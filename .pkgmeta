@@ -1,0 +1,15 @@
+package-as: TenUI
+
+move-folders:
+    TenUI/TenUI: TenUI
+
+ignore:
+    - README.md
+    - CHANGELOG.md
+    - LICENSE
+    - .gitignore
+    - .pkgmeta
+
+license-output: TenUI/LICENSE.txt
+
+manual-changelog: CHANGELOG.md

@@ -1,0 +1,64 @@
+## Interface: 120005
+## Title: TenUI
+## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
+## Author: tendoriel
+## Version: 0.1.0
+## SavedVariables: TenUIDB, TendorHUDDB
+## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
+## OptionalDeps: SharedMedia
+## IconTexture: Interface\AddOns\TenUI\Media\UI\minimap_icon.tga
+## AddonCompartmentFunc: TenUI_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: TenUI_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: TenUI_OnAddonCompartmentLeave
+
+Embeds.xml
+
+Core\Init.lua
+Core\ModuleSystem.lua
+Core\SavedVars.lua
+Core\Profile.lua
+Core\Events.lua
+Core\SpecSwap.lua
+Core\Anchors.lua
+Core\EditMode.lua
+Core\CooldownProbe.lua
+
+Widgets\Media.lua
+Widgets\Bar.lua
+Widgets\Icon.lua
+Widgets\Text.lua
+
+Modules\CastBar.lua
+Modules\Resources\ResourceResolver.lua
+Modules\Resources\ResourceEngine.lua
+Modules\Resources\ResourceDisplay.lua
+Modules\Resources\ResourceModule.lua
+Modules\Glow.lua
+Modules\GlowFX.lua
+Modules\Bars.lua
+Modules\Auras.lua
+Modules\Scanner.lua
+
+Options\Skin.lua
+Options\UIControls.lua
+Options\Options.lua
+Options\Layout.lua
+Options\ScannerPanel.lua
+Options\AbilityPanel.lua
+Options\AuraPanel.lua
+Options\GlowPanel.lua
+Options\ProfilesPanel.lua
+Options\ResourcesPanel.lua
+Options\CastBarPanel.lua
+Options\InformationPanel.lua
+
+Modules\General\Drag.lua
+Modules\General\CombatAlerts.lua
+Modules\General\StealthTracking.lua
+Modules\General\TooltipControl.lua
+Modules\General\ClassReminders.lua
+Modules\General\TalentReminder.lua
+Modules\General\GeneralOptions.lua
+
+Core\Slash.lua
+Core\Debug.lua
