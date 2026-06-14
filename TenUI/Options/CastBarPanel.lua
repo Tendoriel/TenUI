@@ -396,11 +396,18 @@ local function buildCastBarPage(sc)
     if not C then return end
     local children = {}
 
-    children[#children + 1] = C.CreateSection(sc, "Cast Bar")
+    ns.Options:ClearPinnedHeader("castbar")
+    local pinned = ns.Options:GetPinnedHeader("castbar", PREVIEW_BLOCK_H)
+    local previewParent = pinned or sc
 
-    local previewBlock = CreateFrame("Frame", nil, sc)
+    local previewBlock = CreateFrame("Frame", nil, previewParent)
     previewBlock:SetHeight(PREVIEW_BLOCK_H)
-    children[#children + 1] = previewBlock
+    if pinned then
+        previewBlock:SetPoint("TOPLEFT",  pinned, "TOPLEFT",  8, 0)
+        previewBlock:SetPoint("TOPRIGHT", pinned, "TOPRIGHT", -4, 0)
+    else
+        children[#children + 1] = previewBlock
+    end
     do
         _previewRefresh = nil
         local ok, err = pcall(buildEmbeddedPreview, previewBlock)
@@ -408,11 +415,16 @@ local function buildCastBarPage(sc)
             _previewRefresh = nil
             previewBlock:Hide()
             previewBlock:SetHeight(1)
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("[CastBarPanel] embedded preview build failed (hidden): %s", tostring(err))
-            end
+            if pinned then ns.Options:GetPinnedHeader("castbar", 0) end
+        elseif pinned then
+            ns.Options:GetPinnedHeader("castbar", previewBlock:GetHeight() or PREVIEW_BLOCK_H)
+        end
+        if not ok and ns.Debug and ns.Debug.Log then
+            ns.Debug:Log("[CastBarPanel] embedded preview build failed (hidden): %s", tostring(err))
         end
     end
+
+    children[#children + 1] = C.CreateSection(sc, "Cast Bar")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Enable Cast Bar",
         function()

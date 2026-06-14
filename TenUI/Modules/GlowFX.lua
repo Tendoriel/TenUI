@@ -189,6 +189,11 @@ local function _release(c)
     c:SetParent(_holder)
     c._style = nil
     c._owner = nil
+    c._offset = nil
+    c._extent = nil
+    c._alpha = nil
+    c._fps = nil
+    c._r, c._g, c._b = nil, nil, nil
     c._elapsed = nil
     c._frameIdx = nil
     if #_pool < POOL_CAP then
@@ -202,23 +207,47 @@ function GlowFX:Start(target, styleName, opts)
     local style = STYLE_DB[styleName]
     if not style then return false end
     if type(opts) ~= "table" then opts = nil end
+    local offset = opts and tonumber(opts.offset) or DEFAULT_OFFSET
+    local extent = opts and tonumber(opts.glowSize) or DEFAULT_EXTENT
+    local owner  = (opts and opts.owner == "intent") and "intent" or "manual"
+    local alpha  = opts and tonumber(opts.alpha) or 1
+    local r = opts and tonumber(opts.colorR) or 1
+    local g = opts and tonumber(opts.colorG) or 1
+    local b = opts and tonumber(opts.colorB) or 1
+    local fps = opts and tonumber(opts.fps) or style.fps or 12
+
     local c = _active[f]
+    if c and c._style == styleName
+       and c._owner == owner and c._offset == offset
+       and c._extent == extent and c._fps == fps and c._alpha == alpha
+       and c._r == r and c._g == g and c._b == b then
+        local playing = false
+        if c.animGroup then
+            playing = c.animGroup:IsPlaying() and true or false
+        else
+            playing = c:GetScript("OnUpdate") ~= nil
+        end
+        if playing then
+            c:Show()
+            return true
+        end
+    end
+
     if not c then
         c = _acquire()
         _active[f] = c
     end
     c:SetParent(f)
     c:SetFrameLevel((f:GetFrameLevel() or 1) + 7)
-    local offset = opts and tonumber(opts.offset) or DEFAULT_OFFSET
     c:ClearAllPoints()
     c:SetPoint("TOPLEFT", f, "TOPLEFT", -offset, offset)
     c:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", offset, -offset)
-    c._extent = opts and tonumber(opts.glowSize) or DEFAULT_EXTENT
-    c._owner = (opts and opts.owner == "intent") and "intent" or "manual"
-    c:SetAlpha(opts and tonumber(opts.alpha) or 1)
-    local r = opts and tonumber(opts.colorR) or 1
-    local g = opts and tonumber(opts.colorG) or 1
-    local b = opts and tonumber(opts.colorB) or 1
+    c._offset = offset
+    c._extent = extent
+    c._owner = owner
+    c._alpha = alpha
+    c._r, c._g, c._b = r, g, b
+    c:SetAlpha(alpha)
     local changed = c._style ~= styleName
     for i = 1, #PIECES do
         local p = PIECES[i]
@@ -231,7 +260,7 @@ function GlowFX:Start(target, styleName, opts)
     end
     c._style = styleName
     _layout(c)
-    local fps = opts and tonumber(opts.fps) or style.fps or 12
+    c._fps = fps
     if c.animGroup then
         if c.animGroup:IsPlaying() then
             c.animGroup:Stop()
@@ -243,7 +272,6 @@ function GlowFX:Start(target, styleName, opts)
         c:Show()
         c.animGroup:Play()
     else
-        c._fps = fps
         c._elapsed = 0
         c._frameIdx = nil
         c:SetScript("OnUpdate", _onUpdateDriver)

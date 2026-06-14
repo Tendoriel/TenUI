@@ -55,10 +55,21 @@ local function getAuraProfile(spellID)
 end
 
 local function getActiveAuras(containerKey)
-    if not (ns.Auras and ns.Auras.GetTrackedAuraList) then return {} end
     local displayType = containerKey
-    local ok, list = pcall(ns.Auras.GetTrackedAuraList, ns.Auras, displayType)
-    if not ok or type(list) ~= "table" then return {} end
+    local list
+    if ns.Auras and ns.Auras.GetConfiguredAuraList then
+        local ok, configured = pcall(ns.Auras.GetConfiguredAuraList, ns.Auras, displayType)
+        if ok and type(configured) == "table" then
+            list = configured
+        end
+    end
+    if list == nil and ns.Auras and ns.Auras.GetTrackedAuraList then
+        local ok, fallback = pcall(ns.Auras.GetTrackedAuraList, ns.Auras, displayType)
+        if ok and type(fallback) == "table" then
+            list = fallback
+        end
+    end
+    if type(list) ~= "table" then return {} end
 
     local result = {}
     for _, entry in ipairs(list) do
@@ -306,7 +317,7 @@ local function rebuildAuraList()
 end
 
 ns:RegisterMessage("AURA_LIST_UPDATED", function()
-    if _auraListFrame then
+    if _auraListFrame and _auraListFrame.IsVisible and _auraListFrame:IsVisible() then
         rebuildAuraList()
     end
 end)
@@ -316,6 +327,10 @@ local function buildAuraPage(sc)
     if not C then return end
     local Theme = C.Theme
     local children = {}
+
+    if ns.Auras and ns.Auras._invalidateLiveRenderCategoryMap then
+        pcall(ns.Auras._invalidateLiveRenderCategoryMap, ns.Auras)
+    end
 
     do
         local ui = ns.GetUIState and ns:GetUIState()

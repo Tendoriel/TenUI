@@ -1,12 +1,16 @@
 local addonName, ns = ...
 
-ns.SCHEMA_VERSION = 2
+ns.SCHEMA_VERSION = 3
 
 ns.dbDefaults = {
     schema = ns.SCHEMA_VERSION,
     locked = true,
     globalScale = 1.0,
     activeProfile = "Default",
+    minimap = {
+        hide = false,
+        minimapPos = 220,
+    },
     profiles = {
         Default = {
             modules = {},
@@ -120,6 +124,7 @@ local MODULE_DEFAULTS = {
             },
             TrackedBars = {
                 barHeight = 18, spacing = 2,
+                fillColor = { 1, 1, 1, 1 },
                 text = {
                     name  = { font = "default", size = 11, anchor = "LEFT",  x =  4, y = 0 },
                     timer = { font = "default", size = 11, anchor = "RIGHT", x = -4, y = 0 },

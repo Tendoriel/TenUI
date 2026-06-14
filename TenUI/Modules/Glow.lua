@@ -129,6 +129,28 @@ end
 
 local STYLES = {}
 
+local function disableProcGlowMouse(frame)
+    if type(frame) ~= "table" then return end
+    if type(frame.EnableMouse) == "function" then
+        pcall(frame.EnableMouse, frame, false)
+    end
+    if type(frame.EnableMouseMotion) == "function" then
+        pcall(frame.EnableMouseMotion, frame, false)
+    end
+    if type(frame.SetMouseClickEnabled) == "function" then
+        pcall(frame.SetMouseClickEnabled, frame, false)
+    end
+    if type(frame.GetChildren) == "function" then
+        local ok, n = pcall(select, "#", frame:GetChildren())
+        if ok and n and n > 0 then
+            local children = { frame:GetChildren() }
+            for i = 1, #children do
+                disableProcGlowMouse(children[i])
+            end
+        end
+    end
+end
+
 local function blizzardEnsure(f)
     if f._thudGlowProc then return f._thudGlowProc end
     local ok, glow = pcall(CreateFrame, "Frame", nil, f, "ActionButtonSpellAlertTemplate")
@@ -143,6 +165,8 @@ local function blizzardEnsure(f)
         glow:SetSize(w * 1.4, h * 1.4)
         glow:SetPoint("CENTER", f, "CENTER", 0, 0)
     end
+    pcall(glow.SetScript, glow, "OnHide", nil)
+    disableProcGlowMouse(glow)
     glow:Hide()
     f._thudGlowProc = glow
     return glow
@@ -150,6 +174,7 @@ end
 
 STYLES.blizzard = {
     apply = function(f, intent, opts)
+        f._thudGlowBlizzardIntent = intent
         local w = _widgets[f]
         if intent == "proc" and w and w.SetProcGlow then
             w:SetProcGlow(true)
@@ -157,7 +182,14 @@ STYLES.blizzard = {
         end
         local glow = blizzardEnsure(f)
         if not glow then return end
-        if f._thudGlowProcActive and glow:IsShown() then return end
+        if f._thudGlowProcActive and glow:IsShown() then
+            if glow:IsVisible()
+               and glow.ProcLoop and glow.ProcLoop.Play
+               and glow.ProcLoop.IsPlaying and not glow.ProcLoop:IsPlaying() then
+                pcall(glow.ProcLoop.Play, glow.ProcLoop)
+            end
+            return
+        end
         f._thudGlowProcActive = true
         glow:Show()
         if glow.ProcStartAnim and glow.ProcStartAnim.Play then
@@ -167,8 +199,10 @@ STYLES.blizzard = {
         end
     end,
     clear = function(f)
+        local owner = f._thudGlowBlizzardIntent
+        f._thudGlowBlizzardIntent = nil
         local w = _widgets[f]
-        if w and w.SetProcGlow then
+        if w and w.SetProcGlow and (owner == "proc" or owner == nil) then
             w:SetProcGlow(false)
         end
         f._thudGlowProcActive = false
@@ -213,6 +247,7 @@ end
 
 STYLES.border = {
     apply = function(f, intent, opts)
+        f._thudGlowBorderIntent = intent
         local w = _widgets[f]
         if intent == "activeAura" and w and w.SetActiveBorder then
             local r, g, b, a = _resolveColor(intent, opts)
@@ -235,8 +270,10 @@ STYLES.border = {
         end
     end,
     clear = function(f)
+        local owner = f._thudGlowBorderIntent
+        f._thudGlowBorderIntent = nil
         local w = _widgets[f]
-        if w and w.SetActiveBorder then
+        if w and w.SetActiveBorder and (owner == "activeAura" or owner == nil) then
             w:SetActiveBorder(false)
         end
         local border = f._thudGlowBorder
@@ -671,6 +708,31 @@ function Glow:GetDumpLines()
             end
         end
         L("  frame %s -> %s", name, table.concat(parts, "  "))
+
+        local function shownOf(obj)
+            if type(obj) ~= "table" or type(obj.IsShown) ~= "function" then return "-" end
+            local ok, s = pcall(obj.IsShown, obj)
+            if not ok then return "?" end
+            return s and "shown" or "hidden"
+        end
+        local procFrame = f._thudGlowProc or f._procGlow
+        local procShown = shownOf(procFrame)
+        local procLoopPlaying = "-"
+        if type(procFrame) == "table" and type(procFrame.ProcLoop) == "table"
+           and type(procFrame.ProcLoop.IsPlaying) == "function" then
+            local ok, p = pcall(procFrame.ProcLoop.IsPlaying, procFrame.ProcLoop)
+            if ok then procLoopPlaying = p and "playing" or "stopped" else procLoopPlaying = "?" end
+        end
+        local readyShown = "-"
+        local gb = f._thudGlowBorder
+        if type(gb) == "table" and type(gb.top) == "table" then
+            readyShown = shownOf(gb.top)
+        end
+        L("    actual: procFrame=%s procLoop=%s readyBorder=%s blizzActiveFlag=%s blizzIntent=%s borderIntent=%s",
+            procShown, procLoopPlaying, readyShown,
+            tostring(f._thudGlowProcActive),
+            tostring(f._thudGlowBlizzardIntent),
+            tostring(f._thudGlowBorderIntent))
     end
     if frameCount == 0 then
         L("live state: (empty -- no frames carry glow intents)")

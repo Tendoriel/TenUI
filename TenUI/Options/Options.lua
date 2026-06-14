@@ -18,6 +18,9 @@ local SIDEBAR_W      = 160
 local HEADER_H       = 40
 local FOOTER_H       = 28
 local SCROLL_PAD_TOP = 8
+local GRAB_MARGIN    = 80
+local PINNED_GAP     = 8
+local SCROLLBAR_GUTTER = 12
 
 local _frame       = nil
 local _currentPage = nil
@@ -48,9 +51,10 @@ local function clampWindowToScreen()
     local l, t = _frame:GetLeft(), _frame:GetTop()
     if not (l and t) then return end
     local w = _frame:GetWidth()
-    local h = _frame:GetHeight()
-    local nl = math.max(0, math.min(l, sw - w))
-    local nt = math.max(h, math.min(t, sh))
+    local minL = GRAB_MARGIN - w
+    local maxL = sw - GRAB_MARGIN
+    local nl = math.max(minL, math.min(l, maxL))
+    local nt = math.max(HEADER_H, math.min(t, sh))
     if nl ~= l or nt ~= t then
         _frame:ClearAllPoints()
         _frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", nl, nt)
@@ -137,9 +141,9 @@ function Options:_BuildWindow()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetMovable(true)
     f:EnableMouse(true)
-    f:SetClampedToScreen(true)
+    f:SetClampedToScreen(false)
     f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStart", function(self) if self:IsMovable() then self:StartMoving() end end)
     f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
     f:SetFrameStrata("DIALOG")
     f:SetFrameLevel(100)
@@ -305,6 +309,45 @@ function Options:_GetOrCreateScrollForPage(key)
     entry.scrollFrame = container.scrollFrame
     entry.scrollChild = sc
     return entry.scrollFrame, sc
+end
+
+function Options:ClearPinnedHeader(key)
+    local entry = _pageMap[key]
+    if not entry or not entry.pinnedHeader then return end
+    local C = ns.UI
+    if C and C.ClearChildren then
+        pcall(C.ClearChildren, entry.pinnedHeader)
+    end
+end
+
+function Options:GetPinnedHeader(key, height)
+    local entry = _pageMap[key]
+    if not entry then return nil end
+
+    self:_GetOrCreateScrollForPage(key)
+    local container = entry.container
+    local sf = entry.scrollFrame
+    if not (container and sf) then return nil end
+
+    height = tonumber(height) or 0
+    if height < 0 then height = 0 end
+    entry.pinnedHeight = height
+
+    local ph = entry.pinnedHeader
+    if not ph then
+        ph = CreateFrame("Frame", nil, container)
+        ph:SetPoint("TOPLEFT",  container, "TOPLEFT",  0, 0)
+        ph:SetPoint("TOPRIGHT", container, "TOPRIGHT", -SCROLLBAR_GUTTER, 0)
+        entry.pinnedHeader = ph
+    end
+    ph:SetHeight(math.max(height, 1))
+
+    local topInset = (height > 0) and -(height + PINNED_GAP) or 0
+    sf:ClearAllPoints()
+    sf:SetPoint("TOPLEFT",     container, "TOPLEFT",     0, topInset)
+    sf:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -SCROLLBAR_GUTTER, 0)
+
+    return ph
 end
 
 function Options:Build()
@@ -543,6 +586,9 @@ local function buildGeneralPage(sc)
             p.modules = p.modules or {}
             p.modules.Minimap = p.modules.Minimap or {}
             p.modules.Minimap.enabled = v
+            if ns.MinimapButton and ns.MinimapButton.ApplyVisibility then
+                ns.MinimapButton:ApplyVisibility()
+            end
         end
     )
 

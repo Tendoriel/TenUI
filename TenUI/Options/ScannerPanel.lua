@@ -366,8 +366,75 @@ local function rebuildCandidateGrid()
     relayoutBarSection()
 end
 
+local _dragState = nil
+
+local _dropIndicator = nil
+
+local function ensureDropIndicator(parent)
+    local C = ns.UI
+    if not (_dropIndicator and _dropIndicator.line) then
+        local ind = CreateFrame("Frame", nil, parent)
+        ind:SetHeight(2)
+        ind:SetFrameStrata("DIALOG")
+        local line = ind:CreateTexture(nil, "OVERLAY")
+        line:SetAllPoints(ind)
+        line:SetColorTexture(C.Theme.color.accent[1], C.Theme.color.accent[2], C.Theme.color.accent[3], 1)
+        ind.line = line
+        _dropIndicator = ind
+    else
+        _dropIndicator:SetParent(parent)
+    end
+    _dropIndicator:ClearAllPoints()
+    _dropIndicator:Hide()
+    return _dropIndicator
+end
+
+local function computeInsertPos(state, cursorY)
+    local rows = state.sectionRows
+    local n = #rows
+    if n == 0 then return 1 end
+    for i = 1, n do
+        local r = rows[i]
+        local top = r:GetTop()
+        local bottom = r:GetBottom()
+        if top and bottom then
+            local mid = (top + bottom) * 0.5
+            if cursorY >= mid then
+                return i
+            end
+        end
+    end
+    return n + 1
+end
+
+local function insertPosToTarget(insertPos, fromIdx)
+    local target = insertPos
+    if insertPos > fromIdx then
+        target = insertPos - 1
+    end
+    return target
+end
+
+local function moveDropIndicator(state, insertPos)
+    local ind = state.indicator
+    if not ind then return end
+    local rows = state.sectionRows
+    local n = #rows
+    if insertPos < 1 then insertPos = 1 end
+    if insertPos > n + 1 then insertPos = n + 1 end
+    ind:ClearAllPoints()
+    if insertPos <= n then
+        ind:SetPoint("TOPLEFT", rows[insertPos], "TOPLEFT", 0, 2)
+        ind:SetPoint("TOPRIGHT", rows[insertPos], "TOPRIGHT", 0, 2)
+    else
+        ind:SetPoint("BOTTOMLEFT", rows[n], "BOTTOMLEFT", 0, -2)
+        ind:SetPoint("BOTTOMRIGHT", rows[n], "BOTTOMRIGHT", 0, -2)
+    end
+    ind:Show()
+end
+
 local function buildBarLayoutEntryRow(parent, entry, idx, totalCount,
-                                      isRow2, totalH, capturedContainer)
+                                      isRow2, totalH, capturedContainer, sectionRows)
     local C = ns.UI
     local Theme = C.Theme
     local ROW_H = 26
@@ -375,6 +442,9 @@ local function buildBarLayoutEntryRow(parent, entry, idx, totalCount,
     row:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, -totalH)
     row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -4, -totalH)
     row:SetHeight(ROW_H)
+    if sectionRows then
+        sectionRows[idx] = row
+    end
     local rowBg = row:CreateTexture(nil, "BACKGROUND")
     rowBg:SetAllPoints(row)
     local baseAlpha = (idx % 2 == 0) and 0.05 or 0.02
@@ -497,10 +567,64 @@ local function buildBarLayoutEntryRow(parent, entry, idx, totalCount,
         if btn == "RightButton" and entry.type == "spell" then
             local ap = ns.AbilityPanel or (ns.Options and ns.Options.AbilityPanel)
             if ap and ap.OpenForSpell then
-                ap:OpenForSpell(entry.id)
+                ap:OpenForSpell(entry.id, { entry = capturedEntry, rowName = capturedContainer })
             end
         end
     end)
+
+    if sectionRows then
+        row:RegisterForDrag("LeftButton")
+        row:SetScript("OnDragStart", function(self)
+            local indicator = ensureDropIndicator(parent)
+            _dragState = {
+                row          = self,
+                fromIdx      = idx,
+                isRow2       = isRow2,
+                container    = capturedContainer,
+                sectionRows  = sectionRows,
+                indicator    = indicator,
+            }
+            self:SetAlpha(0.6)
+            rowBg:SetColorTexture(Theme.color.accent[1], Theme.color.accent[2], Theme.color.accent[3], 0.25)
+            self:SetScript("OnUpdate", function()
+                if not _dragState then return end
+                local _, cy = GetCursorPosition()
+                cy = cy / (self:GetEffectiveScale() or 1)
+                local insertPos = computeInsertPos(_dragState, cy)
+                moveDropIndicator(_dragState, insertPos)
+            end)
+        end)
+        row:SetScript("OnDragStop", function(self)
+            self:SetScript("OnUpdate", nil)
+            self:SetAlpha(1)
+            local state = _dragState
+            _dragState = nil
+            if state and state.indicator then state.indicator:Hide() end
+            if not state then return end
+            local _, cy = GetCursorPosition()
+            cy = cy / (self:GetEffectiveScale() or 1)
+            local insertPos = computeInsertPos(state, cy)
+            local n = #state.sectionRows
+            local target = insertPosToTarget(insertPos, state.fromIdx)
+            if target < 1 then target = 1 end
+            if target > n then target = n end
+            if target == state.fromIdx then
+                rebuildBarLayoutList()
+                return
+            end
+            if state.isRow2 then
+                if ns.Bars and ns.Bars.ReorderRow2 then
+                    ns.Bars:ReorderRow2(state.container, state.fromIdx, target)
+                end
+            else
+                if ns.Scanner and ns.Scanner.ReorderBar then
+                    ns.Scanner:ReorderBar(state.container, state.fromIdx, target)
+                end
+            end
+            rebuildBarLayoutList()
+        end)
+    end
+
     return ROW_H
 end
 
@@ -599,10 +723,11 @@ rebuildBarLayoutList = function()
         emptyLabel:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 12, -totalH)
         totalH = totalH + 16
     else
+        local sectionRows1 = {}
         for idx, entry in ipairs(displayed1) do
             local rowH = buildBarLayoutEntryRow(
                 _barLayoutListFrame, entry, idx, #displayed1,
-                false, totalH, capturedContainer)
+                false, totalH, capturedContainer, sectionRows1)
             totalH = totalH + rowH + 2
         end
     end
@@ -620,10 +745,11 @@ rebuildBarLayoutList = function()
             emptyLabel2:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 12, -totalH)
             totalH = totalH + 16
         else
+            local sectionRows2 = {}
             for idx, entry in ipairs(displayed2) do
                 local rowH = buildBarLayoutEntryRow(
                     _barLayoutListFrame, entry, idx, #displayed2,
-                    true, totalH, capturedContainer)
+                    true, totalH, capturedContainer, sectionRows2)
                 totalH = totalH + rowH + 2
             end
         end

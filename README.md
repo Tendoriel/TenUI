@@ -2,7 +2,7 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
-[![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](#) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.0.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
+[![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.0.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
 ## Screenshots
 

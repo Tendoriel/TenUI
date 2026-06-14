@@ -710,15 +710,6 @@ function UI.CreateTextAnchorDropdown(parent, labelText, get, set)
     return UI.CreateDropdownLikeList(parent, labelText, ANCHOR_POINTS, get, set)
 end
 
-local FONT_LIST = {
-    { key = "default",    label = "Default (Friz Quadrata)" },
-    { key = "plexmono",   label = "IBM Plex Mono" },
-    { key = "morpheus",   label = "Morpheus" },
-    { key = "skyline",    label = "Skyline" },
-    { key = "arialn",     label = "Arial Narrow" },
-    { key = "accidental", label = "Accidental Presidency" },
-}
-
 local FONT_KEY_TO_PATH = {
     ["default"]    = "Fonts\\FRIZQT__.TTF",
     ["morpheus"]   = "Fonts\\MORPHEUS.TTF",
@@ -727,15 +718,94 @@ local FONT_KEY_TO_PATH = {
     ["accidental"] = "Fonts\\ARIALN.TTF",
 }
 
+local LEGACY_KEY_TO_LSM = {
+    ["default"]  = "Friz Quadrata TT",
+    ["plexmono"] = "IBM Plex Mono",
+    ["morpheus"] = "Morpheus",
+    ["skyline"]  = "Skurri",
+    ["arialn"]   = "Arial Narrow",
+}
+
 function UI.ResolveFontPath(key)
+    if key == nil or key == "" then return Theme.font.fallback end
+    if type(key) == "string" and (key:find("\\", 1, true) or key:find("/", 1, true)) then
+        return key
+    end
     if key == "plexmono" then return Theme.font.regular end
-    return FONT_KEY_TO_PATH[key or "default"] or Theme.font.fallback
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true) or nil
+    if LSM then
+        local lsmName = LEGACY_KEY_TO_LSM[key] or key
+        local found = LSM:Fetch("font", lsmName, true)
+        if found then return found end
+    end
+    return FONT_KEY_TO_PATH[key] or Theme.font.fallback
 end
 
 UI.FONT_KEY_TO_PATH = FONT_KEY_TO_PATH
 
+local function lsmFontValues(currentRaw)
+    local values = {}
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true) or nil
+    local seen = {}
+    if LSM then
+        local list = LSM:List("font")
+        if type(list) == "table" then
+            local sorted = {}
+            for i = 1, #list do sorted[#sorted + 1] = list[i] end
+            table.sort(sorted)
+            for i = 1, #sorted do
+                values[#values + 1] = { key = sorted[i], label = sorted[i] }
+                seen[sorted[i]] = true
+            end
+        end
+    end
+    if #values == 0 then
+        values[1] = { key = "Friz Quadrata TT", label = "Friz Quadrata TT" }
+        seen["Friz Quadrata TT"] = true
+    end
+    if type(currentRaw) == "string" and currentRaw ~= "" and not seen[currentRaw] then
+        if currentRaw:find("\\", 1, true) or currentRaw:find("/", 1, true) then
+            values[#values + 1] = { key = currentRaw, label = "Custom (saved path)" }
+        elseif LEGACY_KEY_TO_LSM[currentRaw] == nil and FONT_KEY_TO_PATH[currentRaw] == nil then
+            values[#values + 1] = { key = currentRaw, label = currentRaw }
+        end
+    end
+    return values
+end
+
+local function fontDisplayKey(stored)
+    if stored == nil or stored == "" then
+        return "Friz Quadrata TT"
+    end
+    if type(stored) ~= "string" then return stored end
+    if stored:find("\\", 1, true) or stored:find("/", 1, true) then
+        local LSM = LibStub and LibStub("LibSharedMedia-3.0", true) or nil
+        if LSM then
+            local tbl = LSM:HashTable("font")
+            if type(tbl) == "table" then
+                for name, path in pairs(tbl) do
+                    if path == stored then return name end
+                end
+            end
+        end
+        return stored
+    end
+    local mapped = LEGACY_KEY_TO_LSM[stored]
+    if mapped then return mapped end
+    if stored == "accidental" then return "Arial Narrow" end
+    return stored
+end
+
 function UI.CreateFontDropdown(parent, labelText, get, set)
-    return UI.CreateDropdownLikeList(parent, labelText, FONT_LIST, get, set)
+    local current = type(get) == "function" and get() or nil
+    local values = lsmFontValues(current)
+    return UI.CreateDropdownLikeList(parent, labelText, values,
+        function()
+            local v = type(get) == "function" and get() or nil
+            return fontDisplayKey(v)
+        end,
+        set
+    )
 end
 
 local OUTLINE_LIST = {

@@ -90,8 +90,6 @@ UI.BarFXForces = BARFX_FORCES
 do
     local LSM = LibStub and LibStub("LibSharedMedia-3.0", true) or nil
     if LSM then
-        pcall(LSM.Register, LSM, "font", "IBM Plex Mono", Theme.font.regular)
-        pcall(LSM.Register, LSM, "font", "IBM Plex Mono SemiBold", Theme.font.semibold)
         for i = 1, #BARFX_FORCES do
             local force = BARFX_FORCES[i]
             pcall(LSM.Register, LSM, "statusbar", "TenUI " .. force, BARFX .. force:lower() .. ".tga")

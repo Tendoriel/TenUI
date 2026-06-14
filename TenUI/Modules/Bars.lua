@@ -234,7 +234,7 @@ local function suppressMirrorViewers()
                 local okS, s = pcall(viewer.IsShown, viewer)
                 if okS then shown = s end
             end
-            if shown == false then
+            if shown == false and not (InCombatLockdown and InCombatLockdown()) then
                 pcall(viewer.SetShown, viewer, true)
                 _mirrorMapDirty = true
                 vlog("mirror force-show %s", name)
@@ -260,7 +260,8 @@ local function unsuppressMirrorViewers()
             pcall(viewer.SetAlpha, viewer, 1)
             pcall(viewer.EnableMouse, viewer, true)
             mirrorSetItemMouse(viewer, true)
-            if type(viewer.UpdateShownState) == "function" then
+            if type(viewer.UpdateShownState) == "function"
+               and not (InCombatLockdown and InCombatLockdown()) then
                 pcall(viewer.UpdateShownState, viewer)
             end
         end
@@ -917,6 +918,9 @@ local function applyReadyGlow(icon, spellID, ready)
         else
             opts.style = gdStyle or "border"
         end
+        if opts.style == "blizzard" then
+            opts.style = "border"
+        end
         local c = g.color
         if type(c) ~= "table" then c = gdColor end
         if type(c) == "table" then
@@ -1035,6 +1039,7 @@ local function setIconProcGlow(icon, baseID, wanted)
         icon._procApplied = nil
         if ns.Glow then
             ns.Glow:Clear(icon, "proc")
+            applyReadyGlow(icon, baseID, icon._readyNowCached == true)
         end
     end
 end
@@ -1149,13 +1154,95 @@ Bars.Row = Row
 
 local function spellIsKnown(spellID)
     if not spellID then return false end
-    if IsPlayerSpell and IsPlayerSpell(spellID) then return true end
-    if C_SpellBook and C_SpellBook.IsSpellKnown then
-        local ok, res = pcall(C_SpellBook.IsSpellKnown, spellID)
-        if ok and res then return true end
+    if IsPlayerSpell then
+        local ok, k = pcall(IsPlayerSpell, spellID)
+        if ok and k == true then return true end
     end
-    if IsSpellKnown and IsSpellKnown(spellID) then return true end
+    if C_SpellBook and C_SpellBook.IsSpellKnown then
+        local ok, k = pcall(C_SpellBook.IsSpellKnown, spellID)
+        if ok and k == true then return true end
+    end
+    if C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook then
+        local ok, k = pcall(C_SpellBook.IsSpellKnownOrInSpellBook, spellID)
+        if ok and k == true then return true end
+    end
+    if IsSpellKnown then
+        local ok, k = pcall(IsSpellKnown, spellID)
+        if ok and k == true then return true end
+    end
     return false
+end
+
+local function spellInActiveSpellbook(spellID)
+    if not spellID then return false end
+    if not (C_SpellBook and C_SpellBook.FindSpellBookSlotForSpell
+            and Enum and Enum.SpellBookSpellBank) then
+        return spellIsKnown(spellID)
+    end
+    local okSlot, slot, slotBank = pcall(
+        C_SpellBook.FindSpellBookSlotForSpell, spellID, false, true, false, false)
+    if not okSlot or not slot then return false end
+    if slotBank ~= Enum.SpellBookSpellBank.Player
+       and slotBank ~= Enum.SpellBookSpellBank.Pet then
+        return false
+    end
+    if C_SpellBook.IsSpellBookItemOffSpec then
+        local okOff, off = pcall(C_SpellBook.IsSpellBookItemOffSpec, slot, slotBank)
+        if okOff and off == true then return false end
+    end
+    if C_SpellBook.GetSpellBookItemType and Enum.SpellBookItemType then
+        local okT, itemType = pcall(C_SpellBook.GetSpellBookItemType, slot, slotBank)
+        if okT and itemType == Enum.SpellBookItemType.FutureSpell then return false end
+    end
+    return true
+end
+
+local _resourceGatedCache = {}
+
+local function spellHasPositiveResourceGateCost(spellID)
+    if not (C_Spell and C_Spell.GetSpellPowerCost) then return false end
+    local rune    = Enum and Enum.PowerType and Enum.PowerType.Runes
+    local essence = Enum and Enum.PowerType and Enum.PowerType.Essence
+    if rune == nil and essence == nil then return false end
+    local ok, costs = pcall(C_Spell.GetSpellPowerCost, spellID)
+    if not ok or type(costs) ~= "table" then return false end
+    for i = 1, #costs do
+        local c = costs[i]
+        if type(c) == "table" and (c.type == rune or c.type == essence) then
+            local cost = c.cost
+            local minCost = c.minCost
+            if (not isSecret(cost) and (tonumber(cost) or 0) > 0)
+               or (not isSecret(minCost) and (tonumber(minCost) or 0) > 0) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function spellHasCooldownSurface(spellID)
+    if GetSpellBaseCooldown then
+        local ok, base = pcall(GetSpellBaseCooldown, spellID)
+        if ok and type(base) == "number" and base > 0 then return true end
+    end
+    if C_Spell and C_Spell.GetSpellCharges then
+        local ok, charges = pcall(C_Spell.GetSpellCharges, spellID)
+        if ok and type(charges) == "table" then
+            local mc = charges.maxCharges
+            if not isSecret(mc) and (tonumber(mc) or 0) > 0 then return true end
+        end
+    end
+    return false
+end
+
+local function isResourceGatedNoCooldownSpell(spellID)
+    if type(spellID) ~= "number" or spellID <= 0 then return false end
+    local cached = _resourceGatedCache[spellID]
+    if cached ~= nil then return cached end
+    local gated = spellHasPositiveResourceGateCost(spellID)
+                  and not spellHasCooldownSurface(spellID)
+    _resourceGatedCache[spellID] = gated
+    return gated
 end
 
 local function getSpellTexture(spellID)
@@ -1235,6 +1322,16 @@ function Row:DestroyIcons()
     for i = 1, #self.icons do self.icons[i] = nil end
 end
 
+local function countVisibleIcons(iconList)
+    if type(iconList) ~= "table" then return 0 end
+    local n = 0
+    for i = 1, #iconList do
+        local icon = iconList[i]
+        if icon and not icon._hiddenUnknown then n = n + 1 end
+    end
+    return n
+end
+
 local function buildIconsForList(container, displayedList, showText, rowName)
     local out = {}
     local textStyle = rowName and getVisualProfileTextForRow(rowName) or nil
@@ -1262,6 +1359,13 @@ local function buildIconsForList(container, displayedList, showText, rowName)
         })
         icon._entry = entry
         out[i] = icon
+        local hideThis = entry.hideWhileUnknown == true
+                     and entry.type == "spell"
+                     and not spellInActiveSpellbook(entry.id)
+        icon._hiddenUnknown = hideThis
+        if icon.SetShown then
+            pcall(icon.SetShown, icon, not hideThis)
+        end
         applyActiveProcsToIcon(icon)
         if textStyle and icon.ApplyTextStyle then
             icon:ApplyTextStyle(textStyle)
@@ -1271,6 +1375,18 @@ local function buildIconsForList(container, displayedList, showText, rowName)
         end
     end
     return out
+end
+
+local function hiddenUnknownSignature(displayedList)
+    local sig = ""
+    for i = 1, #displayedList do
+        local entry = displayedList[i]
+        if entry.hideWhileUnknown and entry.type == "spell" then
+            local known = spellInActiveSpellbook(entry.id) and "1" or "0"
+            sig = sig .. tostring(entry.id) .. ":" .. known .. ";"
+        end
+    end
+    return sig
 end
 
 function Row:Rebuild()
@@ -1285,15 +1401,15 @@ function Row:Rebuild()
     self:DestroyIcons()
 
     if #displayed1 == 0 and #displayed2 == 0 then
+        self._hiddenSig = ""
         if self.container then self.container:SetAlpha(0) end
         return
     end
 
-    if self.container then self.container:SetAlpha(1) end
-
     local showText = parent.showCooldownText ~= false
     self._iconsRow1 = buildIconsForList(self.container, displayed1, showText, self.name)
     self._iconsRow2 = buildIconsForList(self.container, displayed2, showText, self.name)
+    self._hiddenSig = hiddenUnknownSignature(displayed1) .. "|" .. hiddenUnknownSignature(displayed2)
 
     local flat = self.icons
     local n = 0
@@ -1305,6 +1421,9 @@ function Row:Rebuild()
         n = n + 1
         flat[n] = self._iconsRow2[i]
     end
+
+    local visible = countVisibleIcons(self._iconsRow1) + countVisibleIcons(self._iconsRow2)
+    if self.container then self.container:SetAlpha(visible > 0 and 1 or 0) end
 
     self:Layout()
     self:Refresh()
@@ -1318,14 +1437,17 @@ function Row:GetIconSize()
 end
 
 local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, crossOffset, orient)
-    local count = #iconList
+    local count = countVisibleIcons(iconList)
     if count == 0 then return end
     local vertical = orient == "V"
     local totalW = count * iconW + (count - 1) * spacing
     local totalH = count * iconH + (count - 1) * spacing
-    for i = 1, count do
+    local slot = 0
+    for i = 1, #iconList do
         local icon = iconList[i]
-        if icon and icon.frame then
+        if icon and icon._hiddenUnknown then
+            if icon.frame then icon.frame:ClearAllPoints() end
+        elseif icon and icon.frame then
             local f = icon.frame
             f:ClearAllPoints()
             f:SetSize(iconW, iconH)
@@ -1334,7 +1456,7 @@ local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, cros
                 f.cooldown:SetAllPoints(f)
             end
             if vertical then
-                local step = (i - 1) * (iconH + spacing)
+                local step = slot * (iconH + spacing)
                 if mode == "LEFT" then
                     f:SetPoint("TOPLEFT", anchor.frame, "TOPLEFT", crossOffset, -step)
                 elseif mode == "RIGHT" then
@@ -1345,16 +1467,17 @@ local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, cros
                 end
             else
                 if mode == "LEFT" then
-                    local x = (i - 1) * (iconW + spacing)
+                    local x = slot * (iconW + spacing)
                     f:SetPoint("TOPLEFT", anchor.frame, "TOPLEFT", x, crossOffset)
                 elseif mode == "RIGHT" then
-                    local x = -((i - 1) * (iconW + spacing))
+                    local x = -(slot * (iconW + spacing))
                     f:SetPoint("TOPRIGHT", anchor.frame, "TOPRIGHT", x, crossOffset)
                 else
-                    local left = -(totalW / 2) + (i - 1) * (iconW + spacing)
+                    local left = -(totalW / 2) + slot * (iconW + spacing)
                     f:SetPoint("TOPLEFT", anchor.frame, "TOP", left, crossOffset)
                 end
             end
+            slot = slot + 1
         end
     end
 end
@@ -1362,8 +1485,8 @@ end
 function Row:Layout()
     local anchor = self.anchor
     if not (anchor and anchor.frame) then return end
-    local count1 = #(self._iconsRow1 or {})
-    local count2 = #(self._iconsRow2 or {})
+    local count1 = countVisibleIcons(self._iconsRow1 or {})
+    local count2 = countVisibleIcons(self._iconsRow2 or {})
     if count1 == 0 and count2 == 0 then return end
 
     local parent = Bars.profileRef or {}
@@ -1440,9 +1563,47 @@ function Row:Refresh()
     for i = 1, #self.icons do
         local icon = self.icons[i]
         local entry = icon and icon._entry
-        if icon and entry then
+        if icon and entry and not icon._hiddenUnknown then
             self:RefreshIcon(icon, entry, desat)
         end
+    end
+end
+
+function Row:UpdateHiddenVisibility()
+    local changed = false
+    for i = 1, #self.icons do
+        local icon = self.icons[i]
+        local entry = icon and icon._entry
+        if icon and entry then
+            local hideThis = entry.hideWhileUnknown == true
+                         and entry.type == "spell"
+                         and not spellInActiveSpellbook(entry.id)
+            if (icon._hiddenUnknown == true) ~= hideThis then
+                icon._hiddenUnknown = hideThis
+                if icon.SetShown then
+                    pcall(icon.SetShown, icon, not hideThis)
+                end
+                changed = true
+            end
+        end
+    end
+    return changed
+end
+
+function Row:MaybeRebuildForHidden()
+    local rp = getRowProfile(self.name)
+    if not rp then return end
+    local displayed1 = rp.displayed or {}
+    local rows2      = rp.rows2 or { enabled = false, displayed = {} }
+    local displayed2 = (rows2.enabled and rows2.displayed) or {}
+    local sig = hiddenUnknownSignature(displayed1) .. "|" .. hiddenUnknownSignature(displayed2)
+    if sig == self._hiddenSig then return end
+    self._hiddenSig = sig
+    if self:UpdateHiddenVisibility() then
+        local visible = countVisibleIcons(self._iconsRow1) + countVisibleIcons(self._iconsRow2)
+        if self.container then self.container:SetAlpha(visible > 0 and 1 or 0) end
+        self:Layout()
+        self:RequestRefresh()
     end
 end
 
@@ -1486,6 +1647,7 @@ function Row:RefreshIcon(icon, entry, desat)
                             if tex then icon:SetTexture(tex) end
                             icon:SetDesaturated(false)
                             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+                            icon._readyNowCached = false
                             applyReadyGlow(icon, sid, false)
                             return
                         end
@@ -1509,6 +1671,7 @@ function Row:RefreshIcon(icon, entry, desat)
             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
             icon:ClearCooldown()
             icon:SetStackTextRaw("")
+            icon._readyNowCached = false
             applyReadyGlow(icon, sid, false)
             return
         end
@@ -1577,8 +1740,23 @@ function Row:RefreshIcon(icon, entry, desat)
             end
         end
 
+        local resourceGated = (not isChargeSpell)
+            and (isResourceGatedNoCooldownSpell(sid)
+                 or (baseSID and isResourceGatedNoCooldownSpell(baseSID)))
+        if resourceGated then
+            if not icon._resourceGatedLogged then
+                icon._resourceGatedLogged = true
+                dlog("resource-gated (no real CD) spell=%s base=%s", tostring(sid), tostring(baseSID))
+            end
+            onRealCooldown = false
+        end
+
         local showGCD = (Bars.profileRef and Bars.profileRef.showGCDSwipe) ~= false
+        local realGCD = (cdInfo and cdInfo.isOnGCD) and true or false
         local onGCD = cdActive and not onRealCooldown
+        if resourceGated and not realGCD then
+            onGCD = false
+        end
 
         if isChargeSpell then
             if chargesInfo.isActive then
@@ -1653,6 +1831,7 @@ function Row:RefreshIcon(icon, entry, desat)
         icon:SetDesaturated(shouldDesat and true or false)
 
         local readyNow = (known and readyVisual) and true or false
+        icon._readyNowCached = readyNow
 
         if playerHasCastOrChannel() then
             local becameReady = readyNow and icon._wasReadyVisual == false
@@ -1777,6 +1956,8 @@ local ROW_EVENTS_COMMON = {
     "PLAYER_TARGET_CHANGED",
     "SPELL_UPDATE_USABLE",
     "SPELLS_CHANGED",
+    "TRAIT_CONFIG_UPDATED",
+    "PLAYER_REGEN_ENABLED",
 }
 
 local SNAPSHOT_EVENTS = {
@@ -1829,15 +2010,28 @@ function Row:Enable()
                 row:RequestRefresh()
                 return
             end
+            if event == "SPELLS_CHANGED"
+               or event == "TRAIT_CONFIG_UPDATED" then
+                row:MaybeRebuildForHidden()
+                row:RequestRefresh()
+                return
+            end
+            if event == "PLAYER_REGEN_ENABLED" then
+                row:MaybeRebuildForHidden()
+                row:RequestRefresh()
+                return
+            end
             if event == "PLAYER_SPECIALIZATION_CHANGED"
                or event == "PLAYER_ENTERING_WORLD" then
                 wipe(_cdSnapshot)
+                wipe(_resourceGatedCache)
                 if row.name == "Trinkets" then
                     local scanner = Bars.Scanner and Bars.Scanner.Trinkets
                     if scanner and scanner.Sync then
                         scanner:Sync()
                     end
                 end
+                row:MaybeRebuildForHidden()
                 row:RequestRefresh()
                 return
             end
@@ -1969,6 +2163,15 @@ function Bars:AddEntry(rowName, entry)
     return true
 end
 
+function Bars:RebuildRow(rowName)
+    local row = self.rows[rowName]
+    if row and row.Rebuild then
+        row:Rebuild()
+        return true
+    end
+    return false
+end
+
 function Bars:RemoveEntry(rowName, entry)
     local rp = getRowProfile(rowName)
     if not rp then return false, "profile not ready" end
@@ -2009,6 +2212,7 @@ function Bars:MoveEntryToRow2(rowName, entry)
         local clean = { type = entry.type, id = entry.id }
         local sd = tonumber(entry.summonDuration)
         if sd and sd > 0 then clean.summonDuration = sd end
+        if entry.hideWhileUnknown then clean.hideWhileUnknown = true end
         tinsert(rp2.displayed, clean)
     end
     local row = self.rows[rowName]
@@ -2026,6 +2230,7 @@ function Bars:MoveEntryToRow1(rowName, entry)
         local clean = { type = entry.type, id = entry.id }
         local sd = tonumber(entry.summonDuration)
         if sd and sd > 0 then clean.summonDuration = sd end
+        if entry.hideWhileUnknown then clean.hideWhileUnknown = true end
         tinsert(rp.displayed, clean)
     end
     local row = self.rows[rowName]

@@ -459,6 +459,20 @@ local function buildLayoutPage(sc)
             end
         )
 
+        children[#children + 1] = C.CreateColorSwatch(sc, "Bar Fill Color",
+            function()
+                local vp = getVisualsProfile(_selectedAnchor)
+                local c = vp.fillColor
+                if type(c) == "table" then return c[1], c[2], c[3], c[4] or 1 end
+                return 1, 1, 1, 1
+            end,
+            function(r, g, b, a)
+                local vp = getVisualsProfile(_selectedAnchor)
+                vp.fillColor = { r or 1, g or 1, b or 1, a or 1 }
+                applyTextStyle("TrackedBars")
+            end
+        )
+
         children[#children + 1] = C.CreateCheckBox(sc, "Show Background",
             function()
                 local vp = getVisualsProfile(_selectedAnchor)

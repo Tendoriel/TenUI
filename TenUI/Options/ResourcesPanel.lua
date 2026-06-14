@@ -610,11 +610,19 @@ local function buildResourcesPage(sc)
     if not C then return end
     local children = {}
 
-    children[#children + 1] = C.CreateSection(sc, "Resources")
+    local PREVIEW_EST_H = PREVIEW_TOP_PAD + 24 + PREVIEW_SEC_GAP_H + PREVIEW_BOTTOM_PAD
+    ns.Options:ClearPinnedHeader("resources")
+    local pinned = ns.Options:GetPinnedHeader("resources", PREVIEW_EST_H)
+    local previewParent = pinned or sc
 
-    local previewBlock = CreateFrame("Frame", nil, sc)
-    previewBlock:SetHeight(PREVIEW_TOP_PAD + 24 + PREVIEW_SEC_GAP_H + PREVIEW_BOTTOM_PAD)
-    children[#children + 1] = previewBlock
+    local previewBlock = CreateFrame("Frame", nil, previewParent)
+    previewBlock:SetHeight(PREVIEW_EST_H)
+    if pinned then
+        previewBlock:SetPoint("TOPLEFT",  pinned, "TOPLEFT",  8, 0)
+        previewBlock:SetPoint("TOPRIGHT", pinned, "TOPRIGHT", -4, 0)
+    else
+        children[#children + 1] = previewBlock
+    end
     do
         _previewRefresh = nil
         local ok, err = pcall(buildEmbeddedPreview, previewBlock)
@@ -622,11 +630,16 @@ local function buildResourcesPage(sc)
             _previewRefresh = nil
             previewBlock:Hide()
             previewBlock:SetHeight(1)
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("[ResourcesPanel] embedded preview build failed (hidden): %s", tostring(err))
-            end
+            if pinned then ns.Options:GetPinnedHeader("resources", 0) end
+        elseif pinned then
+            ns.Options:GetPinnedHeader("resources", previewBlock:GetHeight() or PREVIEW_EST_H)
+        end
+        if not ok and ns.Debug and ns.Debug.Log then
+            ns.Debug:Log("[ResourcesPanel] embedded preview build failed (hidden): %s", tostring(err))
         end
     end
+
+    children[#children + 1] = C.CreateSection(sc, "Resources")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Hide Out of Combat",
         function()

@@ -2,7 +2,7 @@
 ## Title: TenUI
 ## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
 ## Author: tendoriel
-## Version: 0.1.0
+## Version: 0.1.1
 ## SavedVariables: TenUIDB, TendorHUDDB
 ## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
 ## OptionalDeps: SharedMedia
@@ -58,6 +58,7 @@ Modules\General\StealthTracking.lua
 Modules\General\TooltipControl.lua
 Modules\General\ClassReminders.lua
 Modules\General\TalentReminder.lua
+Modules\General\MinimapButton.lua
 Modules\General\GeneralOptions.lua
 
 Core\Slash.lua

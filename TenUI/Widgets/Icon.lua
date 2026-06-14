@@ -100,9 +100,15 @@ function Icon:New(parent, opts)
         cd:SetAllPoints(f)
         self_._drawSwipe = opts.cooldownSwipe ~= false
         self_._drawEdge = opts.cooldownEdge ~= false
+        self_._cooldownReverse = opts.cooldownReverse == true
         cd:SetDrawSwipe(self_._drawSwipe)
-        if not self_._drawSwipe then
+        if self_._drawSwipe then
+            pcall(cd.SetSwipeColor, cd, 0, 0, 0, opts.cooldownSwipeAlpha or 0.8)
+        else
             cd:SetSwipeColor(0, 0, 0, 0)
+        end
+        if type(cd.SetReverse) == "function" then
+            pcall(cd.SetReverse, cd, self_._cooldownReverse)
         end
         cd:SetDrawEdge(self_._drawSwipe and self_._drawEdge)
         cd._ownerWidget = self_
@@ -156,8 +162,14 @@ function Icon:New(parent, opts)
     return self_
 end
 
+local function texturePresent(v)
+    if type(issecretvalue) == "function" and issecretvalue(v) then return true end
+    if v == nil then return false end
+    return v ~= false
+end
+
 function Icon:SetTexture(texture)
-    if texture then
+    if texturePresent(texture) then
         self.frame.icon:SetTexture(texture)
     else
         self.frame.icon:SetColorTexture(0.1, 0.1, 0.1, 1)
@@ -211,6 +223,14 @@ function Icon:SetDrawSwipe(enabled)
         pcall(cd.SetDrawEdge, cd, false)
     end
     cd._inSwipeHook = false
+end
+
+function Icon:SetCooldownReverse(enabled)
+    local value = enabled == true
+    self._cooldownReverse = value
+    local cd = self.frame and self.frame.cooldown
+    if not cd or type(cd.SetReverse) ~= "function" then return end
+    pcall(cd.SetReverse, cd, value)
 end
 
 function Icon:ClearCooldown()
@@ -484,6 +504,28 @@ function Icon:SetActiveBorder(enabled, r, g, b, a)
     end
 end
 
+local function disableProcGlowMouse(frame)
+    if type(frame) ~= "table" then return end
+    if type(frame.EnableMouse) == "function" then
+        pcall(frame.EnableMouse, frame, false)
+    end
+    if type(frame.EnableMouseMotion) == "function" then
+        pcall(frame.EnableMouseMotion, frame, false)
+    end
+    if type(frame.SetMouseClickEnabled) == "function" then
+        pcall(frame.SetMouseClickEnabled, frame, false)
+    end
+    if type(frame.GetChildren) == "function" then
+        local ok, n = pcall(select, "#", frame:GetChildren())
+        if ok and n and n > 0 then
+            local children = { frame:GetChildren() }
+            for i = 1, #children do
+                disableProcGlowMouse(children[i])
+            end
+        end
+    end
+end
+
 local function ensureProcGlow(self_)
     local f = self_.frame
     if not f then return nil end
@@ -500,6 +542,8 @@ local function ensureProcGlow(self_)
         glow:SetSize(w * 1.4, h * 1.4)
         glow:SetPoint("CENTER", f, "CENTER", 0, 0)
     end
+    pcall(glow.SetScript, glow, "OnHide", nil)
+    disableProcGlowMouse(glow)
     glow:Hide()
     f._procGlow = glow
     return glow
@@ -512,7 +556,14 @@ function Icon:SetProcGlow(enabled)
         local glow = ensureProcGlow(self)
         if not glow then return end
         self._procGlowActive = true
-        if glow:IsShown() then return end
+        if glow:IsShown() then
+            if glow:IsVisible()
+               and glow.ProcLoop and glow.ProcLoop.Play
+               and glow.ProcLoop.IsPlaying and not glow.ProcLoop:IsPlaying() then
+                pcall(glow.ProcLoop.Play, glow.ProcLoop)
+            end
+            return
+        end
         glow:Show()
         if glow.ProcStartAnim and glow.ProcStartAnim.Play then
             pcall(glow.ProcStartAnim.Play, glow.ProcStartAnim)
@@ -555,6 +606,14 @@ end
 
 function Icon:Hide()
     self.frame:Hide()
+end
+
+function Icon:SetShown(shown)
+    if shown then
+        self:Show()
+    else
+        self:Hide()
+    end
 end
 
 function Icon:SetState(state)

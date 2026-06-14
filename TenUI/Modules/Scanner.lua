@@ -506,7 +506,10 @@ local function revalidateSpellbookCacheKnown()
     end
 end
 
-local _spellsChangedScheduled = false
+local _spellsChangedScheduled    = false
+local _combatRevalidateAt        = 0
+local SPELLS_CHANGED_COMBAT_GAP  = 2.0
+
 local function scheduleSpellsChangedRescan()
     markDirty("__spellbook")
     if _spellsChangedScheduled then return end
@@ -515,9 +518,11 @@ local function scheduleSpellsChangedRescan()
         _spellsChangedScheduled = false
         if InCombatLockdown() then
             _deferredScans.spellbook = true
-            revalidateSpellbookCacheKnown()
-            refreshAllRowDisplays()
-            pushError("SPELLS_CHANGED in combat -- isKnown revalidated, full rescan deferred")
+            local now = (GetTime and GetTime()) or 0
+            if (now - _combatRevalidateAt) >= SPELLS_CHANGED_COMBAT_GAP then
+                _combatRevalidateAt = now
+                revalidateSpellbookCacheKnown()
+            end
             return
         end
         Scanner:ScanSpellBook()

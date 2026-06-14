@@ -43,7 +43,7 @@ local function styleLabel(name)
     return name
 end
 
-local function defaultStyleValues(builtinKey)
+local function defaultStyleValues(builtinKey, excludeBlizzard)
     local values = {
         { key = "__builtin", label = "Built-in (" .. styleLabel(builtinKey) .. ")" },
     }
@@ -54,7 +54,10 @@ local function defaultStyleValues(builtinKey)
         names = { "blizzard", "border", "overlay", "pixel", "solid" }
     end
     for i = 1, #names do
-        values[#values + 1] = { key = names[i], label = styleLabel(names[i]) }
+        local k = names[i]
+        if not (excludeBlizzard and k == "blizzard") then
+            values[#values + 1] = { key = k, label = styleLabel(k) }
+        end
     end
     return values
 end
@@ -100,13 +103,17 @@ local function buildGlowPage(sc)
 
     for _, def in ipairs(DEFAULT_INTENT_DEFS) do
         local intent = def.intent
+        local excludeBlizzard = (intent == "ready")
 
         local styleCtl, colorCtl
         styleCtl = C.CreateDropdownLikeList(sc, def.label .. " Default Style",
-            defaultStyleValues(def.builtinStyle),
+            defaultStyleValues(def.builtinStyle, excludeBlizzard),
             function()
                 local d = readGlowDefault(intent)
-                if d and type(d.style) == "string" then return d.style end
+                if d and type(d.style) == "string" then
+                    if excludeBlizzard and d.style == "blizzard" then return "__builtin" end
+                    return d.style
+                end
                 return "__builtin"
             end,
             function(v)

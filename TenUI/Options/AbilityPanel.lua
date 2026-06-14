@@ -9,6 +9,8 @@ local tonumber = tonumber
 local pcall    = pcall
 
 local _currentSpellID = nil
+local _currentEntry   = nil
+local _currentRowName = nil
 
 local function getAbilityProfile(spellID)
     if not ns.savedVarsReady or not spellID then return {} end
@@ -23,7 +25,7 @@ local function getAbilityProfile(spellID)
     return p.abilities[spellID]
 end
 
-local function glowStyleValues(defaultKey)
+local function glowStyleValues(defaultKey, excludeBlizzard)
     local names
     if ns.Glow and ns.Glow.GetRegisteredStyles then
         names = ns.Glow:GetRegisteredStyles()
@@ -33,11 +35,13 @@ local function glowStyleValues(defaultKey)
     local values = {}
     for i = 1, #names do
         local k = names[i]
-        local label = (ns.Glow and ns.Glow.GetStyleLabel) and ns.Glow:GetStyleLabel(k) or k
-        if k == defaultKey then
-            label = label .. " (default)"
+        if not (excludeBlizzard and k == "blizzard") then
+            local label = (ns.Glow and ns.Glow.GetStyleLabel) and ns.Glow:GetStyleLabel(k) or k
+            if k == defaultKey then
+                label = label .. " (default)"
+            end
+            values[#values + 1] = { key = k, label = label }
         end
-        values[#values + 1] = { key = k, label = label }
     end
     return values
 end
@@ -255,10 +259,12 @@ local function buildAbilityPage(sc)
     )
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Ready Glow Style",
-        glowStyleValues("border"),
+        glowStyleValues("border", true),
         function()
             local ap = getAbilityProfile(spellID)
-            return (ap.glow and ap.glow.ready and ap.glow.ready.style) or "border"
+            local s = (ap.glow and ap.glow.ready and ap.glow.ready.style) or "border"
+            if s == "blizzard" then s = "border" end
+            return s
         end,
         function(v)
             local ap = getAbilityProfile(spellID)
@@ -411,17 +417,29 @@ local function buildAbilityPage(sc)
 
     children[#children + 1] = C.CreateSubSection(sc, "Visibility Conditions")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Hide If Not Learned",
-        function()
-            local ap = getAbilityProfile(spellID)
-            return ap.visibility and ap.visibility.hideUnlearned ~= false
-        end,
-        function(v)
-            local ap = getAbilityProfile(spellID)
-            ap.visibility = ap.visibility or {}
-            ap.visibility.hideUnlearned = v
-        end
-    )
+    local entry   = _currentEntry
+    local rowName = _currentRowName
+    if type(entry) == "table" then
+        children[#children + 1] = C.CreateCheckBox(sc, "Hide Until Learned",
+            function()
+                return entry.hideWhileUnknown and true or false
+            end,
+            function(v)
+                if v then
+                    entry.hideWhileUnknown = true
+                else
+                    entry.hideWhileUnknown = nil
+                end
+                if rowName and ns.Bars and ns.Bars.RebuildRow then
+                    pcall(ns.Bars.RebuildRow, ns.Bars, rowName)
+                end
+            end
+        )
+        children[#children + 1] = C.CreateHelpText(sc,
+            "When on, this bar slot is removed entirely while the spell is unlearned " ..
+            "(no greyed icon, no gap) and reappears automatically when learned. " ..
+            "When off (default), an unlearned spell shows greyed in place.")
+    end
 
     children[#children + 1] = C.CreateCheckBox(sc, "Combat Only",
         function()
@@ -439,8 +457,15 @@ local function buildAbilityPage(sc)
     sc:SetHeight(math.max(totalH, 10))
 end
 
-function AbilityPanel:OpenForSpell(spellID)
+function AbilityPanel:OpenForSpell(spellID, context)
     _currentSpellID = spellID
+    if type(context) == "table" then
+        _currentEntry   = context.entry
+        _currentRowName = context.rowName
+    else
+        _currentEntry   = nil
+        _currentRowName = nil
+    end
     if ns.Options then
         ns.Options:SelectPage("ability", true)
         ns.Options:Open()
