@@ -146,8 +146,8 @@ local function instantEnabled()
 end
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[CastBar] " .. fmt, ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("castbar", "[CastBar] " .. fmt, ...)
     end
 end
 
@@ -629,20 +629,16 @@ end
 local function castMatches(eventName, eventCastGUID)
     if eventCastGUID == nil then return true end
     if CastBar._activeCastID == nil then
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("CastBar GUARD: " .. tostring(eventName)
-                .. " rejected (no active cast) -- incoming castGUID="
-                .. tostring(eventCastGUID))
-        end
+        dlog("CastBar GUARD: " .. tostring(eventName)
+            .. " rejected (no active cast) -- incoming castGUID="
+            .. tostring(eventCastGUID))
         return false
     end
     if eventCastGUID == CastBar._activeCastID then return true end
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("CastBar GUARD: " .. tostring(eventName)
-            .. " rejected (castGUID mismatch) -- incoming="
-            .. tostring(eventCastGUID)
-            .. " active=" .. tostring(CastBar._activeCastID))
-    end
+    dlog("CastBar GUARD: " .. tostring(eventName)
+        .. " rejected (castGUID mismatch) -- incoming="
+        .. tostring(eventCastGUID)
+        .. " active=" .. tostring(CastBar._activeCastID))
     return false
 end
 
@@ -650,31 +646,23 @@ function CastBar:OnSpellcastStart(castGUID)
     if self._state == "channeling" or self._state == "empowering" then
         local castingName = UnitCastingInfo and UnitCastingInfo("player")
         if castingName then
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("CastBar: hardcast preempted " .. tostring(self._state)
-                    .. " (engine reports cast=" .. tostring(castingName) .. " active)")
-            end
+            dlog("CastBar: hardcast preempted " .. tostring(self._state)
+                .. " (engine reports cast=" .. tostring(castingName) .. " active)")
         else
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("CastBar GUARD: OnSpellcastStart rejected -- state="
-                    .. tostring(self._state) .. " (instant during channel/empower)")
-            end
+            dlog("CastBar GUARD: OnSpellcastStart rejected -- state="
+                .. tostring(self._state) .. " (instant during channel/empower)")
             return
         end
     end
     if UnitChannelInfo and UnitChannelInfo("player")
        and not (UnitCastingInfo and UnitCastingInfo("player")) then
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("CastBar GUARD: OnSpellcastStart rejected -- UnitChannelInfo active (no engine cast)")
-        end
+        dlog("CastBar GUARD: OnSpellcastStart rejected -- UnitChannelInfo active (no engine cast)")
         return
     end
 
     if self._state ~= "idle" then
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("CastBar: preempting previous cast (state="
-                .. tostring(self._state) .. ") for new START")
-        end
+        dlog("CastBar: preempting previous cast (state="
+            .. tostring(self._state) .. ") for new START")
     end
     self:CancelHideTimer()
     self._pendingNaturalStop = false
@@ -725,10 +713,8 @@ end
 
 function CastBar:OnChannelStart(castGUID)
     if self._state ~= "idle" then
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("CastBar: preempting previous cast (state="
-                .. tostring(self._state) .. ") for new CHANNEL_START")
-        end
+        dlog("CastBar: preempting previous cast (state="
+            .. tostring(self._state) .. ") for new CHANNEL_START")
     end
 
     self:CancelHideTimer()
@@ -778,10 +764,8 @@ end
 
 function CastBar:OnEmpowerStart(castGUID)
     if self._state ~= "idle" then
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("CastBar: preempting previous cast (state="
-                .. tostring(self._state) .. ") for new EMPOWER_START")
-        end
+        dlog("CastBar: preempting previous cast (state="
+            .. tostring(self._state) .. ") for new EMPOWER_START")
     end
 
     self:CancelHideTimer()

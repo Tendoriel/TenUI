@@ -15,8 +15,8 @@ local MinimapButton = {
 ns.MinimapButton = MinimapButton
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[MinimapButton] " .. tostring(fmt), ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("minimap", "[MinimapButton] " .. tostring(fmt), ...)
     end
 end
 

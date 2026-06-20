@@ -32,8 +32,8 @@ local TalentReminder = {
 ns.TalentReminder = TalentReminder
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[TalentReminder] " .. tostring(fmt), ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("talent", "[TalentReminder] " .. tostring(fmt), ...)
     end
 end
 

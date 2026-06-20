@@ -35,8 +35,8 @@ local CombatAlerts = {
 ns.CombatAlerts = CombatAlerts
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[CombatAlerts] " .. tostring(fmt), ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("combatalerts", "[CombatAlerts] " .. tostring(fmt), ...)
     end
 end
 

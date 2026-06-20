@@ -1,11 +1,14 @@
-## Interface: 120005
+## Interface: 120007
 ## Title: TenUI
 ## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
 ## Author: tendoriel
-## Version: 0.1.1
+## Version: 0.2.0
 ## SavedVariables: TenUIDB, TendorHUDDB
 ## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
 ## OptionalDeps: SharedMedia
+## X-License: MIT
+## X-Website: https://www.curseforge.com/wow/addons/tenui
+## X-Category: HUDs
 ## IconTexture: Interface\AddOns\TenUI\Media\UI\minimap_icon.tga
 ## AddonCompartmentFunc: TenUI_OnAddonCompartmentClick
 ## AddonCompartmentFuncOnEnter: TenUI_OnAddonCompartmentEnter

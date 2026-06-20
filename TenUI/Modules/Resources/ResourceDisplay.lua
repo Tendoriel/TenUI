@@ -83,8 +83,8 @@ local function getScaleTo100()
 end
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Resources] " .. fmt, ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("resources", "[Resources] " .. fmt, ...)
     end
 end
 
@@ -605,6 +605,11 @@ local function primary_Refresh()
     if not (bar and desc) then
         vlog("Primary.Refresh: early-return bar=%s desc=%s",
              tostring(bar), tostring(desc))
+        return
+    end
+
+    if not _previewActive and resolvePrimaryEnabled(Primary.profileRef) == false then
+        bar:Hide()
         return
     end
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0] - 2026-06-20
+
+### Added
+
+- Demonology guardian summons (Summon Demonic Tyrant and Call Dreadstalkers) now show their remaining duration in Tracked Bars, using the live guardian duration when available and a cast-driven estimate otherwise, alongside the existing Essential icons.
+- Implosion now shows the active Wild Imp count as a stack number, matching Blizzard's action bar.
+- New read-only diagnostic: `/tenui auras rawset`.
+
+### Fixed
+
+- Updated for WoW patch 12.0.7 (Interface 120007).
+- Primary Resource Bar: the "disable" toggle now reliably hides the bar instead of re-showing it on every power tick; the enable and alpha settings now persist correctly.
+- Secondary Resource Bar: width and height are now restored after relog, and the anchor Alpha (Layout, Anchor Positioning) now persists and restores correctly.
+- Diabolist "Demonic Art" (Diabolic Ritual): the tracked icon now shows the active variant's icon (Pit Lord, Mother of Chaos or Overlord) instead of a static base icon.
+
+### Changed
+
+- Debug logging is now silenced by default; per-module verbose channels can be enabled on demand with `/tenui debug verbose <module>`.
+
 ## 0.1.1 - 2026-06-14
 
 - Tracked buff/debuff icons and bars now display correctly while in combat.

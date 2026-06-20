@@ -39,15 +39,26 @@ local _lastSummary = "No scan run yet."
 
 local _deferredScans = {}
 
-local function pushError(msg)
+local function pushRing(msg)
     _errorHead = _errorHead + 1
     _errorRing[_errorHead] = date("%H:%M:%S") .. " " .. tostring(msg)
     if #_errorRing > ERROR_RING_MAX then
         tremove(_errorRing, 1)
         _errorHead = _errorHead - 1
     end
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Scanner] " .. tostring(msg))
+end
+
+local function pushError(msg)
+    pushRing(msg)
+    if ns.Debug and ns.Debug.Error then
+        ns.Debug:Error("[Scanner] " .. tostring(msg))
+    end
+end
+
+local function pushInfo(msg)
+    pushRing(msg)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("scanner", "[Scanner] " .. tostring(msg))
     end
 end
 
@@ -106,7 +117,7 @@ end
 function Scanner:ScanCDM()
     if InCombatLockdown() then
         _deferredScans.cdm = true
-        pushError("ScanCDM deferred (in combat)")
+        pushInfo("ScanCDM deferred (in combat)")
         return false, "in combat"
     end
     local t0 = GetTime()
@@ -147,14 +158,14 @@ function Scanner:ScanCDM()
 
     _lastSummary = ("CDM scan: ok=%s total=%s  (%dms)"):format(
         tostring(ok), tostring(total), elapsed)
-    pushError("ScanCDM complete: " .. _lastSummary)
+    pushInfo("ScanCDM complete: " .. _lastSummary)
     return ok, total
 end
 
 function Scanner:ScanSpellBook()
     if InCombatLockdown() then
         _deferredScans.spellbook = true
-        pushError("ScanSpellBook deferred (in combat)")
+        pushInfo("ScanSpellBook deferred (in combat)")
         return false, "in combat"
     end
     local t0 = GetTime()
@@ -211,7 +222,7 @@ function Scanner:ScanSpellBook()
     local elapsed = math.floor((GetTime() - t0) * 1000 + 0.5)
     _perf.lastScanDurationMs = elapsed
     _lastSummary = ("SpellBook scan: %d spells  (%dms)"):format(count, elapsed)
-    pushError("ScanSpellBook complete: " .. _lastSummary)
+    pushInfo("ScanSpellBook complete: " .. _lastSummary)
     ns:Fire("SCANNER_CANDIDATES_UPDATED", "__spellbook")
     return true, count
 end
@@ -219,7 +230,7 @@ end
 function Scanner:ScanTrinkets()
     if InCombatLockdown() then
         _deferredScans.trinkets = true
-        pushError("ScanTrinkets deferred (in combat)")
+        pushInfo("ScanTrinkets deferred (in combat)")
         return false, "in combat"
     end
     local t0 = GetTime()
@@ -247,7 +258,7 @@ function Scanner:ScanTrinkets()
     local elapsed = math.floor((GetTime() - t0) * 1000 + 0.5)
     _perf.lastScanDurationMs = elapsed
     _lastSummary = ("Trinkets scan: ok=%s  (%dms)"):format(tostring(ok), elapsed)
-    pushError("ScanTrinkets complete: " .. _lastSummary)
+    pushInfo("ScanTrinkets complete: " .. _lastSummary)
     ns:Fire("SCANNER_CANDIDATES_UPDATED", "Trinkets")
     return ok, info
 end
@@ -369,7 +380,7 @@ end
 
 function Scanner:RebuildCandidateCache()
     if InCombatLockdown() then
-        pushError("RebuildCandidateCache deferred (in combat)")
+        pushInfo("RebuildCandidateCache deferred (in combat)")
         return false
     end
     for container in pairs(_dirty) do
@@ -459,7 +470,7 @@ local function scheduleSpecRescan()
     markAllDirty()
     if InCombatLockdown() then
         _deferredScans.cdm = true
-        pushError("spec/CDM change while in combat -- deferred CDM rescan")
+        pushInfo("spec/CDM change while in combat -- deferred CDM rescan")
         return
     end
     if _specScanScheduled then return end

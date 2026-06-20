@@ -112,11 +112,17 @@ local KNOWN_SUMMON_DURATIONS = {
     [275699] = 20,
     [455395] = 30,
     [383269] = 30,
+    [265187] = 15,
+    [104316] = 12,
+}
+
+local CAST_COUNT_SPELLS = {
+    [196277] = true,
 }
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Bars] " .. fmt, ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("bars", "[Bars] " .. fmt, ...)
     end
 end
 
@@ -1245,6 +1251,26 @@ local function isResourceGatedNoCooldownSpell(spellID)
     return gated
 end
 
+local function getTotemDurationFromMirror(sid, activeSID, baseSID)
+    local durFn = (type(GetTotemDuration) == "function" and GetTotemDuration)
+        or (C_TotemInfo and type(C_TotemInfo.GetTotemDuration) == "function"
+            and C_TotemInfo.GetTotemDuration)
+        or nil
+    if not durFn then return nil end
+    if _mirrorMapDirty then rebuildMirrorMap() end
+    local child = _mirrorMap[activeSID] or _mirrorMap[sid]
+    if not child and baseSID then child = _mirrorMap[baseSID] end
+    if type(child) ~= "table" then return nil end
+    local td = child.totemData
+    if not isSecret(td) and td == nil then return nil end
+    local slot = child.preferredTotemUpdateSlot
+    if not isSecret(slot) and slot == nil then return nil end
+    local ok, durObj = pcall(durFn, slot)
+    if not ok or durObj == nil then return nil end
+    if not durationShowsCooldown(durObj) then return nil end
+    return durObj
+end
+
 local function getSpellTexture(spellID)
     if not (C_Spell and C_Spell.GetSpellTexture) then return nil end
     local ok, tex = pcall(C_Spell.GetSpellTexture, spellID)
@@ -1617,6 +1643,27 @@ function Row:RefreshIcon(icon, entry, desat)
         local activeSID = activeSpellID(sid)
 
         local summonDur = tonumber(entry.summonDuration) or 0
+        local totemDur = getTotemDurationFromMirror(sid, activeSID, resolveBaseSpellID(sid))
+        if totemDur then
+            icon:SetCooldown(totemDur)
+            icon._summonAppliedUntil = nil
+            if ns.Glow then
+                ns.Glow:Set(icon, "activeAura", {
+                    style  = "border",
+                    colorR = SUMMON_BORDER_R,
+                    colorG = SUMMON_BORDER_G,
+                    colorB = SUMMON_BORDER_B,
+                    colorA = SUMMON_BORDER_A,
+                })
+            end
+            local tex = getSpellTexture(sid)
+            if tex then icon:SetTexture(tex) end
+            icon:SetDesaturated(false)
+            icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+            icon._readyNowCached = false
+            applyReadyGlow(icon, sid, false)
+            return
+        end
         if summonDur > 0 and icon._summonActiveUntil then
             local now = GetTime()
             if now < icon._summonActiveUntil then
@@ -1815,7 +1862,21 @@ function Row:RefreshIcon(icon, entry, desat)
                 icon:SetStackTextRaw(current)
             end
         else
-            icon:SetStackTextRaw("")
+            local shown = false
+            if C_Spell and C_Spell.GetSpellCastCount
+               and (CAST_COUNT_SPELLS[activeSID] or CAST_COUNT_SPELLS[baseSID]) then
+                local ok, castCount = pcall(C_Spell.GetSpellCastCount, activeSID)
+                if ok then
+                    if isSecret(castCount) then
+                        icon:SetStackTextRaw(castCount)
+                        shown = true
+                    elseif type(castCount) == "number" and castCount > 0 then
+                        icon:SetStackTextRaw(castCount)
+                        shown = true
+                    end
+                end
+            end
+            if not shown then icon:SetStackTextRaw("") end
         end
 
         icon._effOnRealCD = onRealCooldown or nil

@@ -35,7 +35,6 @@ local function showHelp()
     out("  |cffffd200/tenui castbar grace on|off|r  -- toggle grace-window anti-flicker (Phase B)")
     out("  |cffffd200/tenui castbar instant on|off|r -- toggle GCD instant-cast overlay (Phase B)")
     out("  |cffffd200/tenui resources reset|r       -- restore Resources module defaults")
-    out("  |cffffd200/tenui resources resolverdump|r -- (TEMP Phase-0) dump new resolver/engine helper output to the debug window")
     out("  |cffffd200/tenui resources thldump|r      -- dump threshold-line per-spell diagnostics (known/cost/routing) to the debug window")
     out("  |cffffd200/tenui combatalert test|r       -- fire the QoL Combat Alert test")
     out("  |cffffd200/tenui combatalert reset|r      -- reset Combat Alert frame position")
@@ -91,6 +90,7 @@ local function showHelp()
     out("  |cffffd200/tenui aura forceviewer on|off|toggle|r   -- keep Blizzard CDM viewer populated+invisible for in-combat target debuffs (default: off)")
     out("  |cffffd200/tenui aura dump|r                         -- CDM identity/runtime/display/matching dump (to debug window)")
     out("  |cffffd200/tenui aura pipeline|r                     -- prove WHERE the aura display chain breaks (to debug window)")
+    out("  |cffffd200/tenui aura rawset|r                       -- dump RAW Blizzard CDM category sets (unfiltered) -- no-cooldownID vs HideByDefault (to debug window)")
     out("  |cffffd200/tenui aura verifydk|r                     -- DK Virulent/Dread Plague + Lesser Ghoul icon self-test")
     out("  |cffffd200/tenui auras lookup <spellID>|r            -- viewer-aura map + active + probe diagnostic")
     out("  |cffffd200/tenui auras dedup dump|r                  -- list cross-viewer overlaps (spellIDs in both viewers)")
@@ -292,78 +292,6 @@ local function handleCastBar(rest)
     out("usage: |cffffd200/tenui castbar test|r | |cffffd200reset|r | |cffffd200grace on|off|r | |cffffd200instant on|off|r")
 end
 
-local function handleResourcesResolverDump()
-    local Resolver = ns.Resources_Resolver
-    local EngineR  = ns.Resources_Engine
-    if not (ns.Debug and ns.Debug.Log) then
-        out("debug window unavailable")
-        return
-    end
-    local function L(fmt, ...)
-        ns.Debug:Log("[Resources/Phase0] " .. fmt, ...)
-    end
-
-    L("=== resolverdump (TEMPORARY Phase-0 diagnostic) ===")
-    if not Resolver then
-        L("ns.Resources_Resolver MISSING (file not loaded?)")
-    end
-    if not EngineR then
-        L("ns.Resources_Engine MISSING (file not loaded?)")
-    end
-    if not Resolver then
-        if ns.Debug.Show then ns.Debug:Show() end
-        out("resolverdump sent to the debug window -- |cffffd200/tenui debug|r to view")
-        return
-    end
-
-    local class, specIndex = Resolver:GetPlayerInfo()
-    L("player class=%s  specIndex=%s", tostring(class), tostring(specIndex))
-
-    local primaryPT = Resolver:GetPrimaryResource()
-    local primaryName = Resolver:GetPowerTypeName(primaryPT)
-    L("GetPrimaryResource() = %s  (%s)", tostring(primaryPT), tostring(primaryName))
-
-    local secondaryPT = Resolver:GetSecondaryResource()
-    if secondaryPT == nil then
-        L("GetSecondaryResource() = nil  (none -- hidden)")
-    else
-        L("GetSecondaryResource() = %s  (%s)",
-            tostring(secondaryPT), tostring(Resolver:GetPowerTypeName(secondaryPT)))
-    end
-
-    local rawSecMax = Resolver:GetSecondaryMax()
-    if EngineR then
-        local secMaxSecret = EngineR:IsSecret(rawSecMax)
-        local secMaxScrub  = EngineR:ScrubNumber(rawSecMax, -1)
-        L("GetSecondaryMax() raw isSecret=%s  scrubbed=%s",
-            tostring(secMaxSecret), tostring(secMaxScrub))
-    else
-        L("GetSecondaryMax() raw -> (engine unavailable for scrub)")
-    end
-
-    if EngineR and primaryPT ~= nil then
-        local rawMax = UnitPowerMax and UnitPowerMax("player", primaryPT) or nil
-        L("engine: scrubNumber(UnitPowerMax player primary) = %s",
-            tostring(EngineR:ScrubNumber(rawMax, -1)))
-        local diag = {}
-        local pct = EngineR:TryUnitPowerPercent("player", primaryPT, diag)
-        L("engine: tryUnitPowerPercent(player primary) = %s (0..1 ratio or nil)",
-            tostring(pct))
-        for i = 1, #diag do
-            local d = diag[i]
-            L("  attempt[%d] form=%s ok=%s secret=%s value=%s",
-                i, tostring(d.form), tostring(d.ok),
-                tostring(d.secret), tostring(d.value))
-        end
-    else
-        L("engine: primary nil or engine unavailable -- skipped helper sanity lines")
-    end
-
-    L("=== end resolverdump ===")
-    if ns.Debug.Show then ns.Debug:Show() end
-    out("resolverdump sent to the debug window -- |cffffd200/tenui debug|r to view/copy")
-end
-
 local function handleResources(rest)
     local sub = (rest or ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
     if sub == "reset" then
@@ -380,10 +308,6 @@ local function handleResources(rest)
         out("resources module reset to defaults")
         return
     end
-    if sub == "resolverdump" then
-        handleResourcesResolverDump()
-        return
-    end
     if sub == "thldump" then
         local D = ns.Resources_Display
         if D and D.thLines_DiagDump and D.thLines_DiagDump() then
@@ -394,7 +318,7 @@ local function handleResources(rest)
         end
         return
     end
-    out("usage: |cffffd200/tenui resources reset|r | |cffffd200resolverdump|r (Phase-0 diagnostic) | |cffffd200thldump|r (threshold-line diagnostic)")
+    out("usage: |cffffd200/tenui resources reset|r | |cffffd200thldump|r (threshold-line diagnostic)")
 end
 
 local function handleCombatAlert(rest)
@@ -1318,6 +1242,23 @@ local function handleAuras(rest)
         return
     end
 
+    if sub == "rawset" then
+        if not Auras then out("auras module not registered") return end
+        if not Auras.DumpRawCategorySet then
+            out("rawset helper not loaded (Auras.lua out of date)")
+            return
+        end
+        local lines = Auras:DumpRawCategorySet() or {}
+        if ns.Debug and ns.Debug.Log then
+            for i = 1, #lines do ns.Debug:Log("%s", lines[i]) end
+            if ns.Debug.Show then ns.Debug:Show() end
+            out(("raw category-set dump (%d lines) sent to the debug window -- |cffffd200/tenui debug|r to view/copy"):format(#lines))
+        else
+            for i = 1, #lines do out(lines[i]) end
+        end
+        return
+    end
+
     if sub == "verifydk" then
         if not Auras then out("auras module not registered") return end
         if not Auras.VerifyDK then
@@ -1351,7 +1292,7 @@ local function handleAuras(rest)
         return
     end
 
-    out("usage: |cffffd200/tenui auras|r [|cffffd200icons on|off|r | |cffffd200bars on|off|r | |cffffd200rescan|r | |cffffd200reset|r | |cffffd200unsuppress|r | |cffffd200suppress|r | |cffffd200map|r | |cffffd200active|r | |cffffd200dump|r | |cffffd200pipeline|r | |cffffd200verifydk|r | |cffffd200pandemic ...|r | |cffffd200prefer bar|icon|r | |cffffd200probe on|off|r | |cffffd200lookup <spellID>|r | |cffffd200dedup dump|r | |cffffd200activeglow on|off|r | |cffffd200lowtime on|off|threshold <N>|color <r> <g> <b>|r | |cffffd200barpreview on|off|r [count] | |cffffd200glow dump|r [N]]")
+    out("usage: |cffffd200/tenui auras|r [|cffffd200icons on|off|r | |cffffd200bars on|off|r | |cffffd200rescan|r | |cffffd200reset|r | |cffffd200unsuppress|r | |cffffd200suppress|r | |cffffd200map|r | |cffffd200active|r | |cffffd200dump|r | |cffffd200pipeline|r | |cffffd200rawset|r | |cffffd200verifydk|r | |cffffd200pandemic ...|r | |cffffd200prefer bar|icon|r | |cffffd200probe on|off|r | |cffffd200lookup <spellID>|r | |cffffd200dedup dump|r | |cffffd200activeglow on|off|r | |cffffd200lowtime on|off|threshold <N>|color <r> <g> <b>|r | |cffffd200barpreview on|off|r [count] | |cffffd200glow dump|r [N]]")
 end
 
 local function trim(s) return (s or ""):gsub("^%s+", ""):gsub("%s+$", "") end

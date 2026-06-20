@@ -14,6 +14,18 @@ ns.anchors = ns.anchors or {}
 local Anchors = {}
 ns.Anchors = Anchors
 
+local function vlog(fmt, ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("anchors", fmt, ...)
+    end
+end
+
+local function ainfo(fmt, ...)
+    if ns.Debug and ns.Debug.Info then
+        ns.Debug:Info(fmt, ...)
+    end
+end
+
 local registry = ns.anchors
 
 local dormantRegistry = {}
@@ -331,9 +343,7 @@ local function buildAnchor(def)
         end
         dormantRT.frame:Show()
         _tracePush(name, "REVIVE", {})
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("Anchor revived from dormant cache: %s", name)
-        end
+        vlog("Anchor revived from dormant cache: %s", name)
         return dormantRT
     end
 
@@ -390,10 +400,8 @@ local function buildAnchor(def)
     registry[name] = runtime
     f.runtime = runtime
 
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("Anchor registered: %s at %s (%d,%d) %dx%d",
-            name, tostring(pos.point), pos.x or 0, pos.y or 0, pos.width or 0, pos.height or 0)
-    end
+    vlog("Anchor registered: %s at %s (%d,%d) %dx%d",
+        name, tostring(pos.point), pos.x or 0, pos.y or 0, pos.width or 0, pos.height or 0)
 
     return runtime
 end
@@ -431,9 +439,7 @@ function Anchors:Unregister(name)
         runtime.overlay:EnableMouse(false)
     end
     _tracePush(name, "UNREGISTER", {})
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("Anchor unregistered (parked dormant): %s", name)
-    end
+    vlog("Anchor unregistered (parked dormant): %s", name)
     return true
 end
 
@@ -516,11 +522,9 @@ function Anchors:SavePosition(anchor)
             entry.point, entry.x, entry.y, date("%H:%M:%S"))
     end
 
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Anchor] SAVE name=%s point=%s x=%d y=%d w=%d h=%d",
-            anchor.anchorName, tostring(entry.point), entry.x, entry.y,
-            entry.width or 0, entry.height or 0)
-    end
+    vlog("[Anchor] SAVE name=%s point=%s x=%d y=%d w=%d h=%d",
+        anchor.anchorName, tostring(entry.point), entry.x, entry.y,
+        entry.width or 0, entry.height or 0)
 end
 
 function Anchors:SaveSize(anchor)
@@ -541,11 +545,9 @@ function Anchors:SaveSize(anchor)
         w = entry.width, h = entry.height,
     })
     ns:Fire("ANCHOR_RESIZED", anchor.anchorName, entry.width, entry.height)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("Anchor resized: %s -> %s (%d,%d) %dx%d",
-            anchor.anchorName, tostring(entry.point), entry.x or 0, entry.y or 0,
-            entry.width, entry.height)
-    end
+    vlog("Anchor resized: %s -> %s (%d,%d) %dx%d",
+        anchor.anchorName, tostring(entry.point), entry.x or 0, entry.y or 0,
+        entry.width, entry.height)
 end
 
 function Anchors:AutoFitSize(name, w, h)
@@ -625,8 +627,8 @@ local function forceFixTrackedAnchor(saved, anchorName, defaultW, defaultH, minW
             note = "width/height only; point/x/y NEVER mutated here",
         })
 
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("[Anchor] FORCE-RESET %s %dx%d (was w=%s h=%s liveW=%s liveH=%s)",
+        if ns.Debug and ns.Debug.Warn then
+            ns.Debug:Warn("[Anchor] FORCE-RESET %s %dx%d (was w=%s h=%s liveW=%s liveH=%s)",
                 anchorName, defaultW, defaultH,
                 tostring(oldW), tostring(oldH),
                 tostring(liveW), tostring(liveH))
@@ -648,10 +650,10 @@ local function migrateTinyTrackedAnchors(saved)
             tostring(tb and tb.width),  tostring(tb and tb.height))
     end
 
-    if ns.Debug and ns.Debug.Log then
+    do
         local ti = saved.TrackedIcon
         local tb = saved.TrackedBars
-        ns.Debug:Log("[Anchor] migrateTinyTrackedAnchors (ONE-TIME): checking TrackedIcon width="
+        ainfo("[Anchor] migrateTinyTrackedAnchors (ONE-TIME): checking TrackedIcon width="
             .. tostring(ti and ti.width)
             .. " TrackedBars width="
             .. tostring(tb and tb.width))
@@ -695,9 +697,7 @@ function Anchors:ForceResetTracked(name)
                 _G.TenUIDB.debug._last_slash_reset = ("%s slash-reset to %dx%d at %s"):format(
                     n, d.width, d.height, date("%H:%M:%S"))
             end
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("[Anchor] SLASH-RESET %s -> %dx%d", n, d.width, d.height)
-            end
+            ainfo("[Anchor] SLASH-RESET %s -> %dx%d", n, d.width, d.height)
         end
     end
     if ns.EditMode and ns.EditMode.Refresh then
@@ -745,9 +745,7 @@ local function wipeDeprecatedBuffsDebuffs(saved)
             _G.TenUIDB.debug = _G.TenUIDB.debug or {}
             _G.TenUIDB.debug._buffsdebuffs_wiped = ("wiped at %s"):format(date("%H:%M:%S"))
         end
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("[Anchor] WIPED deprecated saved.BuffsDebuffs blob")
-        end
+        ainfo("[Anchor] WIPED deprecated saved.BuffsDebuffs blob")
     end
 end
 
@@ -764,9 +762,7 @@ function migrateOriginModel(saved)
         _G.TenUIDB.debug = _G.TenUIDB.debug or {}
         _G.TenUIDB.debug._origin_model_migrated = ("migrated at %s"):format(date("%H:%M:%S"))
     end
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Anchor] MIGRATED saved entries to deterministic origin model")
-    end
+    ainfo("[Anchor] MIGRATED saved entries to deterministic origin model")
 end
 
 local function migratePointCanonicalization(saved)
@@ -789,10 +785,8 @@ local function migratePointCanonicalization(saved)
                 entry.x = math_floor(ox + 0.5)
                 entry.y = math_floor(oy + 0.5)
                 saved[name] = entry
-                if ns.Debug and ns.Debug.Log then
-                    ns.Debug:Log("[Anchor] POINT-CANON %s -> point=%s x=%d y=%d",
-                        name, canon, entry.x, entry.y)
-                end
+                ainfo("[Anchor] POINT-CANON %s -> point=%s x=%d y=%d",
+                    name, canon, entry.x, entry.y)
             end
         end
     end
@@ -812,15 +806,15 @@ function Anchors:ApplyProfile()
     migratePointCanonicalization(saved)
     for name, runtime in pairs(registry) do
         local rawResolved, tier = resolveSavedEntry(name)
-        if ns.Debug and ns.Debug.Log then
+        if ns.Debug and ns.Debug.IsVerbose and ns.Debug:IsVerbose("anchors") then
             local rawSaved = rawResolved
             if type(rawSaved) == "table" then
-                ns.Debug:Log("[Anchor] LOAD name=%s tier=%s saved=%s,%s,%s w=%s h=%s",
+                vlog("[Anchor] LOAD name=%s tier=%s saved=%s,%s,%s w=%s h=%s",
                     name, tier,
                     tostring(rawSaved.point), tostring(rawSaved.x), tostring(rawSaved.y),
                     tostring(rawSaved.width), tostring(rawSaved.height))
             else
-                ns.Debug:Log("[Anchor] LOAD name=%s tier=%s saved=<nil/non-table:%s>",
+                vlog("[Anchor] LOAD name=%s tier=%s saved=<nil/non-table:%s>",
                     name, tier, tostring(rawSaved))
             end
         end
@@ -837,10 +831,8 @@ function Anchors:ApplyProfile()
             else
                 saved[name] = entry
             end
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("[Anchor] LOAD name=%s -> wrote DEFAULTS tier=%s (corrupt=%s)",
-                    name, tier, tostring(corrupt))
-            end
+            vlog("[Anchor] LOAD name=%s -> wrote DEFAULTS tier=%s (corrupt=%s)",
+                name, tier, tostring(corrupt))
         end
         if clampToScreen(entry) then
             if tier == "overlay" then
@@ -849,11 +841,15 @@ function Anchors:ApplyProfile()
                 saved[name] = entry
             end
             _tracePush(name, "CLAMP", { x = entry.x, y = entry.y })
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("[Anchor] LOAD name=%s clamped to screen", name)
-            end
+            vlog("[Anchor] LOAD name=%s clamped to screen", name)
         end
         applyPosition(runtime.frame, entry)
+        do
+            local savedAlpha = (type(rawResolved) == "table") and rawResolved.alpha or nil
+            if not isFiniteNumber(savedAlpha) then savedAlpha = 1.0 end
+            if savedAlpha < 0 then savedAlpha = 0 elseif savedAlpha > 1 then savedAlpha = 1 end
+            runtime.frame:SetAlpha(savedAlpha)
+        end
         _tracePush(name, "APPLY", {
             point = entry.point, x = entry.x, y = entry.y,
             w = entry.width, h = entry.height,
@@ -869,11 +865,9 @@ function Anchors:ApplyProfile()
                 tostring(entry.point), entry.x or 0, entry.y or 0,
                 entry.width or 0, entry.height or 0, date("%H:%M:%S"))
         end
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("[Anchor] APPLY name=%s -> point=%s x=%d y=%d w=%d h=%d",
-                name, tostring(entry.point), entry.x or 0, entry.y or 0,
-                entry.width or 0, entry.height or 0)
-        end
+        vlog("[Anchor] APPLY name=%s -> point=%s x=%d y=%d w=%d h=%d",
+            name, tostring(entry.point), entry.x or 0, entry.y or 0,
+            entry.width or 0, entry.height or 0)
     end
 
     forceFixTrackedAnchor(saved, "TrackedIcon", 320, 40, 1, 1)
@@ -930,11 +924,9 @@ function Anchors:SetPositionDirect(name, x, y)
         _G.TenUIDB.debug._last_slash_setpos = ("%s @ %d,%d at %s"):format(
             name, entry.x, entry.y, date("%H:%M:%S"))
     end
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Anchor] SET name=%s point=%s x=%d y=%d w=%d h=%d",
-            name, tostring(entry.point), entry.x, entry.y,
-            entry.width or 0, entry.height or 0)
-    end
+    vlog("[Anchor] SET name=%s point=%s x=%d y=%d w=%d h=%d",
+        name, tostring(entry.point), entry.x, entry.y,
+        entry.width or 0, entry.height or 0)
     return true
 end
 
@@ -1375,22 +1367,26 @@ ns:RegisterEvent("PLAYER_REGEN_ENABLED", function()
     end
 end)
 
-ns:RegisterEvent("PLAYER_ENTERING_WORLD", function()
+ns:RegisterEvent("PLAYER_ENTERING_WORLD", function(event, isInitialLogin, isReloadingUi)
     if not ns.savedVarsReady then return end
+    if isInitialLogin or isReloadingUi then
+        Anchors:ApplyProfile()
+        return
+    end
     local diverged = false
     for name, runtime in pairs(registry) do
         local f = runtime.frame
         local entry = resolveSavedEntry(name)
         local livePoint, _, liveRel, liveX, liveY = f:GetPoint(1)
-        if ns.Debug and ns.Debug.Log then
+        if ns.Debug and ns.Debug.IsVerbose and ns.Debug:IsVerbose("anchors") then
             if type(entry) == "table" then
-                ns.Debug:Log("[Anchor] PEW name=%s live=%s,%s,%.2f,%.2f saved=%s,%d,%d",
+                vlog("[Anchor] PEW name=%s live=%s,%s,%.2f,%.2f saved=%s,%d,%d",
                     name,
                     tostring(livePoint), tostring(liveRel),
                     liveX or 0, liveY or 0,
                     tostring(entry.point), entry.x or 0, entry.y or 0)
             else
-                ns.Debug:Log("[Anchor] PEW name=%s live=%s,%s,%.2f,%.2f saved=<missing>",
+                vlog("[Anchor] PEW name=%s live=%s,%s,%.2f,%.2f saved=<missing>",
                     name,
                     tostring(livePoint), tostring(liveRel),
                     liveX or 0, liveY or 0)
@@ -1405,9 +1401,7 @@ ns:RegisterEvent("PLAYER_ENTERING_WORLD", function()
             local py = math_floor((liveY or 0) + 0.5)
             if livePoint ~= entry.point or px ~= math_floor(expX + 0.5) or py ~= math_floor(expY + 0.5) then
                 diverged = true
-                if ns.Debug and ns.Debug.Log then
-                    ns.Debug:Log("[Anchor] PEW name=%s DIVERGED -- re-applying", name)
-                end
+                vlog("[Anchor] PEW name=%s DIVERGED -- re-applying", name)
             end
         end
     end

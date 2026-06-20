@@ -6,8 +6,8 @@ local Primary   = Display and Display.Primary   or {}
 local Secondary = Display and Display.Secondary or {}
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[Resources] " .. fmt, ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("resources", "[Resources] " .. fmt, ...)
     end
 end
 
@@ -207,6 +207,12 @@ function Resources:OnEnable(_, profile)
         self:ApplyOptions()
     end)
 
+    self._pewCB = ns:RegisterEvent("PLAYER_ENTERING_WORLD", function(_, isInitialLogin, isReloadingUi)
+        if isInitialLogin or isReloadingUi then
+            self:ApplyOptions()
+        end
+    end)
+
     local InCombatLockdown = InCombatLockdown
     applyCombatVisibility(InCombatLockdown and InCombatLockdown() or false)
 
@@ -231,6 +237,10 @@ function Resources:OnDisable()
     if self._specCB then
         ns:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", self._specCB)
         self._specCB = nil
+    end
+    if self._pewCB then
+        ns:UnregisterEvent("PLAYER_ENTERING_WORLD", self._pewCB)
+        self._pewCB = nil
     end
 end
 

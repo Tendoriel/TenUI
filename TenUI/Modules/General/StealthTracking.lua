@@ -47,8 +47,8 @@ local StealthTracking = {
 ns.StealthTracking = StealthTracking
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[StealthTracking] " .. tostring(fmt), ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("stealth", "[StealthTracking] " .. tostring(fmt), ...)
     end
 end
 

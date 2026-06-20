@@ -23,8 +23,8 @@ local TooltipControl = {
 ns.TooltipControl = TooltipControl
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[TooltipControl] " .. tostring(fmt), ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("tooltip", "[TooltipControl] " .. tostring(fmt), ...)
     end
 end
 

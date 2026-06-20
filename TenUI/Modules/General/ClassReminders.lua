@@ -116,8 +116,8 @@ local ClassReminders = {
 ns.ClassReminders = ClassReminders
 
 local function dlog(fmt, ...)
-    if ns.Debug and ns.Debug.Log then
-        ns.Debug:Log("[ClassReminders] " .. tostring(fmt), ...)
+    if ns.Debug and ns.Debug.Verbose then
+        ns.Debug:Verbose("classreminders", "[ClassReminders] " .. tostring(fmt), ...)
     end
 end
 

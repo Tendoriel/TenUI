@@ -240,9 +240,9 @@ Auras.PLACEHOLDER_ICON = [[Interface\Icons\INV_Misc_QuestionMark]]
 
 function Auras._catalogDisplayTexture(e)
     if type(e) ~= "table" then return nil end
-    local cached = e.icon
+    local cached = e.displayIcon
     if not isSecret(cached) and cached ~= nil and cached ~= false then return cached end
-    cached = e.displayIcon
+    cached = e.icon
     if not isSecret(cached) and cached ~= nil and cached ~= false then return cached end
     if C_Spell and C_Spell.GetSpellTexture then
         for _, sid in ipairs({ e.spellID, e.overrideTooltipSpellID, e.overrideSpellID, e.linkedSpellID }) do
@@ -477,12 +477,231 @@ local function getDurationFor(slot)
     return slot._dur
 end
 
+function Auras._totemChildHasLiveTotem(child)
+    if type(child) ~= "table" then return false end
+    local td = child.totemData
+    if not isSecret(td) and td == nil then return false end
+    local slot = child.preferredTotemUpdateSlot
+    if not isSecret(slot) and slot == nil then return false end
+    return true
+end
+
+function Auras._totemDurationFromChild(child)
+    if not Auras._totemChildHasLiveTotem(child) then return nil end
+    local durFn = (type(GetTotemDuration) == "function" and GetTotemDuration)
+        or (C_TotemInfo and type(C_TotemInfo.GetTotemDuration) == "function"
+            and C_TotemInfo.GetTotemDuration)
+        or nil
+    if not durFn then return nil end
+    local ok, durObj = pcall(durFn, child.preferredTotemUpdateSlot)
+    if not ok or durObj == nil then return nil end
+    return durObj
+end
+
+function Auras._findTotemViewerChildForItem(item)
+    if type(item) ~= "table" then return nil end
+    if Auras._totemChildHasLiveTotem(item._viewerChild) then
+        return item._viewerChild
+    end
+    local cooldownID = tonumber(item.cooldownID)
+    if not cooldownID then return nil end
+    for _, viewerName in ipairs({ ICON_VIEWER_NAME, BAR_VIEWER_NAME }) do
+        local viewer = getViewer(viewerName)
+        if viewer then
+            local children = getItemFrames(viewer) or {}
+            for i = 1, #children do
+                local child = children[i]
+                if type(child) == "table"
+                   and tonumber(child.cooldownID) == cooldownID
+                   and Auras._totemChildHasLiveTotem(child) then
+                    return child
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function Auras._resolveTotemDuration(item)
+    local child = Auras._findTotemViewerChildForItem(item)
+    if not child then return nil end
+    return Auras._totemDurationFromChild(child)
+end
+
+Auras.SUMMON_BAR_SPELLS = {
+    [265187] = 15,
+    [104316] = 12,
+}
+
+Auras.SUMMON_BAR_SPEC_GATE = {
+    WARLOCK_2 = true,
+}
+
+Auras.SUMMON_MIRROR_VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer" }
+
+Auras._summonActiveUntil = {}
+Auras._summonDurObjBySpell = {}
+Auras._summonSpecGateOK = false
+
+function Auras._summonSpellForEntry(e)
+    if type(e) ~= "table" then return nil end
+    local map = Auras.SUMMON_BAR_SPELLS
+    local function ok(sid)
+        return type(sid) == "number" and not isSecret(sid) and map[sid] ~= nil
+    end
+    if ok(e.spellID) then return e.spellID end
+    if ok(e.overrideSpellID) then return e.overrideSpellID end
+    if ok(e.overrideTooltipSpellID) then return e.overrideTooltipSpellID end
+    if ok(e.linkedSpellID) then return e.linkedSpellID end
+    if type(e.linkedSpellIDs) == "table" then
+        for i = 1, #e.linkedSpellIDs do
+            if ok(e.linkedSpellIDs[i]) then return e.linkedSpellIDs[i] end
+        end
+    end
+    return nil
+end
+
+function Auras._summonDurationShowsCooldown(durObj)
+    if not durObj then return false end
+    local sc = Auras._summonScratchCooldown
+    if not sc then
+        local parent = CreateFrame("Frame", "TenUIAurasSummonScratchParent")
+        parent:Hide()
+        sc = CreateFrame("Cooldown", nil, parent, "CooldownFrameTemplate")
+        Auras._summonScratchCooldown = sc
+    end
+    local ok = pcall(sc.SetCooldownFromDurationObject, sc, durObj)
+    if not ok then return false end
+    local shown = sc:IsShown()
+    pcall(sc.Clear, sc)
+    return shown and true or false
+end
+
+function Auras._childMatchesSummonSpell(child, summonSpellID)
+    if type(child) ~= "table" then return false end
+    local cdInfo = child.cooldownInfo
+    local function eq(sid)
+        return type(sid) == "number" and not isSecret(sid) and sid == summonSpellID
+    end
+    if type(cdInfo) == "table" then
+        if eq(cdInfo.spellID) then return true end
+        if eq(cdInfo.overrideSpellID) then return true end
+        if eq(cdInfo.overrideTooltipSpellID) then return true end
+        if type(cdInfo.linkedSpellIDs) == "table" then
+            for k = 1, #cdInfo.linkedSpellIDs do
+                if eq(cdInfo.linkedSpellIDs[k]) then return true end
+            end
+        end
+    end
+    if type(child.GetSpellID) == "function" then
+        local okS, s = pcall(child.GetSpellID, child)
+        if okS and eq(s) then return true end
+    end
+    if type(child.GetBaseSpellID) == "function" then
+        local okB, b = pcall(child.GetBaseSpellID, child)
+        if okB and eq(b) then return true end
+    end
+    return false
+end
+
+function Auras._resolveSummonLiveTotem(summonSpellID)
+    local durFn = (type(GetTotemDuration) == "function" and GetTotemDuration)
+        or (C_TotemInfo and type(C_TotemInfo.GetTotemDuration) == "function"
+            and C_TotemInfo.GetTotemDuration)
+        or nil
+    if not durFn then return nil end
+    for _, viewerName in ipairs(Auras.SUMMON_MIRROR_VIEWER_NAMES) do
+        local viewer = getViewer(viewerName)
+        if viewer then
+            local children = getItemFrames(viewer) or {}
+            for i = 1, #children do
+                local child = children[i]
+                if Auras._childMatchesSummonSpell(child, summonSpellID)
+                   and Auras._totemChildHasLiveTotem(child) then
+                    local ok, durObj = pcall(durFn, child.preferredTotemUpdateSlot)
+                    if ok and durObj ~= nil and Auras._summonDurationShowsCooldown(durObj) then
+                        return durObj
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function Auras._resolveSummonFixedDuration(summonSpellID)
+    local until_ = Auras._summonActiveUntil[summonSpellID]
+    if type(until_) ~= "number" then return nil end
+    local now = GetTime and GetTime() or 0
+    if now >= until_ then
+        Auras._summonActiveUntil[summonSpellID] = nil
+        return nil
+    end
+    if not (C_DurationUtil and C_DurationUtil.CreateDuration) then return nil end
+    local dur = Auras.SUMMON_BAR_SPELLS[summonSpellID]
+    if type(dur) ~= "number" or dur <= 0 then return nil end
+    local durObj = Auras._summonDurObjBySpell[summonSpellID]
+    if not durObj then
+        local okC, d = pcall(C_DurationUtil.CreateDuration)
+        if not okC or d == nil then return nil end
+        durObj = d
+        Auras._summonDurObjBySpell[summonSpellID] = durObj
+    end
+    if type(durObj.SetTimeFromStart) ~= "function" then return nil end
+    local startTime = until_ - dur
+    local okSet = pcall(durObj.SetTimeFromStart, durObj, startTime, dur, 1)
+    if not okSet then return nil end
+    return durObj
+end
+
+function Auras._resolveSummonBarPresence(e)
+    local summonSpellID = Auras._summonSpellForEntry(e)
+    if not summonSpellID then return false, nil, nil end
+
+    local liveDur = Auras._resolveSummonLiveTotem(summonSpellID)
+    if liveDur ~= nil then return true, liveDur, "summonBar:totem" end
+
+    local fixedDur = Auras._resolveSummonFixedDuration(summonSpellID)
+    if fixedDur ~= nil then return true, fixedDur, "summonBar:fixed" end
+
+    return false, nil, nil
+end
+
+function Auras._refreshSummonSpecGate()
+    local key = Auras.GetCurrentScopeKey and Auras:GetCurrentScopeKey() or nil
+    Auras._summonSpecGateOK = (type(key) == "string" and Auras.SUMMON_BAR_SPEC_GATE[key] == true)
+    if not Auras._summonSpecGateOK then
+        wipe(Auras._summonActiveUntil)
+    end
+end
+
+function Auras._handleSummonCast(spellID)
+    if type(spellID) ~= "number" or isSecret(spellID) then return end
+    local dur = Auras.SUMMON_BAR_SPELLS[spellID]
+    if type(dur) ~= "number" or dur <= 0 then return end
+    if not Auras._summonSpecGateOK then return end
+    Auras._summonActiveUntil[spellID] = (GetTime and GetTime() or 0) + dur
+    if Auras.RequestRefresh then pcall(Auras.RequestRefresh, Auras) end
+end
+
 local function applySwipe(iconWidget, item, spellID)
     if not iconWidget then return end
 
     iconWidget._liveDurObj = nil
     iconWidget._liveDurObjType = nil
     iconWidget._liveDurObjSecret = nil
+
+    if type(item) == "table" then
+        local totemDur = Auras._resolveTotemDuration(item)
+        if ns._auraPresentTruthy(totemDur) then
+            iconWidget._liveDurObj = totemDur
+            iconWidget._liveDurObjType = type(totemDur)
+            iconWidget._liveDurObjSecret = isSecret(totemDur)
+            pcall(iconWidget.SetCooldown, iconWidget, totemDur)
+            iconWidget._lastArmPath = "auras:totem"
+            return
+        end
+    end
 
     if type(item) == "table" and item.auraInstanceID ~= nil
        and C_UnitAuras and C_UnitAuras.GetAuraDuration then
@@ -496,6 +715,16 @@ local function applySwipe(iconWidget, item, spellID)
             iconWidget._lastArmPath = "auras:auraDur"
             return
         end
+    end
+
+    if type(item) == "table" and item._summonDurObj ~= nil then
+        local sdur = item._summonDurObj
+        iconWidget._liveDurObj = sdur
+        iconWidget._liveDurObjType = type(sdur)
+        iconWidget._liveDurObjSecret = isSecret(sdur)
+        pcall(iconWidget.SetCooldown, iconWidget, sdur)
+        iconWidget._lastArmPath = "auras:summonBar"
+        return
     end
 
     if spellID and C_Spell and C_Spell.GetSpellCooldownDuration then
@@ -835,6 +1064,13 @@ function Auras._resolveLowTimeDuration(item, spellID, dbg)
         if dbg then dbg.durPath = "no-item" end
         return nil
     end
+    do
+        local totemDur = Auras._resolveTotemDuration(item)
+        if _isUsableLowTimeDuration(totemDur) then
+            if dbg then dbg.durPath = "GetTotemDuration" end
+            return totemDur
+        end
+    end
     if item.auraInstanceID ~= nil
        and C_UnitAuras and C_UnitAuras.GetAuraDuration then
         local unit = type(item.auraDataUnit) == "string" and item.auraDataUnit or "player"
@@ -1118,6 +1354,19 @@ local function applyBarFill(slot, item, spellID)
                 slot._liveDurObjSecret = isSecret(dur)
                 return
             end
+        end
+    end
+
+    if type(bar.SetTimerDuration) == "function"
+       and type(item) == "table" and item._summonDurObj ~= nil then
+        local sdur = item._summonDurObj
+        local okSet = pcall(bar.SetTimerDuration, bar, sdur,
+            BAR_TIMER_INTERP_IMMEDIATE, BAR_TIMER_DIR_REMAINING)
+        if okSet then
+            slot._liveDurObj = sdur
+            slot._liveDurObjType = type(sdur)
+            slot._liveDurObjSecret = isSecret(sdur)
+            return
         end
     end
 
@@ -5800,6 +6049,150 @@ function Auras:DumpPipeline()
     return lines
 end
 
+function Auras:DumpRawCategorySet()
+    local lines = {}
+    local function push(fmt, ...)
+        if select("#", ...) > 0 then
+            local ok, s = pcall(string.format, fmt, ...)
+            lines[#lines + 1] = ok and s or fmt
+        else
+            lines[#lines + 1] = fmt
+        end
+    end
+    local function safeStr(v)
+        if isSecret(v) then return "<secret>" end
+        if v == nil then return "-" end
+        return tostring(v)
+    end
+    local function safeName(sid)
+        if type(sid) ~= "number" or isSecret(sid) or sid <= 0 then return "-" end
+        if not (C_Spell and type(C_Spell.GetSpellName) == "function") then return "?" end
+        local ok, n = pcall(C_Spell.GetSpellName, sid)
+        if not ok then return "?" end
+        return safeStr(n)
+    end
+    local function joinLinked(linked)
+        if type(linked) ~= "table" then return safeStr(linked) end
+        local parts, n = {}, 0
+        local okIter = pcall(function()
+            for i = 1, #linked do
+                n = n + 1
+                parts[n] = safeStr(linked[i])
+            end
+        end)
+        if not okIter then return "<err>" end
+        return table.concat(parts, ",")
+    end
+
+    -- Targeted verdict accumulator: per target spellID -> hit record (or nil = not found)
+    local TARGETS = { [265187] = "Summon Demonic Tyrant", [104316] = "Call Dreadstalkers" }
+    local found = {}
+
+    push("== /tenui auras rawset -- RAW Blizzard cooldown-viewer category sets (UNFILTERED) ==")
+    push("   (read-only: GetCooldownViewerCategorySet / GetCooldownViewerCooldownInfo / GetSpellName)")
+
+    local hasCV = (C_CooldownViewer ~= nil)
+        and (type(C_CooldownViewer.GetCooldownViewerCategorySet) == "function")
+        and (type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function")
+    if not hasCV then
+        push("C_CooldownViewer category API unavailable on this client -- nothing to dump.")
+        return lines
+    end
+
+    local enum = Enum and Enum.CooldownViewerCategory
+    if type(enum) ~= "table" then
+        push("Enum.CooldownViewerCategory unavailable on this client -- nothing to dump.")
+        return lines
+    end
+
+    -- category order: TrackedBar + TrackedBuff are the point of this command; Essential/Utility for completeness
+    local catDefs = {
+        { name = "TrackedBar",  cat = enum.TrackedBar },
+        { name = "TrackedBuff", cat = enum.TrackedBuff },
+        { name = "Essential",   cat = enum.Essential },
+        { name = "Utility",     cat = enum.Utility },
+    }
+
+    for _, def in ipairs(catDefs) do
+        if def.cat == nil then
+            push(" ")
+            push("[%s] -- enum member missing on this client (skipped)", def.name)
+        else
+            local okSet, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, def.cat, true)
+            push(" ")
+            if not okSet or type(ids) ~= "table" then
+                push("[%s] (cat=%s) -- GetCooldownViewerCategorySet failed/empty", def.name, safeStr(def.cat))
+            else
+                push("[%s] (cat=%s) count=%d", def.name, safeStr(def.cat), #ids)
+                for i = 1, #ids do
+                    local cdID = tonumber(ids[i])
+                    if cdID then
+                        local info
+                        local okI = pcall(function()
+                            info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+                        end)
+                        if not okI or type(info) ~= "table" then
+                            push("  cdID=%s  <GetCooldownViewerCooldownInfo failed>", safeStr(cdID))
+                        else
+                            local sid   = info.spellID
+                            local osid  = info.overrideSpellID
+                            local hide  = cdmHiddenByDefault(info)
+                            local known = info.isKnown
+                            -- displaySpellID for name: prefer override when usable, else base
+                            local nameSid = osid
+                            if type(nameSid) ~= "number" or isSecret(nameSid) or nameSid <= 0 then
+                                nameSid = sid
+                            end
+                            push("  cdID=%s  spellID=%s  override=%s  linked={%s}  hideByDefault=%s  isKnown=%s  name=%s",
+                                safeStr(cdID), safeStr(sid), safeStr(osid),
+                                joinLinked(info.linkedSpellIDs),
+                                tostring(hide and true or false),
+                                safeStr(known), safeName(nameSid))
+
+                            -- targeted-verdict scan (compare only non-secret numbers)
+                            local function matchTarget(v)
+                                if type(v) ~= "number" or isSecret(v) then return end
+                                if TARGETS[v] and not found[v] then
+                                    found[v] = { cat = def.name, cdID = cdID, hide = hide and true or false }
+                                end
+                            end
+                            matchTarget(sid)
+                            matchTarget(osid)
+                            if type(info.linkedSpellIDs) == "table" then
+                                pcall(function()
+                                    for li = 1, #info.linkedSpellIDs do
+                                        matchTarget(tonumber(info.linkedSpellIDs[li]))
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    push(" ")
+    push("===================== TARGETED VERDICT =====================")
+    local order = { 265187, 104316 }
+    for _, tid in ipairs(order) do
+        local label = TARGETS[tid]
+        local hit = found[tid]
+        if hit then
+            push(">> %d (%s): FOUND in category=%s cdID=%s hideByDefault=%s",
+                tid, label, hit.cat, safeStr(hit.cdID), tostring(hit.hide))
+        else
+            push(">> %d (%s): NOT FOUND in any tracked category set", tid, label)
+        end
+    end
+    push("===========================================================")
+    push("interpretation: FOUND + hideByDefault=true => a HideByDefault cooldownID exists")
+    push("  (live duration possible via unhide/whitelist). NOT FOUND => no cooldownID =>")
+    push("  the fix must be a self-driven bar (no Blizzard duration to mirror).")
+
+    return lines
+end
+
 function Auras:VerifyDK()
     local lines = {}
     local function push(fmt, ...)
@@ -6403,6 +6796,16 @@ function Auras:OnEnable(_, profile)
     self.BarDisplay:EnsureContainer()
 
     ensureAuraCacheFrame()
+    Auras._refreshSummonSpecGate()
+    if self._auraCacheFrame then
+        if self._auraCacheFrame.RegisterUnitEvent then
+            pcall(self._auraCacheFrame.RegisterUnitEvent, self._auraCacheFrame,
+                "UNIT_SPELLCAST_SUCCEEDED", "player")
+        else
+            pcall(self._auraCacheFrame.RegisterEvent, self._auraCacheFrame,
+                "UNIT_SPELLCAST_SUCCEEDED")
+        end
+    end
 
     if not self._mirrorFrame then
         self._mirrorFrame = CreateFrame("Frame", "TenUIAurasMirrorFrame")
@@ -6596,6 +6999,12 @@ function Auras:OnDisable()
     if self.IconDisplay then self.IconDisplay:DestroyIcons() end
     if self.BarDisplay then self.BarDisplay:DestroyBars() end
     resetPandemicState()
+
+    if self._auraCacheFrame then
+        pcall(self._auraCacheFrame.UnregisterEvent, self._auraCacheFrame, "UNIT_SPELLCAST_SUCCEEDED")
+    end
+    wipe(Auras._summonActiveUntil)
+    Auras._summonSpecGateOK = false
 
     self:UnsuppressNativeViewers()
 end
@@ -7127,6 +7536,18 @@ function buildAuraCatalog(displayType)
                 end
             end
         end
+        for _, def in ipairs(defs) do
+            local oids = orderedConfiguredIDs(def.cat)
+            if type(oids) == "table" then
+                for i = 1, #oids do
+                    local cdID = tonumber(oids[i])
+                    if cdID and not seen[cdID] then
+                        seen[cdID] = true
+                        order[#order + 1] = { cooldownID = cdID, staticDisplayType = def.displayType }
+                    end
+                end
+            end
+        end
         return order
     end
 
@@ -7632,9 +8053,13 @@ local function makeSyntheticItem(e, ad, unit)
 
     local catalogIcon = Auras._catalogDisplayTexture(e)
     local catalogName = Auras._catalogDisplayName(e)
-    local displayIcon = catalogIcon
-    if not ns._auraPresentTruthy(displayIcon) and not isSecret(rt.displayIcon) and rt.displayIcon ~= nil then
+    local displayIcon = Auras._resolveLiveVariantIcon(unit, ad and ad.auraInstanceID)
+    if not ns._auraPresentTruthy(displayIcon)
+       and not isSecret(rt.displayIcon) and ns._auraPresentTruthy(rt.displayIcon) then
         displayIcon = rt.displayIcon
+    end
+    if not ns._auraPresentTruthy(displayIcon) then
+        displayIcon = catalogIcon
     end
     if not ns._auraPresentTruthy(displayIcon) then
         displayIcon = Auras.PLACEHOLDER_ICON
@@ -7693,6 +8118,14 @@ local function readViewerChildIconTexture(child)
     return nil
 end
 
+function Auras._resolveLiveVariantIcon(unit, auraInstanceID)
+    if unit == nil or auraInstanceID == nil or isSecret(auraInstanceID) then return nil end
+    if not (C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID) then return nil end
+    local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, unit, auraInstanceID)
+    if ok and type(ad) == "table" and ns._auraPresentTruthy(ad.icon) then return ad.icon end
+    return nil
+end
+
 local function makeSyntheticItemFromViewerChild(entry, child)
     if type(entry) ~= "table" or type(child) ~= "table" then return nil end
 
@@ -7705,10 +8138,12 @@ local function makeSyntheticItemFromViewerChild(entry, child)
 
     local safeSpellID = entry.overrideTooltipSpellID or entry.overrideSpellID or entry.spellID
 
-    local iconTex = Auras._catalogDisplayTexture(entry)
+    local iconTex = Auras._resolveLiveVariantIcon(unit, aInst)
     if not ns._auraPresentTruthy(iconTex) then
-        local childTex = readViewerChildIconTexture(child)
-        if ns._auraPresentTruthy(childTex) then iconTex = childTex end
+        iconTex = readViewerChildIconTexture(child)
+    end
+    if not ns._auraPresentTruthy(iconTex) then
+        iconTex = Auras._catalogDisplayTexture(entry)
     end
     if not ns._auraPresentTruthy(iconTex) then
         iconTex = Auras.PLACEHOLDER_ICON
@@ -7744,6 +8179,34 @@ local function makeSyntheticItemFromViewerChild(entry, child)
     end
 
     return item
+end
+
+function Auras._makeSummonBarItem(entry, durObj)
+    if type(entry) ~= "table" then return nil end
+    local safeSpellID = entry.overrideTooltipSpellID or entry.overrideSpellID or entry.spellID
+    local iconTex = Auras._catalogDisplayTexture(entry)
+    if not ns._auraPresentTruthy(iconTex) then iconTex = Auras.PLACEHOLDER_ICON end
+    local barName = Auras._catalogDisplayName(entry)
+    if type(barName) ~= "string" or barName == "" then
+        barName = entry.displayName or entry.label
+    end
+    return {
+        _synthetic    = true,
+        _summon       = true,
+        _summonDurObj = durObj,
+        _entry        = entry,
+        cooldownID    = entry.cooldownID,
+        _spellID      = safeSpellID,
+        _iconTexture  = iconTex,
+        _barName      = barName,
+        stableEntryID = entry.stableEntryID,
+        cooldownInfo  = (type(entry.cooldownInfo) == "table" and entry.cooldownInfo) or {
+            spellID                = entry.spellID,
+            overrideSpellID        = entry.overrideSpellID,
+            overrideTooltipSpellID = entry.overrideTooltipSpellID,
+            linkedSpellIDs         = entry.linkedSpellIDs,
+        },
+    }
 end
 
 function Auras._makeSyntheticItemFromViewerChildDirect(child, displayType)
@@ -8061,6 +8524,23 @@ buildActiveFromCatalog = function(displayType, preview)
                         end
                     end
 
+                    if not emitted and not preview and forcePop
+                       and displayType == "TrackedBars"
+                       and Auras._summonSpecGateOK
+                       and Auras._summonSpellForEntry(e) then
+                        local okP, active, durObj, srcTag = pcall(Auras._resolveSummonBarPresence, e)
+                        if okP and active then
+                            local okI, item = pcall(Auras._makeSummonBarItem, e, durObj)
+                            if okI and item then
+                                out[#out + 1] = item
+                                emitted = true
+                                logEmitTransition(displayType, e, srcTag or "summonBar")
+                            else
+                                dlogItemErrorOnce(e, "makeSummonBarItem", item)
+                            end
+                        end
+                    end
+
                     if not emitted then
                         logEmitTransition(displayType, e, "none")
                     end
@@ -8119,6 +8599,7 @@ buildActiveFromCatalog = function(displayType, preview)
             end
         end
     end
+
     return out
 end
 
@@ -8221,8 +8702,14 @@ end
 function ensureAuraCacheFrame()
     if _auraCacheFrame then return end
     _auraCacheFrame = CreateFrame("Frame", "TenUIPlayerAuraCacheFrame")
-    _auraCacheFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
-        if event == "UNIT_AURA" then
+    Auras._auraCacheFrame = _auraCacheFrame
+    _auraCacheFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
+        if event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if arg1 == "player" then
+                pcall(Auras._handleSummonCast, arg3)
+            end
+            return
+        elseif event == "UNIT_AURA" then
             local unit, updateInfo = arg1, arg2
             if Auras._liveAura and Auras._liveAura.handleUnitAura then
                 pcall(Auras._liveAura.handleUnitAura, unit, updateInfo)
@@ -8255,6 +8742,7 @@ function ensureAuraCacheFrame()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED"
             or event == "COOLDOWN_VIEWER_DATA_LOADED"
             or event == "TRAIT_CONFIG_UPDATED" then
+            pcall(Auras._refreshSummonSpecGate)
             if Auras.RefreshTrackedAuraCatalog then
                 pcall(Auras.RefreshTrackedAuraCatalog, Auras)
             end
@@ -8269,6 +8757,7 @@ function ensureAuraCacheFrame()
             end
             rebuildPlayerAuraCache()
         else
+            pcall(Auras._refreshSummonSpecGate)
             if Auras.ScanBlizzardCDMAuras then
                 pcall(Auras.ScanBlizzardCDMAuras, Auras)
             end
@@ -8283,8 +8772,10 @@ function ensureAuraCacheFrame()
     end)
     if _auraCacheFrame.RegisterUnitEvent then
         pcall(_auraCacheFrame.RegisterUnitEvent, _auraCacheFrame, "UNIT_AURA", "player", "target")
+        pcall(_auraCacheFrame.RegisterUnitEvent, _auraCacheFrame, "UNIT_SPELLCAST_SUCCEEDED", "player")
     else
         _auraCacheFrame:RegisterEvent("UNIT_AURA")
+        pcall(_auraCacheFrame.RegisterEvent, _auraCacheFrame, "UNIT_SPELLCAST_SUCCEEDED")
     end
     _auraCacheFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
     _auraCacheFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -8294,6 +8785,7 @@ function ensureAuraCacheFrame()
     pcall(_auraCacheFrame.RegisterEvent, _auraCacheFrame, "PLAYER_ENTERING_BATTLEGROUND")
     pcall(_auraCacheFrame.RegisterEvent, _auraCacheFrame, "COOLDOWN_VIEWER_DATA_LOADED")
     pcall(_auraCacheFrame.RegisterEvent, _auraCacheFrame, "TRAIT_CONFIG_UPDATED")
+    pcall(Auras._refreshSummonSpecGate)
 end
 
 function Auras:GetTrackedAuraList(displayType)
