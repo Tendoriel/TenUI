@@ -15,6 +15,7 @@ local CONTAINERS = {
     { key = "UtilityCooldowns",   label = "Utility" },
     { key = "DefensiveCooldowns", label = "Defensive" },
     { key = "Trinkets",           label = "Trinkets" },
+    { key = "Consumables",        label = "Consumables" },
     { key = "Custom",             label = "Custom" },
 }
 
@@ -171,6 +172,8 @@ local function updateScanButtons()
     local visible
     if _selectedContainer == "Trinkets" then
         visible = { _scanTrinketsBtn }
+    elseif _selectedContainer == "Consumables" then
+        visible = {}
     elseif _selectedContainer == "Custom" then
         visible = { _scanSpellBookBtn }
     else
@@ -766,6 +769,416 @@ ns:RegisterMessage("SCANNER_CANDIDATES_UPDATED", function(_, container)
     end
 end)
 
+local function getConsumablesProfile()
+    if not ns.savedVarsReady then return nil end
+    local p = ns:GetProfile()
+    p.modules = p.modules or {}
+    p.modules.Bars = p.modules.Bars or {}
+    local bars = p.modules.Bars
+    bars.consumables = bars.consumables or {}
+    bars.consumables.enabledPresets = bars.consumables.enabledPresets or {}
+    bars.consumables.customItems    = bars.consumables.customItems or {}
+    if bars.consumables.showItemCount == nil then bars.consumables.showItemCount = true end
+    if bars.consumables.hideIfMissing == nil then bars.consumables.hideIfMissing = true end
+    if bars.consumables.showTooltip   == nil then bars.consumables.showTooltip   = true end
+    return bars.consumables
+end
+
+local function consumablesScanner()
+    return ns.Bars and ns.Bars.Scanner and ns.Bars.Scanner.Consumables
+end
+
+local function resyncConsumables()
+    local sc = consumablesScanner()
+    if sc and sc.Sync then sc:Sync() end
+    if ns.Bars and ns.Bars.RebuildRow then
+        ns.Bars:RebuildRow("Consumables")
+    end
+end
+
+local _consIconGen = 0
+local _consPendingLoads = {}
+local _consLoadFrame = nil
+
+local function ensureConsLoadFrame()
+    if _consLoadFrame then return _consLoadFrame end
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+    f:SetScript("OnEvent", function(_, _, loadedID)
+        local list = _consPendingLoads[loadedID]
+        if not list then return end
+        _consPendingLoads[loadedID] = nil
+        for i = 1, #list do
+            local target = list[i]
+            if target and target.gen == _consIconGen and type(target.apply) == "function" then
+                pcall(target.apply)
+            end
+        end
+    end)
+    _consLoadFrame = f
+    return f
+end
+
+local function consInBagsItemID(itemID, altItemIDs)
+    if ns.Bars and ns.Bars.ConsumableDisplayItemID then
+        local ok, id = pcall(ns.Bars.ConsumableDisplayItemID, ns.Bars, itemID, altItemIDs)
+        if ok and id then return id end
+    end
+    if C_Item and C_Item.GetItemCount then
+        local function count(id)
+            local okC, total = pcall(C_Item.GetItemCount, id, false, true)
+            if not okC then return 0 end
+            if type(issecretvalue) == "function" and issecretvalue(total) then return 0 end
+            return (type(total) == "number" and total > 0) and total or 0
+        end
+        if count(itemID) > 0 then return itemID end
+        if type(altItemIDs) == "table" then
+            for i = 1, #altItemIDs do
+                if count(altItemIDs[i]) > 0 then return altItemIDs[i] end
+            end
+        end
+    end
+    return itemID
+end
+
+local function resolveConsIconTex(presetIcon, itemID)
+    if presetIcon then return presetIcon end
+    return getItemIconTex(itemID)
+end
+
+local function requestConsItemLoad(itemID, gen, apply)
+    if not itemID then return end
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        pcall(C_Item.RequestLoadItemDataByID, itemID)
+    end
+    ensureConsLoadFrame()
+    local list = _consPendingLoads[itemID]
+    if not list then
+        list = {}
+        _consPendingLoads[itemID] = list
+    end
+    list[#list + 1] = { gen = gen, apply = apply }
+end
+
+local function createConsIconButton(parent, def)
+    local C = ns.UI
+    local Theme = C.Theme
+    local SIZE = 36
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(SIZE, SIZE)
+    btn:EnableMouse(true)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+    local bg = C.Rect(btn, "BACKGROUND", Theme.color.input)
+    bg:SetAllPoints(btn)
+
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+    icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    btn._iconTex = icon
+
+    local border = C.Border(btn, Theme.color.lineSoft)
+
+    local sel = {}
+    local function selSide()
+        local t = btn:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(unpack(Theme.color.accent))
+        sel[#sel + 1] = t
+        return t
+    end
+    local selTop, selBot, selLft, selRgt = selSide(), selSide(), selSide(), selSide()
+    selTop:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
+    selTop:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 1, 1)
+    selTop:SetHeight(2)
+    selBot:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", -1, -1)
+    selBot:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
+    selBot:SetHeight(2)
+    selLft:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
+    selLft:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", -1, -1)
+    selLft:SetWidth(2)
+    selRgt:SetPoint("TOPRIGHT", btn, "TOPRIGHT", 1, 1)
+    selRgt:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
+    selRgt:SetWidth(2)
+    local function selShown(shown)
+        for i = 1, #sel do sel[i]:SetShown(shown) end
+    end
+
+    local function applyTexture(tex)
+        if tex then
+            icon:SetTexture(tex)
+        else
+            icon:SetColorTexture(0.18, 0.20, 0.28, 1)
+        end
+    end
+
+    local resolvedID = def.itemID
+    if def.altItemIDs then
+        resolvedID = consInBagsItemID(def.itemID, def.altItemIDs)
+    end
+    btn._tooltipItemID = resolvedID or def.itemID
+
+    local tex = resolveConsIconTex(def.icon, resolvedID)
+    applyTexture(tex)
+    if not tex then
+        local capturedID = resolvedID or def.itemID
+        local capturedGen = _consIconGen
+        requestConsItemLoad(capturedID, capturedGen, function()
+            applyTexture(resolveConsIconTex(def.icon, capturedID))
+        end)
+    end
+
+    local function applyState(on)
+        btn._enabled = on and true or false
+        if on then
+            icon:SetDesaturated(false)
+            btn:SetAlpha(1)
+            selShown(true)
+            border.SetColor(unpack(Theme.color.line))
+        else
+            icon:SetDesaturated(true)
+            btn:SetAlpha(0.4)
+            selShown(false)
+            border.SetColor(unpack(Theme.color.lineSoft))
+        end
+    end
+    btn._applyState = applyState
+    applyState(def.enabled and true or false)
+
+    btn:SetScript("OnClick", function(self, button)
+        if button == "LeftButton" then
+            if type(def.onClick) == "function" then pcall(def.onClick, self) end
+        elseif button == "RightButton" then
+            if type(def.onRightClick) == "function" then pcall(def.onRightClick, self) end
+        end
+    end)
+
+    btn:SetScript("OnEnter", function(self)
+        if not self._enabled then
+            self:SetAlpha(0.7)
+        end
+        border.SetColor(unpack(Theme.color.violet))
+        local id = self._tooltipItemID
+        GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
+        local shown = false
+        if id then
+            shown = pcall(GameTooltip.SetItemByID, GameTooltip, id)
+        end
+        if not shown then
+            GameTooltip:SetText(tostring(def.name or "Item " .. tostring(id or "?")), 1, 1, 1, 1, true)
+        end
+        if def.hintLine then
+            GameTooltip:AddLine(def.hintLine, 0.6, 0.6, 1)
+        end
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function(self)
+        if self._applyState then self._applyState(self._enabled) end
+        GameTooltip:Hide()
+    end)
+
+    return btn
+end
+
+local function buildConsumablesIconGrid(parent, defs)
+    local SIZE = 36
+    local GAP  = 5
+    local pw = _widthOr(parent, 320)
+    local cols = math_max(1, math_floor(pw / (SIZE + GAP)))
+    local n = #defs
+    for idx = 1, n do
+        local def = defs[idx]
+        local col = (idx - 1) % cols
+        local row = math_floor((idx - 1) / cols)
+        local btn = createConsIconButton(parent, def)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", parent, "TOPLEFT",
+            col * (SIZE + GAP),
+            -row * (SIZE + GAP))
+    end
+    local numRows = math_max(1, math_ceil(n / cols))
+    return numRows * (SIZE + GAP) - GAP
+end
+
+local function buildConsumablesSection(sc, children)
+    local C = ns.UI
+    local Theme = C.Theme
+    local cp = getConsumablesProfile()
+    if not cp then return end
+
+    _consIconGen = _consIconGen + 1
+
+    children[#children + 1] = C.CreateSubSection(sc, "Tracked Consumables (click an icon to toggle)")
+
+    local presets = (ns.CONSUMABLE_PRESETS) or {}
+    local scanner = consumablesScanner()
+    if (not presets or #presets == 0) and scanner and scanner.GetPresets then
+        presets = scanner:GetPresets()
+    end
+
+    local gridDefs = {}
+
+    for _, pr in ipairs(presets) do
+        local capturedKey = pr.key
+        local label = pr.name or capturedKey
+        if pr.combatLockout then
+            label = label .. " (combat-locked)"
+        end
+        gridDefs[#gridDefs + 1] = {
+            icon       = pr.icon,
+            itemID     = pr.itemID,
+            altItemIDs = pr.altItemIDs,
+            name       = label,
+            enabled    = cp.enabledPresets[capturedKey] == true,
+            hintLine   = "Left-click to toggle tracking",
+            onClick    = function(btn)
+                local newVal = not (cp.enabledPresets[capturedKey] == true)
+                if scanner and scanner.SetPresetEnabled then
+                    scanner:SetPresetEnabled(capturedKey, newVal)
+                    if ns.Bars and ns.Bars.RebuildRow then
+                        ns.Bars:RebuildRow("Consumables")
+                    end
+                else
+                    cp.enabledPresets[capturedKey] = newVal and true or nil
+                    resyncConsumables()
+                end
+                btn._applyState(newVal)
+                updateStatusLabel((newVal and "Enabled " or "Disabled ") .. label)
+            end,
+        }
+    end
+
+    local custom = cp.customItems or {}
+    local customIDs = {}
+    for itemID in pairs(custom) do
+        local id = tonumber(itemID)
+        if id then customIDs[#customIDs + 1] = id end
+    end
+    table.sort(customIDs)
+
+    for _, id in ipairs(customIDs) do
+        local capturedID = id
+        local nameTxt = "Item " .. tostring(capturedID)
+        if C_Item and C_Item.GetItemNameByID then
+            local okN, nm = pcall(C_Item.GetItemNameByID, capturedID)
+            if okN and nm then nameTxt = nm .. " (" .. tostring(capturedID) .. ")" end
+        end
+        gridDefs[#gridDefs + 1] = {
+            itemID       = capturedID,
+            name         = nameTxt .. " (custom)",
+            enabled      = true,
+            hintLine     = "Right-click to remove",
+            onRightClick = function()
+                local s = consumablesScanner()
+                if s and s.RemoveCustomItem then
+                    s:RemoveCustomItem(capturedID)
+                    updateStatusLabel("Removed item " .. capturedID)
+                    rebuildPageDeferred()
+                end
+            end,
+        }
+    end
+
+    local gridFrame = CreateFrame("Frame", nil, sc)
+    children[#children + 1] = gridFrame
+    if #gridDefs == 0 then
+        gridFrame:SetHeight(10)
+    else
+        local h = buildConsumablesIconGrid(gridFrame, gridDefs)
+        gridFrame:SetHeight(math_max(h, 36))
+    end
+
+    children[#children + 1] = C.CreateSubSection(sc, "Custom Consumables (track any item by ID)")
+
+    local addRow = CreateFrame("Frame", nil, sc)
+    addRow:SetHeight(26)
+    children[#children + 1] = addRow
+
+    local addLabel = C.Text(addRow, C.Fonts.label, Theme.color.text, "Add by Item ID:")
+    addLabel:SetPoint("LEFT", addRow, "LEFT", 0, 0)
+
+    local addEBFrame = CreateFrame("Frame", nil, addRow)
+    addEBFrame:SetSize(80, 20)
+    addEBFrame:SetPoint("LEFT", addLabel, "RIGHT", 6, 0)
+    local addEBBg = C.Rect(addEBFrame, "BACKGROUND", Theme.color.input)
+    addEBBg:SetAllPoints(addEBFrame)
+    local addEBLine = addEBFrame:CreateTexture(nil, "BORDER")
+    addEBLine:SetColorTexture(unpack(Theme.color.lineSoft))
+    addEBLine:SetHeight(1)
+    addEBLine:SetPoint("BOTTOMLEFT", addEBFrame, "BOTTOMLEFT", 0, 0)
+    addEBLine:SetPoint("BOTTOMRIGHT", addEBFrame, "BOTTOMRIGHT", 0, 0)
+
+    local addEB = CreateFrame("EditBox", nil, addEBFrame)
+    addEB:SetPoint("TOPLEFT", addEBFrame, "TOPLEFT", 4, 0)
+    addEB:SetPoint("BOTTOMRIGHT", addEBFrame, "BOTTOMRIGHT", -4, 1)
+    addEB:SetFontObject(C.Fonts.value)
+    addEB:SetTextColor(unpack(Theme.color.textBright))
+    addEB:SetAutoFocus(false)
+    addEB:SetNumeric(true)
+    addEB:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    addEB:SetScript("OnEditFocusGained", function()
+        addEBLine:SetColorTexture(unpack(Theme.color.accent))
+    end)
+    addEB:SetScript("OnEditFocusLost", function()
+        addEBLine:SetColorTexture(unpack(Theme.color.lineSoft))
+    end)
+
+    local addBtn = C.CreateCompactButton(addRow, "Add", nil, 60)
+    addBtn:SetHeight(20)
+    addBtn:SetPoint("LEFT", addEBFrame, "RIGHT", 4, 0)
+    addBtn:SetScript("OnClick", function()
+        local id = tonumber(addEB:GetText() or "")
+        if not id or id <= 0 then
+            updateStatusLabel("Invalid item ID")
+            return
+        end
+        local s = consumablesScanner()
+        if s and s.AddCustomItem then
+            local ok, err = s:AddCustomItem(id)
+            if ok then
+                addEB:SetText("")
+                updateStatusLabel("Added item " .. id)
+                rebuildPageDeferred()
+            else
+                updateStatusLabel("Add failed: " .. tostring(err))
+            end
+        end
+    end)
+    addEB:SetScript("OnEnterPressed", function(self)
+        addBtn:Click()
+        self:ClearFocus()
+    end)
+
+    children[#children + 1] = C.CreateHelpText(sc,
+        "Added items appear in the grid above (always tracked). Right-click an item's icon to remove it.")
+
+    children[#children + 1] = C.CreateSubSection(sc, "Display Options")
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show Item Count",
+        function() return cp.showItemCount ~= false end,
+        function(v)
+            cp.showItemCount = v and true or false
+            resyncConsumables()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Hide If Missing",
+        function() return cp.hideIfMissing ~= false end,
+        function(v)
+            cp.hideIfMissing = v and true or false
+            resyncConsumables()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show Tooltip On Hover",
+        function() return cp.showTooltip ~= false end,
+        function(v)
+            cp.showTooltip = v and true or false
+            resyncConsumables()
+        end
+    )
+end
+
 local function buildScannerPage(sc)
     _sc = sc
     local C = ns.UI
@@ -1012,12 +1425,17 @@ local function buildScannerPage(sc)
 
     updateScanButtons()
 
-    local hasEditableBar = currentRowKey() ~= nil
+    local isConsumables = _selectedContainer == "Consumables"
+    local hasEditableBar = (not isConsumables) and currentRowKey() ~= nil
     if not hasEditableBar then
         _candidateListFrame = nil
         _barLayoutListFrame = nil
         _barLayoutHeader    = nil
         _addSpellIDEditBox  = nil
+    end
+
+    if isConsumables then
+        buildConsumablesSection(sc, children)
     end
 
     if hasEditableBar then

@@ -4,10 +4,19 @@ local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local GameTooltip = GameTooltip
 local IsShiftKeyDown = IsShiftKeyDown
+local GetCursorPosition = GetCursorPosition
+local IsMouseButtonDown = IsMouseButtonDown
+local UIParent = UIParent
 local pairs = pairs
 local type = type
 local tonumber = tonumber
 local math = math
+local math_max = math.max
+local math_min = math.min
+local math_abs = math.abs
+local math_floor = math.floor
+
+local SHIFT_AXIS_THRESH = 3
 
 local EditMode = {}
 ns.EditMode = EditMode
@@ -68,44 +77,122 @@ local function setBorderColor(sides, c)
     end
 end
 
-local function overlayCenterRelative(self)
-    local fx, fy = self:GetCenter()
-    local p = self:GetParent()
-    local px, py
-    if p then px, py = p:GetCenter() end
-    if not fx or not fy or not px or not py then return nil end
-    return fx - px, fy - py
+local function anchorParent()
+    return ns.anchorParent or UIParent
+end
+
+local function cursorCenterRelative()
+    local scale = UIParent:GetEffectiveScale()
+    if not scale or scale == 0 then scale = 1 end
+    local mx, my = GetCursorPosition()
+    mx = mx / scale
+    my = my / scale
+    local pcx, pcy = anchorParent():GetCenter()
+    if not pcx or not pcy then return nil end
+    return mx - pcx, my - pcy, scale
+end
+
+local function snapAnchorLive(self, anchor, rawCX, rawCY)
+    local p = anchorParent()
+    local w = self._dragHalfW * 2
+    local h = self._dragHalfH * 2
+    local sx, sy, gx, gy = ns.Anchors:GetSnapPoint(rawCX, rawCY, w, h, anchor.anchorName)
+
+    local pw = p:GetWidth()  or UIParent:GetWidth()  or 1920
+    local ph = p:GetHeight() or UIParent:GetHeight() or 1080
+    local halfScreenW = pw * 0.5
+    local halfScreenH = ph * 0.5
+    sx = math_max(-halfScreenW + self._dragHalfW, math_min(halfScreenW - self._dragHalfW, sx))
+    sy = math_max(-halfScreenH + self._dragHalfH, math_min(halfScreenH - self._dragHalfH, sy))
+
+    anchor:ClearAllPoints()
+    anchor:SetPoint("CENTER", p, "CENTER", sx, sy)
+
+    self:ClearAllPoints()
+    self:SetAllPoints(anchor)
+
+    ns.Anchors:UpdateSnapGuides(gx, gy)
 end
 
 local function overlay_OnUpdate(self)
     local anchor = self.anchor
     if not anchor or not self._dragging then return end
-    local cx, cy = overlayCenterRelative(self)
+
+    local cx, cy = cursorCenterRelative()
     if not cx then return end
-    local _, _, gx, gy = ns.Anchors:GetSnapPoint(cx, cy,
-        self:GetWidth() or 0, self:GetHeight() or 0, anchor.anchorName)
-    ns.Anchors:UpdateSnapGuides(gx, gy)
+
+    local rawCX = cx + self._dragOffX
+    local rawCY = cy + self._dragOffY
+
+    if IsShiftKeyDown() then
+        if not self._shiftAxis then
+            local adx = math_abs(rawCX - self._dragStartCX)
+            local ady = math_abs(rawCY - self._dragStartCY)
+            if adx > SHIFT_AXIS_THRESH or ady > SHIFT_AXIS_THRESH then
+                self._shiftAxis = (adx >= ady) and "X" or "Y"
+            end
+        end
+        if self._shiftAxis == "X" then
+            rawCY = self._dragStartCY
+        elseif self._shiftAxis == "Y" then
+            rawCX = self._dragStartCX
+        end
+    else
+        self._shiftAxis = nil
+    end
+
+    snapAnchorLive(self, anchor, rawCX, rawCY)
+
+    if not IsMouseButtonDown("LeftButton") then
+        local stop = self:GetScript("OnDragStop")
+        if stop then stop(self) end
+    end
 end
 
 local function overlay_OnDragStart(self)
+    if InCombatLockdown() then return end
     if ns:AreAnchorsLocked() then return end
     local anchor = self.anchor
     if not anchor then return end
+
     self._dragging = true
     self._wasDrag = true
-    self:ClearAllPoints()
-    local p, _, rp, x, y = anchor:GetPoint(1)
-    if p then
-        self:SetPoint(p, anchor:GetParent(), rp or p, x or 0, y or 0)
+    self._shiftAxis = nil
+
+    local cx, cy = cursorCenterRelative()
+    if not cx then
+        self._dragging = false
+        return
+    end
+
+    local pcx, pcy = anchorParent():GetCenter()
+    local fcx, fcy = anchor:GetCenter()
+    local centerX, centerY
+    if fcx and fcy and pcx and pcy then
+        centerX = fcx - pcx
+        centerY = fcy - pcy
     else
-        self:SetPoint("CENTER", anchor:GetParent(), "CENTER", 0, 0)
+        local p, _, rp, x, y = anchor:GetPoint(1)
+        if p == "CENTER" and (rp == "CENTER" or rp == nil) then
+            centerX = x or 0
+            centerY = y or 0
+        else
+            centerX = 0
+            centerY = 0
+        end
     end
-    self:SetSize(anchor:GetWidth() or 200, anchor:GetHeight() or 32)
-    self:SetMovable(true)
-    self:StartMoving()
-    if ns.Anchors and ns.Anchors.IsSnapEnabled and ns.Anchors:IsSnapEnabled() then
-        self:SetScript("OnUpdate", overlay_OnUpdate)
-    end
+
+    self._dragOffX = centerX - cx
+    self._dragOffY = centerY - cy
+    self._dragStartCX = centerX
+    self._dragStartCY = centerY
+
+    self._dragHalfW = (anchor:GetWidth() or 200) * 0.5
+    self._dragHalfH = (anchor:GetHeight() or 32) * 0.5
+
+    snapAnchorLive(self, anchor, centerX, centerY)
+
+    self:SetScript("OnUpdate", overlay_OnUpdate)
 end
 
 local function overlay_OnDragStop(self)
@@ -114,32 +201,17 @@ local function overlay_OnDragStop(self)
         ns.Anchors:HideSnapGuides()
     end
     local anchor = self.anchor
+    self._dragging = false
+    self._shiftAxis = nil
     if not anchor then
-        self._dragging = false
         return
     end
-    self:StopMovingOrSizing()
-    self._dragging = false
-    if ns.Anchors and ns.Anchors.GetSnapPoint
-       and ns.Anchors.IsSnapEnabled and ns.Anchors:IsSnapEnabled() then
-        local cx, cy = overlayCenterRelative(self)
-        if cx then
-            local sx, sy = ns.Anchors:GetSnapPoint(cx, cy,
-                self:GetWidth() or 0, self:GetHeight() or 0, anchor.anchorName)
-            if sx ~= cx or sy ~= cy then
-                self:ClearAllPoints()
-                self:SetPoint("CENTER", anchor:GetParent(), "CENTER", sx, sy)
-            end
-        end
-    end
-    local livePoint, liveParent, liveRel, liveX, liveY = self:GetPoint(1)
-    if livePoint then
-        anchor:ClearAllPoints()
-        anchor:SetPoint(livePoint, anchor:GetParent(), liveRel or livePoint,
-            liveX or 0, liveY or 0)
-    end
+
+    local livePoint, _, liveRel, liveX, liveY = anchor:GetPoint(1)
+
     self:ClearAllPoints()
     self:SetAllPoints(anchor)
+
     if ns.Anchors and ns.Anchors.PushTrace then
         ns.Anchors:PushTrace(anchor.anchorName, "DRAGSTOP", {
             point = livePoint, rel = liveRel,
@@ -159,7 +231,7 @@ local function overlay_OnDragStop(self)
         if savedEntry then
             ns:Fire("ANCHOR_MOVED", anchor.anchorName, savedEntry.x or 0, savedEntry.y or 0)
         elseif liveX then
-            ns:Fire("ANCHOR_MOVED", anchor.anchorName, math.floor((liveX or 0) + 0.5), math.floor((liveY or 0) + 0.5))
+            ns:Fire("ANCHOR_MOVED", anchor.anchorName, math_floor((liveX or 0) + 0.5), math_floor((liveY or 0) + 0.5))
         end
     end
 end
@@ -234,6 +306,7 @@ end
 
 local function showNudges(overlay)
     if not overlay or not overlay.nudges then return end
+    if not overlay._selected then return end
     for _, b in pairs(overlay.nudges) do
         b:Show()
     end
@@ -381,7 +454,6 @@ end
 
 local function overlay_OnEnter(self)
     self._hover = true
-    showNudges(self)
     local anchor = self.anchor
     if not anchor then return end
     local label = anchor.def and anchor.def.label or anchor.anchorName
@@ -495,7 +567,9 @@ local function applyState()
             end
             o:EnableMouse(true)
             o:Show()
-            if not overlayFocused(o) then
+            if o._selected then
+                showNudges(o)
+            else
                 o._hover = false
                 hideNudges(o)
             end
@@ -513,6 +587,7 @@ local function applyState()
             end
         end
     end
+    ns:Fire("EDIT_MODE_CHANGED", editModeActive)
 end
 
 function EditMode:Enable()

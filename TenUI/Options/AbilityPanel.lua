@@ -146,6 +146,11 @@ local function buildAbilityPage(sc)
             else
                 pcall(ns.Glow.Clear, ns.Glow, previewHolder, "ready")
             end
+            if g.maxStacks and g.maxStacks.enabled == true then
+                pcall(ns.Glow.Set, ns.Glow, previewHolder, "maxStacks", glowOpts(g.maxStacks))
+            else
+                pcall(ns.Glow.Clear, ns.Glow, previewHolder, "maxStacks")
+            end
         end
     end
 
@@ -300,6 +305,84 @@ local function buildAbilityPage(sc)
     children[#children + 1] = C.CreateHelpText(sc,
         "Glows while the ability is ready (ignores the global cooldown). " ..
         "'Only in Combat' limits it to combat.")
+
+    children[#children + 1] = C.CreateSubSection(sc, "Max Stacks Glow")
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Max Stacks Glow Enabled",
+        function()
+            local ap = getAbilityProfile(spellID)
+            return ap.glow and ap.glow.maxStacks and ap.glow.maxStacks.enabled == true
+        end,
+        function(v)
+            local ap = getAbilityProfile(spellID)
+            ap.glow = ap.glow or {}
+            ap.glow.maxStacks = ap.glow.maxStacks or {}
+            ap.glow.maxStacks.enabled = v
+            if ns.Bars and ns.Bars._TickAll then
+                pcall(ns.Bars._TickAll, ns.Bars)
+            end
+            restylePreview()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Only in Combat",
+        function()
+            local ap = getAbilityProfile(spellID)
+            return ap.glow and ap.glow.maxStacks and ap.glow.maxStacks.combatOnly == true
+        end,
+        function(v)
+            local ap = getAbilityProfile(spellID)
+            ap.glow = ap.glow or {}
+            ap.glow.maxStacks = ap.glow.maxStacks or {}
+            ap.glow.maxStacks.combatOnly = v and true or false
+            if ns.Bars and ns.Bars._TickAll then
+                pcall(ns.Bars._TickAll, ns.Bars)
+            end
+        end
+    )
+
+    children[#children + 1] = C.CreateDropdownLikeList(sc, "Max Stacks Glow Style",
+        glowStyleValues("solid", true),
+        function()
+            local ap = getAbilityProfile(spellID)
+            local s = (ap.glow and ap.glow.maxStacks and ap.glow.maxStacks.style) or "solid"
+            if s == "blizzard" then s = "solid" end
+            return s
+        end,
+        function(v)
+            local ap = getAbilityProfile(spellID)
+            ap.glow = ap.glow or {}
+            ap.glow.maxStacks = ap.glow.maxStacks or {}
+            ap.glow.maxStacks.style = v
+            if ns.Bars and ns.Bars._TickAll then
+                pcall(ns.Bars._TickAll, ns.Bars)
+            end
+            restylePreview()
+        end
+    )
+
+    children[#children + 1] = C.CreateColorSwatch(sc, "Max Stacks Glow Color",
+        function()
+            local ap = getAbilityProfile(spellID)
+            local c = ap.glow and ap.glow.maxStacks and ap.glow.maxStacks.color
+            if c then return c[1], c[2], c[3], c[4] end
+            return 1, 0.5, 0, 1
+        end,
+        function(r, g, b, a)
+            local ap = getAbilityProfile(spellID)
+            ap.glow = ap.glow or {}
+            ap.glow.maxStacks = ap.glow.maxStacks or {}
+            ap.glow.maxStacks.color = { r, g, b, a }
+            if ns.Bars and ns.Bars._TickAll then
+                pcall(ns.Bars._TickAll, ns.Bars)
+            end
+            restylePreview()
+        end
+    )
+
+    children[#children + 1] = C.CreateHelpText(sc,
+        "Glows a charge ability when all its charges are available (at max stacks). " ..
+        "Only applies to abilities that have charges. 'Only in Combat' limits it to combat.")
 
     children[#children + 1] = C.CreateSubSection(sc, "On Cooldown State")
 

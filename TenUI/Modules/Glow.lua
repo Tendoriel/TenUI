@@ -10,8 +10,9 @@ local Glow = {}
 ns.Glow = Glow
 
 local PRIORITY = {
-    proc       = 4,
-    pandemic   = 3,
+    proc       = 5,
+    pandemic   = 4,
+    maxStacks  = 3,
     ready      = 2,
     activeAura = 1,
 }
@@ -19,6 +20,7 @@ local PRIORITY = {
 local CHANNEL = {
     proc       = "overlay",
     pandemic   = "outline",
+    maxStacks  = "overlay",
     ready      = "outline",
     activeAura = "outline",
 }
@@ -59,12 +61,14 @@ end
 local INTENT_STYLE = {
     proc       = "blizzard",
     pandemic   = "pixel",
+    maxStacks  = "solid",
     ready      = "border",
     activeAura = "pixel",
 }
 
 local INTENT_COLOR = {
     pandemic   = { 1.0, 0.6,  0.0, 0.9  },
+    maxStacks  = { 1.0, 0.5,  0.0, 1.0  },
     ready      = { 1.0, 0.7,  0.0, 1.0  },
     activeAura = { 1.0, 0.85, 0.3, 0.85 },
 }
@@ -626,7 +630,7 @@ function Glow:ResolveAll()
     end
 end
 
-local INTENT_ORDER = { "proc", "pandemic", "ready", "activeAura" }
+local INTENT_ORDER = { "proc", "pandemic", "maxStacks", "ready", "activeAura" }
 
 function Glow:GetDumpLines()
     local lines = {}

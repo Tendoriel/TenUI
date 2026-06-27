@@ -628,11 +628,49 @@ function Icon:GetState()
     return self._state
 end
 
+function Icon:SetItemTooltip(itemID, enabled)
+    local f = self.frame
+    if not f then return end
+    if enabled and itemID then
+        f._tooltipItemID = itemID
+        pcall(f.EnableMouse, f, true)
+        if type(f.SetMouseClickEnabled) == "function" then
+            pcall(f.SetMouseClickEnabled, f, false)
+        end
+        if not f._itemTooltipHooked then
+            f._itemTooltipHooked = true
+            f:SetScript("OnEnter", function(selfFrame)
+                local id = selfFrame._tooltipItemID
+                if not id then return end
+                GameTooltip:SetOwner(selfFrame, "ANCHOR_TOPRIGHT")
+                local ok = pcall(GameTooltip.SetItemByID, GameTooltip, id)
+                if ok then GameTooltip:Show() end
+            end)
+            f:SetScript("OnLeave", function()
+                GameTooltip:Hide()
+            end)
+        end
+    else
+        f._tooltipItemID = nil
+        if f._itemTooltipHooked then
+            f._itemTooltipHooked = nil
+            f:SetScript("OnEnter", nil)
+            f:SetScript("OnLeave", nil)
+        end
+        pcall(f.EnableMouse, f, false)
+    end
+end
+
 function Icon:Destroy()
     local f = self.frame
     if f then
         if f.cooldown then
             f.cooldown:Clear()
+        end
+        if f._itemTooltipHooked then
+            f._itemTooltipHooked = nil
+            f:SetScript("OnEnter", nil)
+            f:SetScript("OnLeave", nil)
         end
         f:Hide()
         f:ClearAllPoints()

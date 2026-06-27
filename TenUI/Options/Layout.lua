@@ -80,6 +80,20 @@ local function getVisualsProfile(anchorName)
     return p.modules.Layout.visuals[anchorName]
 end
 
+local function getVisibilityProfile(anchorName)
+    local vp = getVisualsProfile(anchorName)
+    vp.visibility = vp.visibility or {}
+    vp.visibility.state = vp.visibility.state or "always"
+    vp.visibility.options = vp.visibility.options or {}
+    return vp.visibility
+end
+
+local function requestVisibilityUpdate()
+    if ns.Visibility and ns.Visibility.ScheduleUpdate then
+        ns.Visibility:ScheduleUpdate()
+    end
+end
+
 local function applyVisualSize(anchorName)
     if ns.Bars and ns.Bars.rows then
         for _, row in pairs(ns.Bars.rows) do
@@ -177,7 +191,7 @@ local function getSnapProfile()
     p.modules.Layout = p.modules.Layout or {}
     p.modules.Layout.snapping = p.modules.Layout.snapping or {
         enabled      = false,
-        distance     = 12,
+        distance     = 6,
         gap          = 2,
         showLines    = true,
         snapToCenter = true,
@@ -610,11 +624,80 @@ local function buildLayoutPage(sc)
             local ap = getSelectedAnchorProfile()
             ap.alpha = v
             if not InCombatLockdown() then
-                local rt = ns:GetAnchor(_selectedAnchor)
-                if rt and rt.frame then
-                    rt.frame:SetAlpha(v)
+                if ns.Anchors and ns.Anchors.ApplyAlpha then
+                    ns.Anchors:ApplyAlpha(_selectedAnchor, v)
+                else
+                    local rt = ns:GetAnchor(_selectedAnchor)
+                    if rt and rt.frame then
+                        rt.frame:SetAlpha(v)
+                    end
                 end
             end
+        end
+    )
+
+    children[#children + 1] = C.CreateSection(sc, "Visibility")
+    children[#children + 1] = C.CreateHelpText(sc,
+        "Controls when this bar shows. The State dropdown is the base rule; each option below independently HIDES the bar when its condition is met. Module logic (cast bar idle, expired auras, empty rows) still applies on top.")
+
+    do
+        local stateItems
+        if ns.Visibility and ns.Visibility.STATE_LABELS then
+            stateItems = {}
+            for i = 1, #ns.Visibility.STATE_LABELS do
+                stateItems[#stateItems + 1] = ns.Visibility.STATE_LABELS[i]
+            end
+        else
+            stateItems = {
+                { key = "always",        label = "Always" },
+                { key = "never",         label = "Never" },
+                { key = "in_combat",     label = "In Combat" },
+                { key = "out_of_combat", label = "Out of Combat" },
+                { key = "in_raid",       label = "In Raid" },
+                { key = "in_party",      label = "In Party" },
+                { key = "solo",          label = "Solo" },
+            }
+        end
+        children[#children + 1] = C.CreateDropdownLikeList(sc, "State", stateItems,
+            function()
+                local vis = getVisibilityProfile(_selectedAnchor)
+                return vis.state or "always"
+            end,
+            function(k)
+                local vis = getVisibilityProfile(_selectedAnchor)
+                vis.state = (type(k) == "string" and k ~= "") and k or "always"
+                requestVisibilityUpdate()
+            end
+        )
+    end
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Only Show in Instances",
+        function()
+            return getVisibilityProfile(_selectedAnchor).options.onlyInstances == true
+        end,
+        function(v)
+            getVisibilityProfile(_selectedAnchor).options.onlyInstances = v and true or false
+            requestVisibilityUpdate()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Hide in Housing",
+        function()
+            return getVisibilityProfile(_selectedAnchor).options.hideHousing == true
+        end,
+        function(v)
+            getVisibilityProfile(_selectedAnchor).options.hideHousing = v and true or false
+            requestVisibilityUpdate()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Hide when Mounted",
+        function()
+            return getVisibilityProfile(_selectedAnchor).options.hideMounted == true
+        end,
+        function(v)
+            getVisibilityProfile(_selectedAnchor).options.hideMounted = v and true or false
+            requestVisibilityUpdate()
         end
     )
 
@@ -662,7 +745,7 @@ local function buildLayoutPage(sc)
     )
 
     children[#children + 1] = C.CreateSlider(sc, "Snap Distance (px)", 2, 64, 1,
-        function() return getSnapProfile().distance or 12 end,
+        function() return getSnapProfile().distance or 6 end,
         function(v) getSnapProfile().distance = math.floor(v + 0.5) end
     )
 

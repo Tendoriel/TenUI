@@ -91,6 +91,7 @@ local PAGE_ORDER = {
     "glow",
     "resources",
     "castbar",
+    "dragonriding",
     "profiles",
     "information",
 }

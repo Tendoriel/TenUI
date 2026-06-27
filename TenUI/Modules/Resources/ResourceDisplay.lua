@@ -1916,6 +1916,16 @@ local function secondary_LayoutPips()
     end
 end
 
+local SPEC_WARLOCK_DESTRUCTION = 267
+
+local function secondary_ShardsIsDestruction()
+    if not (GetSpecialization and GetSpecializationInfo) then return false end
+    local okIdx, specIdx = pcall(GetSpecialization)
+    if not (okIdx and specIdx and specIdx > 0) then return false end
+    local okId, specId = pcall(GetSpecializationInfo, specIdx)
+    return okId and specId == SPEC_WARLOCK_DESTRUCTION
+end
+
 local function secondary_RefreshShards()
     local desc = Secondary.desc
     if not desc then return end
@@ -1926,8 +1936,8 @@ local function secondary_RefreshShards()
 
     secondary_UpdateCountFromPower(pt)
 
-    local total = UnitPower("player", pt, true)
-    if isSecret(total) then
+    local modCur = UnitPower("player", pt)
+    if isSecret(modCur) then
         local pct = 0
         local scaleTo100 = getScaleTo100()
         if UnitPowerPercent and scaleTo100 then
@@ -1945,7 +1955,7 @@ local function secondary_RefreshShards()
         return
     end
 
-    if type(total) ~= "number" then
+    if type(modCur) ~= "number" then
         for i = 1, #Secondary.pips do
             local p = Secondary.pips[i]
             if p then p:SetValue(0) end
@@ -1953,13 +1963,36 @@ local function secondary_RefreshShards()
         return
     end
 
-    local mod = (UnitPowerDisplayMod and UnitPowerDisplayMod(pt)) or 1
-    if type(mod) ~= "number" or mod <= 0 then mod = 1 end
+    local whole = math_floor(modCur + 0.5)
+
+    local partialFrac = 0
+    local partialIndex = nil
+    if powerName == "SoulShards" and secondary_ShardsIsDestruction() then
+        local mod = (UnitPowerDisplayMod and UnitPowerDisplayMod(pt)) or 1
+        if type(mod) ~= "number" or mod <= 0 then mod = 1 end
+        local total = UnitPower("player", pt, true)
+        if type(total) == "number" and not isSecret(total) then
+            local exact = total / mod
+            local eps = (MathUtil and MathUtil.Epsilon) or 0.000001
+            whole = math_floor(exact + eps)
+            local rem = exact - whole
+            if rem > eps then
+                partialFrac = math_min(1, math_max(0, rem))
+                partialIndex = whole + 1
+            end
+        end
+    end
+
     for i = 1, #Secondary.pips do
         local p = Secondary.pips[i]
         if p then
-            local pipUnits = math_min(mod, math_max(0, total - (i - 1) * mod))
-            p:SetValue(pipUnits / mod)
+            if i <= whole then
+                p:SetValue(1)
+            elseif partialIndex and i == partialIndex then
+                p:SetValue(partialFrac)
+            else
+                p:SetValue(0)
+            end
         end
     end
 end

@@ -39,6 +39,9 @@ local POLL_INTERVAL_SEC = 0.2
 local _cdSnapshot = {}
 local _castReadyLogAt = {}
 
+local _consumableLockout = {}
+local _consumableResetUntil = 0
+
 local _castStateAt, _castStateVal
 local function playerHasCastOrChannel()
     local now = GetTime()
@@ -70,6 +73,7 @@ local ROW_NAMES = {
     "UtilityCooldowns",
     "DefensiveCooldowns",
     "Trinkets",
+    "Consumables",
 }
 
 local ROW_ALIASES = {
@@ -84,6 +88,10 @@ local ROW_ALIASES = {
     defensivecooldowns = "DefensiveCooldowns",
     trinket            = "Trinkets",
     trinkets           = "Trinkets",
+    consumable         = "Consumables",
+    consumables        = "Consumables",
+    consumes           = "Consumables",
+    potions            = "Consumables",
 }
 
 local DEFAULTS = {
@@ -99,6 +107,13 @@ local DEFAULTS = {
     scopes               = {},
     customBars           = {},
     customBarsNextID     = 1,
+    consumables          = {
+        enabledPresets = {},
+        customItems    = {},
+        showItemCount  = true,
+        hideIfMissing  = true,
+        showTooltip    = true,
+    },
 }
 
 local KNOWN_SUMMON_DURATIONS = {
@@ -119,6 +134,77 @@ local KNOWN_SUMMON_DURATIONS = {
 local CAST_COUNT_SPELLS = {
     [196277] = true,
 }
+
+local CONSUMABLE_PRESETS = {
+    {
+        key        = "healthstone",
+        name       = "Healthstone",
+        icon       = 538745,
+        itemID     = 5512,
+        spellID    = 6262,
+        altItemIDs = { 224464 },
+        combatLockout = true,
+    },
+    {
+        key        = "demonic_healthstone",
+        name       = "Demonic Healthstone",
+        icon       = 538745,
+        itemID     = 224464,
+        spellID    = 452930,
+        altItemIDs = { 5512 },
+        combatLockout = true,
+    },
+    {
+        key        = "silvermoon_health",
+        name       = "Silvermoon Health Potion",
+        icon       = 7548909,
+        itemID     = 241304,
+        altItemIDs = { 241305 },
+        combatLockout = true,
+    },
+    {
+        key        = "lightfused_mana",
+        name       = "Lightfused Mana Potion",
+        icon       = 7548907,
+        itemID     = 241300,
+        altItemIDs = { 245917, 245916, 241301 },
+    },
+    {
+        key        = "lights_potential",
+        name       = "Light's Potential",
+        icon       = 7548911,
+        itemID     = 241308,
+        altItemIDs = { 245898, 245897, 241309 },
+    },
+    {
+        key        = "potion_recklessness",
+        name       = "Potion of Recklessness",
+        icon       = 7548916,
+        itemID     = 241288,
+        altItemIDs = { 241289, 245902, 245903 },
+    },
+    {
+        key        = "invis_potion",
+        name       = "Invisibility Potion",
+        icon       = 134764,
+        itemID     = 211756,
+    },
+}
+
+ns.CONSUMABLE_PRESETS = CONSUMABLE_PRESETS
+
+local CONSUMABLE_PRESETS_BY_KEY = {}
+for i = 1, #CONSUMABLE_PRESETS do
+    CONSUMABLE_PRESETS_BY_KEY[CONSUMABLE_PRESETS[i].key] = CONSUMABLE_PRESETS[i]
+end
+
+local CONSUMABLE_LOCKOUT_SPELLS = {}
+for i = 1, #CONSUMABLE_PRESETS do
+    local pr = CONSUMABLE_PRESETS[i]
+    if pr.combatLockout and pr.spellID then
+        CONSUMABLE_LOCKOUT_SPELLS[pr.spellID] = pr.key
+    end
+end
 
 local function dlog(fmt, ...)
     if ns.Debug and ns.Debug.Verbose then
@@ -835,6 +921,209 @@ end
 
 Bars.Scanner.Trinkets = TrinketScanner
 
+local function getConsumablesProfile()
+    local p = getBarsProfile()
+    if not p then return nil end
+    if type(p.consumables) ~= "table" then
+        p.consumables = {
+            enabledPresets = {},
+            customItems    = {},
+            showItemCount  = true,
+            hideIfMissing  = true,
+            showTooltip    = true,
+        }
+    end
+    local c = p.consumables
+    if type(c.enabledPresets) ~= "table" then c.enabledPresets = {} end
+    if type(c.customItems) ~= "table" then c.customItems = {} end
+    return c
+end
+
+local function itemCountFor(itemID)
+    if not (C_Item and C_Item.GetItemCount and itemID) then return 0 end
+    local ok, total = pcall(C_Item.GetItemCount, itemID, false, true)
+    if not ok then return 0 end
+    if isSecret(total) then return 0 end
+    return (type(total) == "number" and total > 0) and total or 0
+end
+
+local function consumableTotalCount(itemID, altItemIDs)
+    local total = itemCountFor(itemID)
+    if type(altItemIDs) == "table" then
+        for i = 1, #altItemIDs do
+            total = total + itemCountFor(altItemIDs[i])
+        end
+    end
+    return total
+end
+
+local function consumableDisplayItemID(itemID, altItemIDs)
+    if itemCountFor(itemID) > 0 then return itemID end
+    if type(altItemIDs) == "table" then
+        for i = 1, #altItemIDs do
+            if itemCountFor(altItemIDs[i]) > 0 then return altItemIDs[i] end
+        end
+    end
+    return itemID
+end
+
+function Bars:ConsumableDisplayItemID(itemID, altItemIDs)
+    return consumableDisplayItemID(itemID, altItemIDs)
+end
+
+local ConsumablesScanner = {}
+
+local function buildConsumableEntries()
+    local c = getConsumablesProfile()
+    if not c then return {} end
+    local out = {}
+    local seen = {}
+
+    for i = 1, #CONSUMABLE_PRESETS do
+        local pr = CONSUMABLE_PRESETS[i]
+        if c.enabledPresets[pr.key] == true then
+            local displayID = consumableDisplayItemID(pr.itemID, pr.altItemIDs)
+            if not seen[displayID] then
+                seen[displayID] = true
+                out[#out + 1] = {
+                    type          = "item",
+                    id            = displayID,
+                    presetKey     = pr.key,
+                    baseItemID    = pr.itemID,
+                    altItemIDs    = pr.altItemIDs,
+                    combatLockout = pr.combatLockout and true or nil,
+                    consumable    = true,
+                }
+            end
+        end
+    end
+
+    for itemID in pairs(c.customItems) do
+        local id = tonumber(itemID)
+        if id and id > 0 and not seen[id] then
+            seen[id] = true
+            out[#out + 1] = {
+                type       = "item",
+                id         = id,
+                customItem = true,
+                consumable = true,
+            }
+        end
+    end
+
+    return out
+end
+
+local function consumableEntryInBags(entry)
+    local total = consumableTotalCount(entry.baseItemID or entry.id, entry.altItemIDs)
+    return total > 0
+end
+
+function ConsumablesScanner:Sync()
+    local rp = getRowProfile("Consumables")
+    if not rp then return false, "profile not ready" end
+    local c = getConsumablesProfile()
+    if not c then return false, "profile not ready" end
+
+    local entries = buildConsumableEntries()
+
+    wipe(rp.candidates)
+    for i = 1, #entries do
+        rp.candidates[i] = {
+            type          = entries[i].type,
+            id            = entries[i].id,
+            presetKey     = entries[i].presetKey,
+            baseItemID    = entries[i].baseItemID,
+            altItemIDs    = entries[i].altItemIDs,
+            combatLockout = entries[i].combatLockout,
+            customItem    = entries[i].customItem,
+            consumable    = true,
+        }
+    end
+
+    local hideMissing = c.hideIfMissing ~= false
+    local desired = {}
+    for i = 1, #entries do
+        local e = entries[i]
+        local include = true
+        if hideMissing and not consumableEntryInBags(e) then
+            include = false
+        end
+        if include then
+            desired[#desired + 1] = e
+        end
+    end
+
+    local cur = rp.displayed
+    local changed = (#cur ~= #desired)
+    if not changed then
+        for i = 1, #desired do
+            local a, b = cur[i], desired[i]
+            if not (a and b and a.type == b.type and tonumber(a.id) == tonumber(b.id)) then
+                changed = true
+                break
+            end
+        end
+    end
+
+    if changed then
+        wipe(rp.displayed)
+        for i = 1, #desired do rp.displayed[i] = desired[i] end
+        local row = Bars.rows and Bars.rows["Consumables"]
+        if row and row.Rebuild then
+            row:Rebuild()
+        end
+    end
+
+    dlog("Consumables:Sync: %d candidates, %d displayed (changed=%s)",
+         #rp.candidates, #rp.displayed, tostring(changed))
+    return true, changed and "updated" or "noop"
+end
+
+function ConsumablesScanner:SetPresetEnabled(key, enabled)
+    if type(key) ~= "string" then return false end
+    if not CONSUMABLE_PRESETS_BY_KEY[key] then return false end
+    local c = getConsumablesProfile()
+    if not c then return false end
+    c.enabledPresets[key] = enabled and true or nil
+    self:Sync()
+    return true
+end
+
+function ConsumablesScanner:IsPresetEnabled(key)
+    local c = getConsumablesProfile()
+    if not c then return false end
+    return c.enabledPresets[key] == true
+end
+
+function ConsumablesScanner:AddCustomItem(itemID)
+    itemID = tonumber(itemID)
+    if not itemID or itemID <= 0 then return false, "invalid item ID" end
+    local c = getConsumablesProfile()
+    if not c then return false, "profile not ready" end
+    if c.customItems[itemID] == true then return false, "already added" end
+    c.customItems[itemID] = true
+    self:Sync()
+    return true
+end
+
+function ConsumablesScanner:RemoveCustomItem(itemID)
+    itemID = tonumber(itemID)
+    if not itemID then return false, "invalid item ID" end
+    local c = getConsumablesProfile()
+    if not c then return false, "profile not ready" end
+    if not c.customItems[itemID] then return false, "not added" end
+    c.customItems[itemID] = nil
+    self:Sync()
+    return true
+end
+
+function ConsumablesScanner:GetPresets()
+    return CONSUMABLE_PRESETS
+end
+
+Bars.Scanner.Consumables = ConsumablesScanner
+
 local function abilityKeyCandidates(spellID)
     local out = { spellID }
     if C_SpellBook and C_SpellBook.FindBaseSpellByID then
@@ -942,6 +1231,51 @@ local function applyReadyGlow(icon, spellID, ready)
     elseif icon._readyGlowOn then
         ns.Glow:Clear(icon, "ready")
         icon._readyGlowOn = nil
+    end
+end
+
+local function applyMaxStacksGlow(icon, spellID, atMax)
+    if not (icon and ns.Glow) then return end
+    local g = abilityGlowOpts(spellID, "maxStacks")
+    local enabled = type(g) == "table" and g.enabled == true
+    if enabled and atMax and g.combatOnly == true
+       and not (InCombatLockdown and InCombatLockdown()) then
+        atMax = false
+    end
+    if enabled and atMax then
+        local opts = icon._maxStacksGlowOpts
+        if not opts then
+            opts = {}
+            icon._maxStacksGlowOpts = opts
+        end
+        opts.reason = "maxStacks:" .. tostring(spellID)
+        local gdStyle, gdColor
+        if ns.Glow.GetGlobalDefault then
+            gdStyle, gdColor = ns.Glow:GetGlobalDefault("maxStacks")
+        end
+        if type(g.style) == "string" then
+            opts.style = g.style
+        else
+            opts.style = gdStyle or "solid"
+        end
+        if opts.style == "blizzard" then
+            opts.style = "solid"
+        end
+        local c = g.color
+        if type(c) ~= "table" then c = gdColor end
+        if type(c) == "table" then
+            opts.colorR = tonumber(c[1]) or 1.0
+            opts.colorG = tonumber(c[2]) or 0.5
+            opts.colorB = tonumber(c[3]) or 0.0
+            opts.colorA = tonumber(c[4]) or 1.0
+        else
+            opts.colorR, opts.colorG, opts.colorB, opts.colorA = 1.0, 0.5, 0.0, 1.0
+        end
+        ns.Glow:Set(icon, "maxStacks", opts)
+        icon._maxStacksGlowOn = true
+    elseif icon._maxStacksGlowOn then
+        ns.Glow:Clear(icon, "maxStacks")
+        icon._maxStacksGlowOn = nil
     end
 end
 
@@ -1399,6 +1733,11 @@ local function buildIconsForList(container, displayedList, showText, rowName)
         if cdTextStyle and icon.ApplyCooldownTextStyle then
             icon:ApplyCooldownTextStyle(cdTextStyle)
         end
+        if entry.type == "item" and entry.consumable and icon.SetItemTooltip then
+            local c = getConsumablesProfile()
+            local wantTip = not (c and c.showTooltip == false)
+            icon:SetItemTooltip(entry.id, wantTip)
+        end
     end
     return out
 end
@@ -1662,6 +2001,7 @@ function Row:RefreshIcon(icon, entry, desat)
             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
             icon._readyNowCached = false
             applyReadyGlow(icon, sid, false)
+            applyMaxStacksGlow(icon, sid, false)
             return
         end
         if summonDur > 0 and icon._summonActiveUntil then
@@ -1696,6 +2036,7 @@ function Row:RefreshIcon(icon, entry, desat)
                             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
                             icon._readyNowCached = false
                             applyReadyGlow(icon, sid, false)
+                            applyMaxStacksGlow(icon, sid, false)
                             return
                         end
                     end
@@ -1720,6 +2061,7 @@ function Row:RefreshIcon(icon, entry, desat)
             icon:SetStackTextRaw("")
             icon._readyNowCached = false
             applyReadyGlow(icon, sid, false)
+            applyMaxStacksGlow(icon, sid, false)
             return
         end
 
@@ -1931,13 +2273,22 @@ function Row:RefreshIcon(icon, entry, desat)
         end
         applyReadyGlow(icon, sid, readyNow)
 
+        local atMaxStacks = isChargeSpell and not chargesInfo.isActive
+        applyMaxStacksGlow(icon, sid, atMaxStacks)
+
     elseif entry.type == "item" then
         local iid = entry.id
         if not iid then return end
         local tex = getItemTexture(iid)
         if tex then icon:SetTexture(tex) end
-        icon:SetDesaturated(false)
         icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+
+        if entry.consumable then
+            self:RefreshConsumableIcon(icon, entry, iid)
+            return
+        end
+
+        icon:SetDesaturated(false)
 
         local start, duration
         if C_Item and C_Item.GetItemCooldown then
@@ -1970,6 +2321,89 @@ function Row:RefreshIcon(icon, entry, desat)
             icon:ClearCooldown()
         end
     end
+end
+
+local function readConsumableCooldown(itemID)
+    local start, duration
+    if C_Container and C_Container.GetItemCooldown then
+        local ok, s, d = pcall(C_Container.GetItemCooldown, itemID)
+        if ok then start, duration = s, d end
+    end
+    if not (type(start) == "number" and type(duration) == "number"
+            and not isSecret(start) and not isSecret(duration) and duration > 1.5)
+       and C_Item and C_Item.GetItemCooldown then
+        local ok, s, d = pcall(C_Item.GetItemCooldown, itemID)
+        if ok then start, duration = s, d end
+    end
+    if type(start) == "number" and type(duration) == "number"
+       and not isSecret(start) and not isSecret(duration) and duration > 1.5 then
+        return start, duration
+    end
+    return nil
+end
+
+function Row:RefreshConsumableIcon(icon, entry, displayID)
+    local now = GetTime()
+
+    local start, duration
+    if now >= _consumableResetUntil then
+        start, duration = readConsumableCooldown(displayID)
+        if not start and type(entry.altItemIDs) == "table" then
+            for i = 1, #entry.altItemIDs do
+                start, duration = readConsumableCooldown(entry.altItemIDs[i])
+                if start then break end
+            end
+        end
+    end
+
+    if start and duration then
+        local dur = getDurationFor(icon)
+        if dur and dur.SetTimeFromStart then
+            local okSet = pcall(dur.SetTimeFromStart, dur, start, duration, 1)
+            if okSet then
+                icon:SetCooldown(dur)
+                icon._consumeCdEnd = start + duration
+            else
+                icon:ClearCooldown()
+                icon._consumeCdEnd = nil
+            end
+        else
+            icon:ClearCooldown()
+            icon._consumeCdEnd = nil
+        end
+    elseif not (icon._consumeCdEnd and now < icon._consumeCdEnd) then
+        icon:ClearCooldown()
+        icon._consumeCdEnd = nil
+    end
+
+    local itemOnCD = icon._consumeCdEnd and now < icon._consumeCdEnd or false
+
+    local total = consumableTotalCount(entry.baseItemID or displayID, entry.altItemIDs)
+
+    local showCount = true
+    local c = getConsumablesProfile()
+    if c and c.showItemCount == false then showCount = false end
+    local displayCount
+    if showCount then
+        if total > 1 then
+            displayCount = total
+        elseif total == 1 and entry.combatLockout then
+            displayCount = total
+        end
+    end
+    if displayCount then
+        icon:SetStackTextRaw(displayCount)
+    else
+        icon:SetStackTextRaw("")
+    end
+
+    local lockedOut = false
+    if entry.presetKey and _consumableLockout[entry.presetKey] then
+        lockedOut = true
+    end
+
+    local shouldDesat = (total == 0 or itemOnCD or lockedOut) and true or false
+    icon:SetDesaturated(shouldDesat)
 end
 
 function Row:SnapshotCooldowns()
@@ -2067,6 +2501,13 @@ function Row:Enable()
                             end
                         end
                     end
+                    if row.name == "Consumables" then
+                        local key = CONSUMABLE_LOCKOUT_SPELLS[spellID]
+                        if key and InCombatLockdown and InCombatLockdown() then
+                            _consumableLockout[key] = true
+                            dlog("consumable lockout SET preset=%s spell=%s", tostring(key), tostring(spellID))
+                        end
+                    end
                 end
                 row:RequestRefresh()
                 return
@@ -2078,6 +2519,10 @@ function Row:Enable()
                 return
             end
             if event == "PLAYER_REGEN_ENABLED" then
+                if row.name == "Consumables" and next(_consumableLockout) then
+                    wipe(_consumableLockout)
+                    dlog("consumable lockout CLEARED (combat end)")
+                end
                 row:MaybeRebuildForHidden()
                 row:RequestRefresh()
                 return
@@ -2088,6 +2533,12 @@ function Row:Enable()
                 wipe(_resourceGatedCache)
                 if row.name == "Trinkets" then
                     local scanner = Bars.Scanner and Bars.Scanner.Trinkets
+                    if scanner and scanner.Sync then
+                        scanner:Sync()
+                    end
+                end
+                if row.name == "Consumables" then
+                    local scanner = Bars.Scanner and Bars.Scanner.Consumables
                     if scanner and scanner.Sync then
                         scanner:Sync()
                     end
@@ -2107,6 +2558,37 @@ function Row:Enable()
                 row:RequestRefresh()
                 return
             end
+            if event == "BAG_UPDATE_DELAYED" then
+                if row.name == "Consumables" then
+                    local scanner = Bars.Scanner and Bars.Scanner.Consumables
+                    if scanner and scanner.Sync then
+                        scanner:Sync()
+                    end
+                end
+                row:RequestRefresh()
+                return
+            end
+            if event == "ENCOUNTER_END" or event == "CHALLENGE_MODE_START" then
+                if row.name == "Consumables" then
+                    _consumableResetUntil = GetTime() + 3
+                    if row.icons then
+                        for i = 1, #row.icons do
+                            local icon = row.icons[i]
+                            if icon then
+                                icon._consumeCdEnd = nil
+                                if icon.ClearCooldown then icon:ClearCooldown() end
+                                if icon.SetDesaturated then icon:SetDesaturated(false) end
+                            end
+                        end
+                    end
+                    local scanner = Bars.Scanner and Bars.Scanner.Consumables
+                    if scanner and scanner.Sync then
+                        scanner:Sync()
+                    end
+                end
+                row:RequestRefresh()
+                return
+            end
             row:RequestRefresh()
         end)
     end
@@ -2115,6 +2597,11 @@ function Row:Enable()
     end
     if self.name == "Trinkets" then
         self.eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+    end
+    if self.name == "Consumables" then
+        self.eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+        self.eventFrame:RegisterEvent("ENCOUNTER_END")
+        self.eventFrame:RegisterEvent("CHALLENGE_MODE_START")
     end
     if self.eventFrame.RegisterUnitEvent then
         self.eventFrame:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
@@ -2521,6 +3008,9 @@ function Bars:_ResyncScope()
     self._currentScopeKey = newKey
     getRowsForScope(newKey)
     dlog("scope changed: %s -> %s", tostring(oldKey), tostring(newKey))
+    if ConsumablesScanner and ConsumablesScanner.Sync then
+        ConsumablesScanner:Sync()
+    end
     for _, r in pairs(self.rows) do
         if r and r.Rebuild then
             r:Rebuild()
@@ -2567,6 +3057,17 @@ function Bars:OnEnable(_, profile)
             C_Timer.After(1.0, function()
                 if Bars._enabled and TrinketScanner and TrinketScanner.Sync then
                     TrinketScanner:Sync()
+                end
+            end)
+        end
+    end
+
+    if self.rows["Consumables"] and ConsumablesScanner and ConsumablesScanner.Sync then
+        ConsumablesScanner:Sync()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(1.0, function()
+                if Bars._enabled and ConsumablesScanner and ConsumablesScanner.Sync then
+                    ConsumablesScanner:Sync()
                 end
             end)
         end
@@ -2669,6 +3170,8 @@ function Bars:OnDisable()
     wipe(self._activeProcs)
     wipe(_cdSnapshot)
     wipe(_castReadyLogAt)
+    wipe(_consumableLockout)
+    _consumableResetUntil = 0
     for _, r in pairs(self.rows) do
         if r and r.Disable then r:Disable() end
     end
@@ -2693,6 +3196,9 @@ ns:RegisterMessage("PROFILE_CHANGED", function()
     Bars._currentScopeKey = Bars:GetCurrentScopeKey()
     getRowsForScope(Bars._currentScopeKey)
     Bars:SyncCustomRows()
+    if ConsumablesScanner and ConsumablesScanner.Sync then
+        pcall(ConsumablesScanner.Sync, ConsumablesScanner)
+    end
     for _, r in pairs(Bars.rows) do
         if r and r.Rebuild then pcall(r.Rebuild, r) end
     end

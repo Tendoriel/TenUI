@@ -777,12 +777,16 @@ local function buildAuraSettingsPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.pandemic = ap.glow.pandemic or {}
             ap.glow.pandemic.style = v
+            ap.glow.pandemic.userSet = true
+            requestAurasRefresh()
             restylePreview()
         end
     )
 
     children[#children + 1] = C.CreateHelpText(sc,
-        "Style takes effect after a future update. Enable, threshold and color work now.")
+        "FX styles (animated borders) play on the live tile when the aura is not " ..
+        "secret. The edge styles (Border, Pixel, Solid) and the pandemic two-zone " ..
+        "fade are always available.")
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Pandemic Glow Color",
         function()
@@ -817,6 +821,40 @@ local function buildAuraSettingsPage(sc)
             if ns.Auras and ns.Auras.PrebuildPandemicCurves then
                 pcall(ns.Auras.PrebuildPandemicCurves, ns.Auras)
             end
+            requestAurasRefresh()
+            restylePreview()
+        end
+    )
+
+    local activeStyleValues = {}
+    do
+        local names
+        if ns.Glow and ns.Glow.GetRegisteredStyles then
+            names = ns.Glow:GetRegisteredStyles()
+        else
+            names = { "blizzard", "border", "overlay", "pixel", "solid" }
+        end
+        for i = 1, #names do
+            local k = names[i]
+            local label = (ns.Glow and ns.Glow.GetStyleLabel) and ns.Glow:GetStyleLabel(k) or k
+            if k == "border" then
+                label = label .. " (default)"
+            end
+            activeStyleValues[#activeStyleValues + 1] = { key = k, label = label }
+        end
+    end
+
+    children[#children + 1] = C.CreateDropdownLikeList(sc, "Active Aura Glow Style",
+        activeStyleValues,
+        function()
+            local ap = getAuraProfile(spellID)
+            return (ap.glow and ap.glow.activeAura and ap.glow.activeAura.style) or "border"
+        end,
+        function(v)
+            local ap = getAuraProfile(spellID)
+            ap.glow = ap.glow or {}
+            ap.glow.activeAura = ap.glow.activeAura or {}
+            ap.glow.activeAura.style = v
             requestAurasRefresh()
             restylePreview()
         end

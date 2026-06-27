@@ -63,13 +63,15 @@ local function defaultStyleValues(builtinKey, excludeBlizzard)
 end
 
 local DEFAULT_INTENT_DEFS = {
-    { intent = "proc",  label = "Proc",  builtinStyle = "blizzard", builtinColor = { 1, 1, 1, 1 } },
-    { intent = "ready", label = "Ready", builtinStyle = "border",   builtinColor = { 0.3, 1, 0.3, 1 } },
+    { intent = "proc",      label = "Proc",       builtinStyle = "blizzard", builtinColor = { 1, 1, 1, 1 } },
+    { intent = "ready",     label = "Ready",      builtinStyle = "border",   builtinColor = { 0.3, 1, 0.3, 1 } },
+    { intent = "maxStacks", label = "Max Stacks", builtinStyle = "solid",    builtinColor = { 1, 0.5, 0, 1 } },
 }
 
 local PREVIEW_INTENTS = {
     { label = "Proc",       intent = "proc"       },
     { label = "Pandemic",   intent = "pandemic"   },
+    { label = "Max Stacks", intent = "maxStacks"  },
     { label = "Ready",      intent = "ready"      },
     { label = "Active Aura",intent = "activeAura" },
 }
@@ -103,7 +105,7 @@ local function buildGlowPage(sc)
 
     for _, def in ipairs(DEFAULT_INTENT_DEFS) do
         local intent = def.intent
-        local excludeBlizzard = (intent == "ready")
+        local excludeBlizzard = (intent == "ready") or (intent == "maxStacks")
 
         local styleCtl, colorCtl
         styleCtl = C.CreateDropdownLikeList(sc, def.label .. " Default Style",

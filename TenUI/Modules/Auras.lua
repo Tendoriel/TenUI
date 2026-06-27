@@ -284,7 +284,12 @@ function Auras._repairOwnParentChain(f)
         guard = guard + 1
         if type(node.GetName) == "function" then
             local okN, name = pcall(node.GetName, node)
-            if okN and name == "UIParent" then break end
+            if okN and type(name) == "string"
+               and (name == "UIParent"
+                    or name == "TenUIAnchorParent"
+                    or name:sub(1, 12) == "TenUIAnchor_") then
+                break
+            end
         end
         local a
         if type(node.GetAlpha) == "function" then
@@ -537,7 +542,12 @@ Auras.SUMMON_BAR_SPEC_GATE = {
     WARLOCK_2 = true,
 }
 
-Auras.SUMMON_MIRROR_VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer" }
+Auras.SUMMON_MIRROR_VIEWER_NAMES = {
+    "EssentialCooldownViewer",
+    "UtilityCooldownViewer",
+    ICON_VIEWER_NAME,
+    BAR_VIEWER_NAME,
+}
 
 Auras._summonActiveUntil = {}
 Auras._summonDurObjBySpell = {}
@@ -654,12 +664,14 @@ function Auras._resolveSummonFixedDuration(summonSpellID)
     return durObj
 end
 
-function Auras._resolveSummonBarPresence(e)
+function Auras._resolveSummonBarPresence(e, allowLive)
     local summonSpellID = Auras._summonSpellForEntry(e)
     if not summonSpellID then return false, nil, nil end
 
-    local liveDur = Auras._resolveSummonLiveTotem(summonSpellID)
-    if liveDur ~= nil then return true, liveDur, "summonBar:totem" end
+    if allowLive then
+        local liveDur = Auras._resolveSummonLiveTotem(summonSpellID)
+        if liveDur ~= nil then return true, liveDur, "summonBar:totem" end
+    end
 
     local fixedDur = Auras._resolveSummonFixedDuration(summonSpellID)
     if fixedDur ~= nil then return true, fixedDur, "summonBar:fixed" end
@@ -675,12 +687,34 @@ function Auras._refreshSummonSpecGate()
     end
 end
 
+function Auras._canonicalSummonKey(spellID)
+    if type(spellID) ~= "number" or isSecret(spellID) then return nil end
+    local map = Auras.SUMMON_BAR_SPELLS
+    if map[spellID] ~= nil then return spellID end
+    if C_Spell and type(C_Spell.GetOverrideSpell) == "function" then
+        for baseID in pairs(map) do
+            local ok, overrideID = pcall(C_Spell.GetOverrideSpell, baseID)
+            if ok and type(overrideID) == "number" and not isSecret(overrideID)
+               and overrideID == spellID then
+                return baseID
+            end
+        end
+    end
+    return nil
+end
+
 function Auras._handleSummonCast(spellID)
     if type(spellID) ~= "number" or isSecret(spellID) then return end
-    local dur = Auras.SUMMON_BAR_SPELLS[spellID]
-    if type(dur) ~= "number" or dur <= 0 then return end
     if not Auras._summonSpecGateOK then return end
-    Auras._summonActiveUntil[spellID] = (GetTime and GetTime() or 0) + dur
+    local canonical = Auras._canonicalSummonKey(spellID)
+    if not canonical then return end
+    local dur = Auras.SUMMON_BAR_SPELLS[canonical]
+    if type(dur) ~= "number" or dur <= 0 then return end
+    local until_ = (GetTime and GetTime() or 0) + dur
+    Auras._summonActiveUntil[canonical] = until_
+    if spellID ~= canonical then
+        Auras._summonActiveUntil[spellID] = until_
+    end
     if Auras.RequestRefresh then pcall(Auras.RequestRefresh, Auras) end
 end
 
@@ -1594,6 +1628,7 @@ function Auras.PerAuraActiveGlow(item)
     s.colorG = c and tonumber(c[2]) or 0.8
     s.colorB = c and tonumber(c[3]) or 1.0
     s.colorA = c and tonumber(c[4]) or 1.0
+    s.style = (type(g.style) == "string") and g.style or nil
     return true, s
 end
 
@@ -1620,6 +1655,7 @@ function Auras._resolveActiveGlowSticky(item)
             if perOn == true and type(perOpts) == "table" then
                 rec.colorR, rec.colorG = perOpts.colorR, perOpts.colorG
                 rec.colorB, rec.colorA = perOpts.colorB, perOpts.colorA
+                rec.style = perOpts.style
             end
         end
         return perOn, perOpts, nil
@@ -1636,6 +1672,7 @@ function Auras._resolveActiveGlowSticky(item)
         end
         s.colorR, s.colorG = rec.colorR, rec.colorG
         s.colorB, s.colorA = rec.colorB, rec.colorA
+        s.style = rec.style
         return rec.perOn, (rec.perOn == true) and s or nil,
             "resolver-error-served-cache: " .. tostring(perOn)
     end
@@ -1686,6 +1723,7 @@ function Auras.PerAuraPandemicGlow(item, globalOpts)
     s.colorG = c and tonumber(c[2]) or 0.35
     s.colorB = c and tonumber(c[3]) or 0.1
     s.colorA = c and tonumber(c[4]) or 1.0
+    s.style = (type(g.style) == "string") and g.style or nil
     return true, s
 end
 
@@ -2631,39 +2669,97 @@ resolveGlowTarget = function(slot)
     return slot.bar or slot.frame or slot.button or slot.icon
 end
 
+function Auras._clearEdgeGlow(slot)
+    local pg = slot and slot.pandemicGlow
+    if not pg then return end
+    if pg.animGroup and pg.animGroup:IsPlaying() then
+        pcall(pg.animGroup.Stop, pg.animGroup)
+    end
+    Auras._resetSecretVisualOverlay(pg)
+    pg:SetAlpha(1)
+    pcall(pg.Hide, pg)
+end
+
+function Auras._stopSlotGlowFX(slot)
+    if not (slot and ns.GlowFX) then return end
+    local f = resolveGlowTarget(slot)
+    if not f then return end
+    pcall(ns.GlowFX.Stop, ns.GlowFX, f)
+end
+
+function Auras._activeGlowFXName(style)
+    if type(style) ~= "string" then return nil end
+    local fx = style:match("^fx_(.+)$")
+    if fx and fx ~= "" then return fx end
+    return nil
+end
+
+function Auras._releaseSlotGlowFX(slot)
+    if not slot then return end
+    Auras._stopSlotGlowFX(slot)
+    if slot._auraGlowRenderer == "fx" then
+        slot._auraGlowActive   = nil
+        slot._auraGlowRenderer = nil
+        slot._auraGlowFXName   = nil
+    end
+end
+
 local function applyGlowInternal(slot, active, opts, kind)
     if not slot then return end
     local r  = opts and tonumber(opts.colorR) or 1.0
     local gg = opts and tonumber(opts.colorG) or 0.6
     local b  = opts and tonumber(opts.colorB) or 0.0
     local a  = opts and tonumber(opts.colorA) or 0.9
+    local style = ((kind == "active" or kind == "pandemic") and opts
+                   and type(opts.style) == "string") and opts.style or nil
+    local fxName = Auras._activeGlowFXName(style)
+    local renderer = fxName and "fx" or "edge"
 
     if slot._auraGlowActive == active
        and slot._auraGlowKind == kind
        and slot._auraGlowR == r and slot._auraGlowG == gg
-       and slot._auraGlowB == b and slot._auraGlowA == a then
+       and slot._auraGlowB == b and slot._auraGlowA == a
+       and slot._auraGlowRenderer == renderer
+       and slot._auraGlowFXName == fxName then
         return
     end
+
+    if slot._auraGlowRenderer == "fx" and (renderer ~= "fx" or not active) then
+        Auras._stopSlotGlowFX(slot)
+    end
+    if slot._auraGlowRenderer == "edge" and (renderer ~= "edge" or not active) then
+        Auras._clearEdgeGlow(slot)
+    end
+
     slot._auraGlowActive = active
     slot._auraGlowKind   = kind
     slot._auraGlowR, slot._auraGlowG, slot._auraGlowB, slot._auraGlowA = r, gg, b, a
+    slot._auraGlowRenderer = active and renderer or nil
+    slot._auraGlowFXName   = active and fxName or nil
 
     Auras.RecordGlow(slot,
-        active and ("pulse-" .. tostring(kind)) or "off",
+        active and ("pulse-" .. tostring(kind) .. (style and (":" .. style) or "")) or "off",
         string.format("color=%.2f/%.2f/%.2f/%.2f", r, gg, b, a))
 
     if not active then
-        local pg = slot.pandemicGlow
-        if pg then
-            if pg.animGroup and pg.animGroup:IsPlaying() then
-                pcall(pg.animGroup.Stop, pg.animGroup)
-            end
-            Auras._resetSecretVisualOverlay(pg)
-            pg:SetAlpha(1)
-            pcall(pg.Hide, pg)
+        Auras._clearEdgeGlow(slot)
+        Auras._stopSlotGlowFX(slot)
+        return
+    end
+
+    if renderer == "fx" then
+        Auras._clearEdgeGlow(slot)
+        local f = resolveGlowTarget(slot)
+        if f and ns.GlowFX then
+            pcall(ns.GlowFX.Start, ns.GlowFX, f, fxName, {
+                colorR = r, colorG = gg, colorB = b, colorA = a,
+                alpha  = a,
+                owner  = "active",
+            })
         end
         return
     end
+
     local g = ensurePandemicGlow(slot)
     if not g then return end
     if g._pandemicMode then
@@ -2675,6 +2771,7 @@ local function applyGlowInternal(slot, active, opts, kind)
             g.edges[i]:SetColorTexture(r, gg, b, a)
         end
     end
+    g:EnableMouse(false)
     g:Show()
     if g.animGroup and not g.animGroup:IsPlaying() then
         g.animGroup:Play()
@@ -2698,8 +2795,11 @@ end
 local function wipeAllGlowState()
     local function wipeSlot(slot)
         if not slot then return end
-        slot._auraGlowActive = nil
-        slot._auraGlowKind   = nil
+        pcall(Auras._stopSlotGlowFX, slot)
+        slot._auraGlowActive   = nil
+        slot._auraGlowKind     = nil
+        slot._auraGlowRenderer = nil
+        slot._auraGlowFXName   = nil
         slot._auraGlowR, slot._auraGlowG, slot._auraGlowB, slot._auraGlowA = nil, nil, nil, nil
         local pg = slot.pandemicGlow
         if pg then
@@ -2730,6 +2830,7 @@ local function ensurePandemicGlowIcon(iconWidget)
         pslot = { bar = frame }
         iconWidget._pandemicSlot = pslot
     elseif pslot.bar ~= frame then
+        pcall(Auras._releaseSlotGlowFX, pslot)
         if pslot.pandemicGlow then
             if pslot.pandemicGlow.animGroup
                and pslot.pandemicGlow.animGroup:IsPlaying() then
@@ -3333,6 +3434,41 @@ local function getTrackedBarsTextStyles()
     return name, timer
 end
 
+function Auras._styleBarCountdownNumbers(cd, bar, timerStyle)
+    if type(cd) ~= "table" then return end
+    local okFS, fs = pcall(cd.GetCountdownFontString, cd)
+    if not (okFS and type(fs) == "table") then return end
+    applyBarTextStyle(fs, bar, timerStyle, "RIGHT")
+end
+
+function Auras._driveBarCountdownNumbers(slot, durObj)
+    if type(slot) ~= "table" then return false end
+    local cd = slot.cdNumbers
+    if type(cd) ~= "table" then return false end
+    if durObj == nil or type(cd.SetCooldownFromDurationObject) ~= "function" then
+        pcall(cd.Clear, cd)
+        pcall(cd.Hide, cd)
+        return false
+    end
+    local ok = pcall(cd.SetCooldownFromDurationObject, cd, durObj)
+    if not ok then
+        pcall(cd.Clear, cd)
+        pcall(cd.Hide, cd)
+        return false
+    end
+    pcall(cd.SetHideCountdownNumbers, cd, false)
+    pcall(cd.Show, cd)
+    return true
+end
+
+function Auras._clearBarCountdownNumbers(slot)
+    if type(slot) ~= "table" then return end
+    local cd = slot.cdNumbers
+    if type(cd) ~= "table" then return end
+    pcall(cd.Clear, cd)
+    pcall(cd.Hide, cd)
+end
+
 local IconDisplay = {}
 IconDisplay.__index = IconDisplay
 
@@ -3630,6 +3766,7 @@ function IconDisplay:_RenderActiveImpl(active, suppressSet)
                         local okSV, applied, svMode = pcall(applySecretPandemicVisual, pslot, pandemicDur, effPOpts, svActive, thrSecs)
                         overlayOwned = okSV and applied == true
                         if overlayOwned then
+                            pcall(Auras._releaseSlotGlowFX, pslot)
                             if svMode == "two-zone" then
                                 Auras.RecordActiveGlowEval(pslot, "applied:two-zone-curve")
                             elseif svActive then
@@ -3898,10 +4035,21 @@ function BarDisplay:GetBarSlot(i)
     durFS:SetPoint("RIGHT", bar, "RIGHT", -3, 0)
     durFS:SetJustifyH("RIGHT")
 
+    local cdNumbers = CreateFrame("Cooldown", nil, bar, "CooldownFrameTemplate")
+    cdNumbers:SetAllPoints(bar)
+    cdNumbers:SetHideCountdownNumbers(false)
+    cdNumbers:SetDrawSwipe(false)
+    cdNumbers:SetDrawEdge(false)
+    cdNumbers:SetDrawBling(false)
+    cdNumbers:EnableMouse(false)
+    cdNumbers:SetFrameLevel((bar:GetFrameLevel() or 1) + 1)
+    cdNumbers:Hide()
+
     do
         local nameStyle, timerStyle = getTrackedBarsTextStyles()
         applyBarTextStyle(nameFS, bar, nameStyle, "LEFT")
         applyBarTextStyle(durFS,  bar, timerStyle, "RIGHT")
+        Auras._styleBarCountdownNumbers(cdNumbers, bar, timerStyle)
     end
 
     frame:ClearAllPoints()
@@ -3914,6 +4062,7 @@ function BarDisplay:GetBarSlot(i)
         bg      = bg,
         nameFS  = nameFS,
         durFS   = durFS,
+        cdNumbers = cdNumbers,
         _iconShown = true,
         _baseFillR = 1,
         _baseFillG = 1,
@@ -4142,6 +4291,7 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
                         slot.nameFS:SetText(ns._auraSafeText(readBarName(item)))
                     end
                     if slot.durFS then slot.durFS:SetText("") end
+                    Auras._clearBarCountdownNumbers(slot)
                     if slot.bar then
                         if type(slot.bar.SetTimerDuration) == "function" then
                             pcall(slot.bar.SetTimerDuration, slot.bar, nil)
@@ -4167,8 +4317,17 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
                     if showName then nameText = ns._auraSafeText(readBarName(item)) end
                     slot.nameFS:SetText(nameText)
                 end
+                local isSummon = type(item) == "table" and item._summonDurObj ~= nil
+                local summonDigits = false
+                if isSummon and showTimer then
+                    summonDigits = Auras._driveBarCountdownNumbers(slot, item._summonDurObj)
+                else
+                    Auras._clearBarCountdownNumbers(slot)
+                end
                 local durText = ""
-                if showTimer then durText = ns._auraSafeText(readBarDuration(item)) end
+                if showTimer and not summonDigits then
+                    durText = ns._auraSafeText(readBarDuration(item))
+                end
                 if slot.durFS then
                     slot.durFS:SetText(durText)
                 end
@@ -4251,6 +4410,7 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
                         local okSV, applied, svMode = pcall(applySecretPandemicVisual, slot, pandemicDur, effPOpts, svActive, thrSecs)
                         overlayOwned = okSV and applied == true
                         if overlayOwned then
+                            pcall(Auras._releaseSlotGlowFX, slot)
                             if svMode == "two-zone" then
                                 Auras.RecordActiveGlowEval(slot, "applied:two-zone-curve")
                             elseif svActive then
@@ -4316,6 +4476,7 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
             pcall(slot.frame.Hide, slot.frame)
             pcall(slot.frame.ClearAllPoints, slot.frame)
             pcall(applyPandemicGlow, slot, false, nil)
+            Auras._clearBarCountdownNumbers(slot)
         end
     end
 
@@ -4367,6 +4528,7 @@ function BarDisplay:ApplyVisualOptions()
         if slot then
             if slot.nameFS then applyBarTextStyle(slot.nameFS, slot.bar, nameStyle, "LEFT") end
             if slot.durFS  then applyBarTextStyle(slot.durFS,  slot.bar, timerStyle, "RIGHT") end
+            if slot.cdNumbers then Auras._styleBarCountdownNumbers(slot.cdNumbers, slot.bar, timerStyle) end
             pcall(self.ApplyBarStyle, self, slot)
         end
     end
@@ -8524,11 +8686,11 @@ buildActiveFromCatalog = function(displayType, preview)
                         end
                     end
 
-                    if not emitted and not preview and forcePop
+                    if not emitted and not preview
                        and displayType == "TrackedBars"
                        and Auras._summonSpecGateOK
                        and Auras._summonSpellForEntry(e) then
-                        local okP, active, durObj, srcTag = pcall(Auras._resolveSummonBarPresence, e)
+                        local okP, active, durObj, srcTag = pcall(Auras._resolveSummonBarPresence, e, forcePop)
                         if okP and active then
                             local okI, item = pcall(Auras._makeSummonBarItem, e, durObj)
                             if okI and item then

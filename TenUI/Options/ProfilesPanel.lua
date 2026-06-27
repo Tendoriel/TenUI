@@ -97,6 +97,27 @@ local function buildProfilesPage(sc)
     local Theme = C.Theme
     local children = {}
 
+    local refreshCopyValues
+    local rebuildSpecMatrix
+    local profileDropdown
+
+    if ns.savedVarsReady and ns.db and not InCombatLockdown() then
+        local specIdx = GetSpecialization and GetSpecialization() or 0
+        local specID = specIdx and specIdx > 0 and GetSpecializationInfo and GetSpecializationInfo(specIdx) or nil
+        if type(specID) == "number" and specID > 0 then
+            local ck = ns.GetCharKey and ns:GetCharKey()
+            if ck then
+                ns.db.lastSpecByChar = ns.db.lastSpecByChar or {}
+                ns.db.lastSpecByChar[ck] = specID
+            end
+            local assigned = ns:GetSpecProfile(specID)
+            if assigned and assigned ~= ns:GetProfileKey()
+               and ns.db.profiles and ns.db.profiles[assigned] then
+                ns:SetActiveProfile(assigned)
+            end
+        end
+    end
+
     children[#children + 1] = C.CreateSection(sc, "Profiles")
 
     children[#children + 1] = C.CreateSubSection(sc, "Active Profile")
@@ -107,10 +128,13 @@ local function buildProfilesPage(sc)
         for _, k in ipairs(ns:ListProfiles()) do
             profileValues[#profileValues + 1] = { key = k, label = k }
         end
+        if profileDropdown and profileDropdown.Refresh then
+            profileDropdown.Refresh()
+        end
     end
     refreshProfileValues()
 
-    children[#children + 1] = C.CreateDropdownLikeList(sc, "Profile",
+    profileDropdown = C.CreateDropdownLikeList(sc, "Profile",
         profileValues,
         function() return ns:GetProfileKey() end,
         function(k)
@@ -126,6 +150,7 @@ local function buildProfilesPage(sc)
             end
         end
     )
+    children[#children + 1] = profileDropdown
 
     local activeActionsRow = CreateFrame("Frame", nil, sc)
     activeActionsRow:SetHeight(24)
@@ -146,10 +171,13 @@ local function buildProfilesPage(sc)
             ns.db.profiles = ns.db.profiles or {}
             if not ns.db.profiles[name] then
                 ns.db.profiles[name] = { modules = {} }
+                ns:_AddProfileToOrder(name)
                 ns.db.activeProfile = name
                 ns:Fire("PROFILE_CHANGED", name)
-                refreshProfileValues()
                 newNameEB:SetText("")
+                if ns.Options and ns.Options.RebuildPage then
+                    ns.Options:RebuildPage("profiles")
+                end
             end
         end
     end
@@ -174,12 +202,9 @@ local function buildProfilesPage(sc)
                         end
                         return
                     end
-                    if ns.db and ns.db.profiles then
-                        ns.db.profiles[key] = nil
-                        ns.db.activeProfile = "Default"
-                        ns.db.profiles["Default"] = ns.db.profiles["Default"] or { modules = {} }
-                        ns:Fire("PROFILE_CHANGED", "Default")
-                        refreshProfileValues()
+                    ns:DeleteProfile(key)
+                    if ns.Options and ns.Options.RebuildPage then
+                        ns.Options:RebuildPage("profiles")
                     end
                 end,
                 timeout = 0,
@@ -222,15 +247,62 @@ local function buildProfilesPage(sc)
     local resetBtn = C.CreateCompactButton(activeActionsRow, "Reset", doResetProfile, 80)
     resetBtn:SetPoint("LEFT", deleteBtn, "RIGHT", 4, 0)
 
+    children[#children + 1] = C.CreateSubSection(sc, "Rename Active Profile")
+
+    local renameRow = CreateFrame("Frame", nil, sc)
+    renameRow:SetHeight(24)
+    children[#children + 1] = renameRow
+
+    local renameBox, renameEB = makeNameBox(C, renameRow, "New name for active profile...")
+    renameBox:SetPoint("LEFT", renameRow, "LEFT", 0, 0)
+
+    local renameStatus = C.Text(sc, C.Fonts.value, Theme.color.textDim, "")
+    renameStatus:SetWordWrap(true)
+    renameStatus:SetHeight(18)
+    renameStatus:SetJustifyH("LEFT")
+
+    local function doRename()
+        if InCombatLockdown() then
+            renameStatus:SetTextColor(unpack(Theme.color.danger))
+            renameStatus:SetText("Cannot rename in combat.")
+            return
+        end
+        local newName = (renameEB:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local oldName = ns:GetProfileKey()
+        local ok, result = ns:RenameProfile(oldName, newName)
+        if ok then
+            renameStatus:SetTextColor(0.3, 1, 0.3, 1)
+            renameStatus:SetText(("Renamed to '%s'."):format(tostring(result)))
+            renameEB:SetText("")
+            if ns.Options and ns.Options.RebuildPage then
+                ns.Options:RebuildPage("profiles")
+            end
+        else
+            renameStatus:SetTextColor(unpack(Theme.color.danger))
+            renameStatus:SetText("Rename failed: " .. tostring(result))
+        end
+    end
+    renameEB:SetScript("OnEnterPressed", function(self) doRename() self:ClearFocus() end)
+
+    local renameBtn = C.CreateCompactButton(renameRow, "Rename", doRename, 80)
+    renameBtn:SetPoint("RIGHT", renameRow, "RIGHT", 0, 0)
+    renameBox:SetPoint("RIGHT", renameBtn, "LEFT", -8, 0)
+
+    children[#children + 1] = renameStatus
+
     children[#children + 1] = C.CreateSubSection(sc, "Copy Positions From")
 
     local copyValues = {}
-    local function refreshCopyValues()
+    local copyFromDropdown
+    refreshCopyValues = function()
         for i = #copyValues, 1, -1 do copyValues[i] = nil end
         for _, k in ipairs(ns:ListProfiles()) do
             if k ~= ns:GetProfileKey() then
                 copyValues[#copyValues + 1] = { key = k, label = k }
             end
+        end
+        if copyFromDropdown and copyFromDropdown.Refresh then
+            copyFromDropdown.Refresh()
         end
     end
     refreshCopyValues()
@@ -259,82 +331,144 @@ local function buildProfilesPage(sc)
         end
     end
 
-    local copyRow = C.CreateDropdownLikeList(sc, "Source Profile",
+    copyFromDropdown = C.CreateDropdownLikeList(sc, "Source Profile",
         copyValues,
         function() return _selectedCopyFrom end,
         function(k) _selectedCopyFrom = k end
     )
-    children[#children + 1] = copyRow
+    children[#children + 1] = copyFromDropdown
 
     children[#children + 1] = C.CreateButton(sc, "Copy Positions to Current Profile", doCopyPositions)
 
     children[#children + 1] = C.CreateHelpText(sc,
-        "Copies only frame positions. All other settings stay untouched.")
+        "Copies only frame positions into the current profile. All other settings stay untouched.")
+
+    local fullCopyRow = CreateFrame("Frame", nil, sc)
+    fullCopyRow:SetHeight(24)
+    children[#children + 1] = fullCopyRow
+
+    local fullCopyBox, fullCopyEB = makeNameBox(C, fullCopyRow, "New profile name...")
+    fullCopyBox:SetPoint("LEFT", fullCopyRow, "LEFT", 0, 0)
+
+    local fullCopyStatus = C.Text(sc, C.Fonts.value, Theme.color.textDim, "")
+    fullCopyStatus:SetWordWrap(true)
+    fullCopyStatus:SetHeight(18)
+    fullCopyStatus:SetJustifyH("LEFT")
+
+    local function doFullCopy()
+        if InCombatLockdown() then
+            fullCopyStatus:SetTextColor(unpack(Theme.color.danger))
+            fullCopyStatus:SetText("Cannot copy in combat.")
+            return
+        end
+        local src = _selectedCopyFrom or ns:GetProfileKey()
+        local newName = (fullCopyEB:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local ok, result = ns:CopyProfile(src, newName)
+        if ok then
+            fullCopyStatus:SetTextColor(0.3, 1, 0.3, 1)
+            fullCopyStatus:SetText(("Created '%s' as a full copy of '%s'."):format(tostring(result), src))
+            fullCopyEB:SetText("")
+            if ns.Options and ns.Options.RebuildPage then
+                ns.Options:RebuildPage("profiles")
+            end
+        else
+            fullCopyStatus:SetTextColor(unpack(Theme.color.danger))
+            fullCopyStatus:SetText("Copy failed: " .. tostring(result))
+        end
+    end
+    fullCopyEB:SetScript("OnEnterPressed", function(self) doFullCopy() self:ClearFocus() end)
+
+    local fullCopyBtn = C.CreateCompactButton(fullCopyRow, "Copy All", doFullCopy, 80)
+    fullCopyBtn:SetPoint("RIGHT", fullCopyRow, "RIGHT", 0, 0)
+    fullCopyBox:SetPoint("RIGHT", fullCopyBtn, "LEFT", -8, 0)
+
+    children[#children + 1] = fullCopyStatus
+
+    children[#children + 1] = C.CreateHelpText(sc,
+        "Creates a brand-new profile that is a complete copy of the selected source profile (or the active profile when none is selected).")
 
     children[#children + 1] = C.CreateSubSection(sc, "Spec Profile Swap")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Enable Spec-Based Profile Swap",
-        function()
-            if not ns.savedVarsReady then return false end
-            local p = ns:GetProfile()
-            return p.modules and p.modules.Profiles and p.modules.Profiles.specSwap and
-                   p.modules.Profiles.specSwap.enabled == true
-        end,
-        function(v)
-            if not ns.savedVarsReady then return end
-            local p = ns:GetProfile()
-            p.modules = p.modules or {}
-            p.modules.Profiles = p.modules.Profiles or {}
-            p.modules.Profiles.specSwap = p.modules.Profiles.specSwap or { enabled = false, assignments = {} }
-            p.modules.Profiles.specSwap.enabled = v
-        end
-    )
-
     children[#children + 1] = C.CreateHelpText(sc,
-        "Switching spec automatically activates the profile assigned to that spec.")
+        "Assign a profile to each specialization. Switching spec automatically activates the assigned profile (out of combat).")
 
-    local specText = C.Text(sc, C.Fonts.value, Theme.color.text)
-    local function updateSpecText()
-        local classToken = select(2, UnitClass("player")) or "?"
-        local specIdx = GetSpecialization and GetSpecialization() or "?"
-        specText:SetText("Current: " .. tostring(classToken) .. " spec " .. tostring(specIdx))
+    local clearValueKey = "__NONE__"
+
+    local function buildSpecRowValues()
+        local vals = { { key = clearValueKey, label = "(none)" } }
+        for _, k in ipairs(ns:ListProfiles()) do
+            vals[#vals + 1] = { key = k, label = k }
+        end
+        return vals
     end
-    updateSpecText()
-    children[#children + 1] = specText
 
-    local specActionsRow = CreateFrame("Frame", nil, sc)
-    specActionsRow:SetHeight(24)
-    children[#children + 1] = specActionsRow
+    local function getPlayerClassID()
+        local _, _, classID = UnitClass("player")
+        return classID
+    end
 
-    local assignBtn = C.CreateCompactButton(specActionsRow, "Assign", function()
-        if not ns.savedVarsReady then return end
-        local p = ns:GetProfile()
-        p.modules = p.modules or {}
-        p.modules.Profiles = p.modules.Profiles or {}
-        p.modules.Profiles.specSwap = p.modules.Profiles.specSwap or { enabled = false, assignments = {} }
-        local classToken = select(2, UnitClass("player")) or "UNKNOWN"
-        local specIdx = GetSpecialization and GetSpecialization() or 0
-        local key = classToken .. "_" .. tostring(specIdx)
-        p.modules.Profiles.specSwap.assignments[key] = ns:GetProfileKey()
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("[ProfilesPanel] spec %s -> '%s'", key, ns:GetProfileKey())
+    local function getNumSpecs(classID)
+        if C_SpecializationInfo and C_SpecializationInfo.GetNumSpecializationsForClassID then
+            return C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
         end
-    end, 80)
-    assignBtn:SetPoint("LEFT", specActionsRow, "LEFT", 0, 0)
+        return 0
+    end
 
-    local clearBtn = C.CreateCompactButton(specActionsRow, "Clear", function()
-        if not ns.savedVarsReady then return end
-        local p = ns:GetProfile()
-        if not (p.modules and p.modules.Profiles and p.modules.Profiles.specSwap) then return end
-        local classToken = select(2, UnitClass("player")) or "UNKNOWN"
-        local specIdx = GetSpecialization and GetSpecialization() or 0
-        local key = classToken .. "_" .. tostring(specIdx)
-        p.modules.Profiles.specSwap.assignments[key] = nil
-        if ns.Debug and ns.Debug.Log then
-            ns.Debug:Log("[ProfilesPanel] spec %s assignment cleared", key)
+    local specMatrixContainer = CreateFrame("Frame", nil, sc)
+    specMatrixContainer:SetHeight(1)
+    children[#children + 1] = specMatrixContainer
+
+    rebuildSpecMatrix = function()
+        if C and C.ClearChildren then
+            pcall(C.ClearChildren, specMatrixContainer)
         end
-    end, 80)
-    clearBtn:SetPoint("LEFT", assignBtn, "RIGHT", 4, 0)
+        local rows = {}
+        local classID = getPlayerClassID()
+        local numSpecs = classID and getNumSpecs(classID) or 0
+        if not classID or numSpecs == 0 then
+            local note = C.CreateHelpText(specMatrixContainer,
+                "Specialization information is not available yet.")
+            rows[#rows + 1] = note
+        else
+            for specIndex = 1, numSpecs do
+                local specID, specName = GetSpecializationInfoForClassID(classID, specIndex)
+                if specID and specID > 0 then
+                    local capturedSpecID = specID
+                    local label = specName or ("Spec " .. tostring(specIndex))
+                    local rowFrame = CreateFrame("Frame", nil, specMatrixContainer)
+                    rowFrame:SetHeight(24)
+
+                    local dd = C.CreateDropdownLikeList(rowFrame, label,
+                        buildSpecRowValues(),
+                        function()
+                            return ns:GetSpecProfile(capturedSpecID) or clearValueKey
+                        end,
+                        function(k)
+                            if not ns.savedVarsReady then return end
+                            if k == clearValueKey then
+                                ns:UnassignSpec(capturedSpecID)
+                                if ns.Debug and ns.Debug.Log then
+                                    ns.Debug:Log("[ProfilesPanel] spec %d cleared", capturedSpecID)
+                                end
+                            else
+                                ns:AssignProfileToSpec(k, capturedSpecID)
+                                if ns.Debug and ns.Debug.Log then
+                                    ns.Debug:Log("[ProfilesPanel] spec %d -> '%s'", capturedSpecID, tostring(k))
+                                end
+                            end
+                        end
+                    )
+                    dd:ClearAllPoints()
+                    dd:SetPoint("TOPLEFT", rowFrame, "TOPLEFT", 0, 0)
+                    dd:SetPoint("TOPRIGHT", rowFrame, "TOPRIGHT", 0, 0)
+                    rows[#rows + 1] = rowFrame
+                end
+            end
+        end
+        local h = C.LayoutVertical(specMatrixContainer, rows, 4, 0)
+        specMatrixContainer:SetHeight(math_max(h, 1))
+    end
+    rebuildSpecMatrix()
 
     children[#children + 1] = C.CreateSubSection(sc, "Export")
 
@@ -394,7 +528,8 @@ local function buildProfilesPage(sc)
             return
         end
         refreshProfileValues()
-        refreshCopyValues()
+        if refreshCopyValues then refreshCopyValues() end
+        if rebuildSpecMatrix then rebuildSpecMatrix() end
         if InCombatLockdown() then
             setImportStatus(true, ("Imported as '%s'. In combat -- switch to it after combat ends."):format(result))
         elseif ns:SetActiveProfile(result) then

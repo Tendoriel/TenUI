@@ -1,10 +1,77 @@
 local addonName, ns = ...
 
+local GetSpecialization     = GetSpecialization
+local GetSpecializationInfo = GetSpecializationInfo
+local UnitName              = UnitName
+local GetRealmName          = GetRealmName
+
 function ns:GetProfileKey()
     if self.db and self.db.activeProfile then
         return self.db.activeProfile
     end
     return "Default"
+end
+
+function ns:GetCharKey()
+    local name = UnitName and UnitName("player")
+    local realm = GetRealmName and GetRealmName()
+    if type(name) ~= "string" or name == "" then return nil end
+    if type(realm) ~= "string" then realm = "" end
+    return name .. " - " .. realm
+end
+
+local function profileOrderContains(order, name)
+    for i = 1, #order do
+        if order[i] == name then return i end
+    end
+    return nil
+end
+
+function ns:_EnsureProfileOrder()
+    if not self.db then return nil end
+    self.db.profiles = self.db.profiles or {}
+    if type(self.db.profileOrder) ~= "table" then
+        self.db.profileOrder = {}
+    end
+    local order = self.db.profileOrder
+    local seen = {}
+    for i = #order, 1, -1 do
+        local n = order[i]
+        if type(n) ~= "string" or not self.db.profiles[n] or seen[n] then
+            table.remove(order, i)
+        else
+            seen[n] = true
+        end
+    end
+    if self.db.profiles["Default"] and not seen["Default"] then
+        table.insert(order, 1, "Default")
+        seen["Default"] = true
+    end
+    local missing = {}
+    for n in pairs(self.db.profiles) do
+        if type(n) == "string" and not seen[n] then
+            missing[#missing + 1] = n
+        end
+    end
+    table.sort(missing)
+    for i = 1, #missing do
+        order[#order + 1] = missing[i]
+    end
+    return order
+end
+
+function ns:_AddProfileToOrder(name)
+    if not self.db or type(name) ~= "string" then return end
+    self.db.profileOrder = self.db.profileOrder or {}
+    if not profileOrderContains(self.db.profileOrder, name) then
+        self.db.profileOrder[#self.db.profileOrder + 1] = name
+    end
+end
+
+function ns:_RemoveProfileFromOrder(name)
+    if not self.db or type(self.db.profileOrder) ~= "table" then return end
+    local i = profileOrderContains(self.db.profileOrder, name)
+    if i then table.remove(self.db.profileOrder, i) end
 end
 
 function ns:GetSpecScopeKey()
@@ -74,12 +141,153 @@ end
 
 function ns:ListProfiles()
     local out = {}
-    if self.db and self.db.profiles then
-        for k in pairs(self.db.profiles) do
-            out[#out + 1] = k
+    if not (self.db and self.db.profiles) then return out end
+    local order = self:_EnsureProfileOrder()
+    if type(order) == "table" then
+        for i = 1, #order do
+            if self.db.profiles[order[i]] then
+                out[#out + 1] = order[i]
+            end
         end
     end
     return out
+end
+
+function ns:AssignProfileToSpec(name, specID)
+    if not self.savedVarsReady or not self.db then return false end
+    if type(name) ~= "string" or name == "" then return false end
+    if type(specID) ~= "number" or specID <= 0 then return false end
+    if not (self.db.profiles and self.db.profiles[name]) then return false end
+    self.db.specProfiles = self.db.specProfiles or {}
+    self.db.specProfiles[specID] = name
+    return true
+end
+
+function ns:UnassignSpec(specID)
+    if not self.savedVarsReady or not self.db then return false end
+    if type(specID) ~= "number" or specID <= 0 then return false end
+    if type(self.db.specProfiles) ~= "table" then return false end
+    self.db.specProfiles[specID] = nil
+    return true
+end
+
+function ns:GetSpecProfile(specID)
+    if not self.savedVarsReady or not self.db then return nil end
+    if type(specID) ~= "number" or specID <= 0 then return nil end
+    if type(self.db.specProfiles) ~= "table" then return nil end
+    return self.db.specProfiles[specID]
+end
+
+function ns:ResolveSpecProfile()
+    if not self.savedVarsReady or not self.db then return nil end
+    local specProfiles = self.db.specProfiles
+    if type(specProfiles) ~= "table" or next(specProfiles) == nil then return nil end
+
+    local charKey = self:GetCharKey()
+    if not charKey then return nil end
+    self.db.lastSpecByChar = self.db.lastSpecByChar or {}
+
+    local resolvedSpecID = self.db.lastSpecByChar[charKey]
+
+    if not resolvedSpecID then
+        local specIdx = GetSpecialization and GetSpecialization()
+        if type(specIdx) == "number" and specIdx > 0 then
+            local liveSpecID = GetSpecializationInfo and GetSpecializationInfo(specIdx)
+            if type(liveSpecID) == "number" and liveSpecID > 0 then
+                resolvedSpecID = liveSpecID
+                self.db.lastSpecByChar[charKey] = resolvedSpecID
+            end
+        end
+    end
+
+    if not resolvedSpecID then return nil end
+
+    local targetProfile = specProfiles[resolvedSpecID]
+    if not targetProfile then return nil, resolvedSpecID, charKey end
+
+    if not (self.db.profiles and self.db.profiles[targetProfile]) then
+        return nil, resolvedSpecID, charKey
+    end
+
+    return targetProfile, resolvedSpecID, charKey
+end
+
+function ns:RenameProfile(oldName, newName)
+    if not self.savedVarsReady or not self.db then return false, "saved variables not ready" end
+    if type(oldName) ~= "string" or oldName == "" then return false, "invalid source name" end
+    if type(newName) == "string" then
+        newName = newName:gsub("^%s+", ""):gsub("%s+$", "")
+    end
+    if type(newName) ~= "string" or newName == "" then return false, "invalid new name" end
+    if #newName > 48 then return false, "profile name too long (max 48 characters)" end
+    if oldName == "Default" then return false, "cannot rename the Default profile" end
+    if newName == "Default" then return false, "cannot rename to Default" end
+    self.db.profiles = self.db.profiles or {}
+    if not self.db.profiles[oldName] then return false, "source profile does not exist" end
+    if oldName == newName then return true, newName end
+    if self.db.profiles[newName] then return false, ("profile '%s' already exists"):format(newName) end
+
+    self.db.profiles[newName] = self.db.profiles[oldName]
+    self.db.profiles[oldName] = nil
+
+    if type(self.db.profileOrder) == "table" then
+        local i = profileOrderContains(self.db.profileOrder, oldName)
+        if i then
+            self.db.profileOrder[i] = newName
+        else
+            self:_AddProfileToOrder(newName)
+        end
+    end
+
+    if type(self.db.specProfiles) == "table" then
+        for specID, pName in pairs(self.db.specProfiles) do
+            if pName == oldName then self.db.specProfiles[specID] = newName end
+        end
+    end
+
+    if self.db.activeProfile == oldName then
+        self.db.activeProfile = newName
+        if not InCombatLockdown() then
+            self:Fire("PROFILE_CHANGED", newName)
+        end
+    end
+
+    if self.Debug and self.Debug.Log then
+        self.Debug:Log("[Profile] Renamed '%s' -> '%s'", oldName, newName)
+    end
+    return true, newName
+end
+
+function ns:DeleteProfile(name)
+    if not self.savedVarsReady or not self.db then return false, "saved variables not ready" end
+    if type(name) ~= "string" or name == "" then return false, "invalid name" end
+    if name == "Default" then return false, "cannot delete the Default profile" end
+    self.db.profiles = self.db.profiles or {}
+    if not self.db.profiles[name] then return false, "profile does not exist" end
+
+    self.db.profiles[name] = nil
+    self:_RemoveProfileFromOrder(name)
+
+    if type(self.db.specProfiles) == "table" then
+        for specID, pName in pairs(self.db.specProfiles) do
+            if pName == name then self.db.specProfiles[specID] = nil end
+        end
+    end
+
+    self.db.profiles["Default"] = self.db.profiles["Default"] or { modules = {} }
+    self:_AddProfileToOrder("Default")
+
+    if self.db.activeProfile == name then
+        self.db.activeProfile = "Default"
+        if not InCombatLockdown() then
+            self:Fire("PROFILE_CHANGED", "Default")
+        end
+    end
+
+    if self.Debug and self.Debug.Log then
+        self.Debug:Log("[Profile] Deleted '%s'", name)
+    end
+    return true
 end
 
 local function deepCopyData(t)
@@ -457,6 +665,45 @@ local function deepCopyProfileData(t, seen)
     return out
 end
 
+function ns:CopyProfile(srcName, newName)
+    if not self.savedVarsReady or not self.db then return false, "saved variables not ready" end
+    if type(srcName) ~= "string" or srcName == "" then return false, "invalid source name" end
+    if type(newName) == "string" then
+        newName = newName:gsub("^%s+", ""):gsub("%s+$", "")
+    end
+    if type(newName) ~= "string" or newName == "" then return false, "invalid new name" end
+    if #newName > 48 then return false, "profile name too long (max 48 characters)" end
+    self.db.profiles = self.db.profiles or {}
+    local src = self.db.profiles[srcName]
+    if type(src) ~= "table" then return false, "source profile does not exist" end
+    if self.db.profiles[newName] then
+        return false, ("profile '%s' already exists"):format(newName)
+    end
+
+    local copy = deepCopyProfileData(src) or { modules = {} }
+    copy.modules = copy.modules or {}
+    if type(copy.modules.Profiles) == "table" and type(copy.modules.Profiles.specSwap) == "table" then
+        copy.modules.Profiles.specSwap.assignments = {}
+    end
+
+    self.db.profiles[newName] = copy
+    self:_AddProfileToOrder(newName)
+
+    if self._deepCopyMissing and self.dbDefaults and self.dbDefaults.profiles then
+        self._deepCopyMissing(self.db.profiles[newName], self.dbDefaults.profiles.Default)
+    end
+
+    if self.Debug and self.Debug.Log then
+        self.Debug:Log("[Profile] Copied '%s' -> '%s'", srcName, newName)
+    end
+    return true, newName
+end
+
+function ns:SaveCurrentAsProfile(name)
+    if not self.savedVarsReady or not self.db then return false, "saved variables not ready" end
+    return self:CopyProfile(self:GetProfileKey(), name)
+end
+
 local function stripNonPortable(data)
     if type(data) ~= "table" then return end
     local m = data.modules
@@ -546,6 +793,7 @@ function ns:ImportProfile(str, profileName)
     data.modules = data.modules or {}
 
     self.db.profiles[name] = data
+    self:_AddProfileToOrder(name)
 
     if self._deepCopyMissing and self.dbDefaults and self.dbDefaults.profiles then
         self._deepCopyMissing(self.db.profiles[name], self.dbDefaults.profiles.Default)

@@ -8,6 +8,7 @@ local type = type
 local math_floor = math.floor
 local math_huge = math.huge
 local math_abs = math.abs
+local math_sqrt = math.sqrt
 
 ns.anchors = ns.anchors or {}
 
@@ -29,6 +30,28 @@ end
 local registry = ns.anchors
 
 local dormantRegistry = {}
+
+local function getAnchorVisibilityCfg(name)
+    local vp
+    if ns.GetLayoutVisuals then
+        vp = ns:GetLayoutVisuals(name, false)
+    end
+    local v = (type(vp) == "table") and vp.visibility or nil
+    if type(v) ~= "table" then
+        if ns.Visibility and ns.Visibility.defaultCfg then
+            return ns.Visibility.defaultCfg()
+        end
+        return { state = "always", options = {} }
+    end
+    return v
+end
+
+local function registerVisibilityEntry(name)
+    if not (ns.Visibility and ns.Visibility.RegisterEntry) then return end
+    ns.Visibility:RegisterEntry(name, function()
+        return getAnchorVisibilityCfg(name)
+    end)
+end
 
 local TRACE_RING_SIZE = 10
 local _trace = {}
@@ -103,9 +126,11 @@ local DEFAULT_ANCHORS = {
     { name = "UtilityCooldowns",   label = "Utility Cooldowns",   point = "CENTER", x =    0, y = -170, width = 320, height = 32 },
     { name = "DefensiveCooldowns", label = "Defensive Cooldowns", point = "CENTER", x = -200, y = -120, width = 160, height = 32 },
     { name = "Trinkets",           label = "Trinkets",            point = "CENTER", x =  200, y = -120, width =  80, height = 32 },
+    { name = "Consumables",        label = "Consumables",         point = "CENTER", x =  200, y = -160, width = 120, height = 32 },
     { name = "Resources",          label = "Primary Resource",    point = "CENTER", x =    0, y =  -80, width = 240, height = 18 },
     { name = "ResourceSecondary",  label = "Secondary Resource",  point = "CENTER", x =    0, y = -100, width = 240, height = 16 },
     { name = "CastBar",            label = "Cast Bar",            point = "CENTER", x =    0, y =  -40, width = 240, height = 22 },
+    { name = "DragonRiding",       label = "Dragon Riding",       point = "CENTER", x =    0, y = -260, width = 268, height = 34 },
 }
 
 local function CreateAnchorParent()
@@ -342,6 +367,7 @@ local function buildAnchor(def)
             applyPosition(dormantRT.frame, entry)
         end
         dormantRT.frame:Show()
+        registerVisibilityEntry(name)
         _tracePush(name, "REVIVE", {})
         vlog("Anchor revived from dormant cache: %s", name)
         return dormantRT
@@ -399,6 +425,9 @@ local function buildAnchor(def)
     }
     registry[name] = runtime
     f.runtime = runtime
+    runtime.restoreAlpha = (ns.savedVarsReady and Anchors:GetSavedAlpha(name)) or 1.0
+
+    registerVisibilityEntry(name)
 
     vlog("Anchor registered: %s at %s (%d,%d) %dx%d",
         name, tostring(pos.point), pos.x or 0, pos.y or 0, pos.width or 0, pos.height or 0)
@@ -430,6 +459,9 @@ function Anchors:Unregister(name)
     if not runtime then return false end
     registry[name] = nil
     dormantRegistry[name] = runtime
+    if ns.Visibility and ns.Visibility.UnregisterEntry then
+        ns.Visibility:UnregisterEntry(name)
+    end
     if runtime.frame then
         runtime.frame:Hide()
         runtime.frame:EnableMouse(false)
@@ -571,6 +603,11 @@ function Anchors:AutoFitSize(name, w, h)
     entry.width  = w
     entry.height = h
     writeOverlayEntry(name, entry)
+    if runtime.overlay and runtime.overlay._dragging then
+        runtime.frame:SetSize(w, h)
+        _tracePush(name, "AUTOFIT", { point = entry.point, x = entry.x, y = entry.y, w = w, h = h })
+        return
+    end
     applyPosition(runtime.frame, entry)
     _tracePush(name, "AUTOFIT", { point = entry.point, x = entry.x, y = entry.y, w = w, h = h })
     if ns.EditMode and ns.EditMode.RefreshOne then
@@ -848,7 +885,10 @@ function Anchors:ApplyProfile()
             local savedAlpha = (type(rawResolved) == "table") and rawResolved.alpha or nil
             if not isFiniteNumber(savedAlpha) then savedAlpha = 1.0 end
             if savedAlpha < 0 then savedAlpha = 0 elseif savedAlpha > 1 then savedAlpha = 1 end
-            runtime.frame:SetAlpha(savedAlpha)
+            runtime.restoreAlpha = savedAlpha
+            if not runtime.visHidden then
+                runtime.frame:SetAlpha(savedAlpha)
+            end
         end
         _tracePush(name, "APPLY", {
             point = entry.point, x = entry.x, y = entry.y,
@@ -897,6 +937,10 @@ function Anchors:ApplyProfile()
 
     if ns.EditMode and ns.EditMode.Refresh then
         ns.EditMode:Refresh()
+    end
+
+    if ns.Visibility and ns.Visibility.ScheduleUpdate then
+        ns.Visibility:ScheduleUpdate()
     end
 end
 
@@ -971,6 +1015,63 @@ function Anchors:Reapply(name)
     return true
 end
 
+function Anchors:GetSavedAlpha(name)
+    if not ns.savedVarsReady then return 1.0 end
+    local raw = resolveSavedEntry(name)
+    local a = (type(raw) == "table") and raw.alpha or nil
+    if not isFiniteNumber(a) then a = 1.0 end
+    if a < 0 then a = 0 elseif a > 1 then a = 1 end
+    return a
+end
+
+function Anchors:IsAnchorVisHidden(name)
+    local runtime = registry[name]
+    return (runtime and runtime.visHidden) and true or false
+end
+
+function Anchors:ApplyAlpha(name, alpha)
+    local runtime = registry[name]
+    if not runtime or not runtime.frame then return end
+    if not isFiniteNumber(alpha) then alpha = 1.0 end
+    if alpha < 0 then alpha = 0 elseif alpha > 1 then alpha = 1 end
+    runtime.restoreAlpha = alpha
+    if runtime.visHidden then return end
+    runtime.frame:SetAlpha(alpha)
+end
+
+function Anchors:SetAnchorVisible(name, show)
+    local runtime = registry[name]
+    if not runtime or not runtime.frame then return end
+    local f = runtime.frame
+    if show then
+        runtime.visHidden = false
+        local a = runtime.restoreAlpha
+        if not isFiniteNumber(a) then a = self:GetSavedAlpha(name) end
+        if a < 0 then a = 0 elseif a > 1 then a = 1 end
+        runtime.restoreAlpha = a
+        f:SetAlpha(a)
+        if runtime.restoreMouse ~= nil then
+            f:EnableMouse(runtime.restoreMouse)
+            runtime.restoreMouse = nil
+        end
+        _tracePush(name, "VIS_SHOW", { alpha = a })
+    else
+        if not runtime.visHidden then
+            local cur = f:GetAlpha()
+            if isFiniteNumber(cur) and cur > 0 then
+                runtime.restoreAlpha = cur
+            elseif not isFiniteNumber(runtime.restoreAlpha) then
+                runtime.restoreAlpha = self:GetSavedAlpha(name)
+            end
+            runtime.restoreMouse = f:IsMouseEnabled()
+        end
+        runtime.visHidden = true
+        f:SetAlpha(0)
+        f:EnableMouse(false)
+        _tracePush(name, "VIS_HIDE", {})
+    end
+end
+
 local function getSnapSettings()
     if not ns.savedVarsReady then return nil end
     local profile = ns:GetProfile()
@@ -1017,9 +1118,9 @@ local _gridEditModeActive = false
 
 function Anchors:GetSnapPoint(x, y, w, h, excludeAnchorName)
     local s = getSnapSettings()
-    if not s then return x, y, nil, nil end
-    local dist = tonumber(s.distance) or 12
-    if dist <= 0 then return x, y, nil, nil end
+    if not s then return x, y, nil, nil, false, false end
+    local dist = tonumber(s.distance) or 6
+    if dist <= 0 then return x, y, nil, nil, false, false end
     w = (type(w) == "number" and w >= 0) and w or 0
     h = (type(h) == "number" and h >= 0) and h or 0
     local gap = tonumber(s.gap) or 2
@@ -1051,30 +1152,59 @@ function Anchors:GetSnapPoint(x, y, w, h, excludeAnchorName)
         if pcx and pcy then
             local halfW = w * 0.5
             local halfH = h * 0.5
+            local dL = x - halfW
+            local dR = x + halfW
+            local dT = y + halfH
+            local dB = y - halfH
+
+            local closest, closestDist = nil, math_huge
             for name, runtime in pairs(registry) do
-                if name ~= excludeAnchorName and runtime.frame then
+                if name ~= excludeAnchorName and runtime.frame and not runtime.visHidden then
                     local fcx, fcy = runtime.frame:GetCenter()
                     local tw = runtime.frame:GetWidth()
                     local th = runtime.frame:GetHeight()
-                    if fcx and fcy and tw and th then
+                    if fcx and fcy and tw and th and tw > 0 and th > 0 then
                         local ax = fcx - pcx
                         local ay = fcy - pcy
-                        local tLeft   = ax - tw * 0.5
-                        local tRight  = ax + tw * 0.5
-                        local tTop    = ay + th * 0.5
-                        local tBottom = ay - th * 0.5
-                        tryY(tTop    + gap + halfH, tTop)
-                        tryY(tBottom - gap - halfH, tBottom)
-                        tryX(tRight  + gap + halfW, tRight)
-                        tryX(tLeft   - gap - halfW, tLeft)
-                        tryX(tLeft  + halfW, tLeft)
-                        tryX(tRight - halfW, tRight)
-                        tryX(ax, ax)
-                        tryY(tTop    - halfH, tTop)
-                        tryY(tBottom + halfH, tBottom)
-                        tryY(ay, ay)
+                        local oL = ax - tw * 0.5
+                        local oR = ax + tw * 0.5
+                        local oT = ay + th * 0.5
+                        local oB = ay - th * 0.5
+                        local gapX = 0
+                        if dR < oL then gapX = oL - dR
+                        elseif dL > oR then gapX = dL - oR end
+                        local gapY = 0
+                        if dB > oT then gapY = dB - oT
+                        elseif dT < oB then gapY = oB - dT end
+                        local edgeDist = math_sqrt(gapX * gapX + gapY * gapY)
+                        if edgeDist < closestDist then
+                            closestDist = edgeDist
+                            closest = runtime.frame
+                        end
                     end
                 end
+            end
+
+            if closest then
+                local fcx, fcy = closest:GetCenter()
+                local tw = closest:GetWidth()
+                local th = closest:GetHeight()
+                local ax = fcx - pcx
+                local ay = fcy - pcy
+                local tLeft   = ax - tw * 0.5
+                local tRight  = ax + tw * 0.5
+                local tTop    = ay + th * 0.5
+                local tBottom = ay - th * 0.5
+                tryY(tTop    + gap + halfH, tTop)
+                tryY(tBottom - gap - halfH, tBottom)
+                tryX(tRight  + gap + halfW, tRight)
+                tryX(tLeft   - gap - halfW, tLeft)
+                tryX(tLeft  + halfW, tLeft)
+                tryX(tRight - halfW, tRight)
+                tryX(ax, ax)
+                tryY(tTop    - halfH, tTop)
+                tryY(tBottom + halfH, tBottom)
+                tryY(ay, ay)
             end
         end
     end
@@ -1098,7 +1228,7 @@ function Anchors:GetSnapPoint(x, y, w, h, excludeAnchorName)
         end
     end
 
-    return bestX or x, bestY or y, bestGX, bestGY
+    return bestX or x, bestY or y, bestGX, bestGY, bestX ~= nil, bestY ~= nil
 end
 
 local guideFrame, guideV, guideH

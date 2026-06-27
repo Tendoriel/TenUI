@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.3.0] - 2026-06-27
+
+### Added
+
+- Per-bar Visibility: every bar can be shown or hidden by state (always, never, in combat, out of combat, in raid, in party or solo), with independent options to show only inside instances, hide while in housing, and hide while mounted or skyriding.
+- Max Stacks glow in the Cooldown Manager: charge abilities can now glow when they reach maximum charges, alongside the existing Proc and Ready glows.
+- Active Aura Glow and Pandemic Glow: the glow texture and style are now selectable and play on live auras for both the icon and bar displays, including the animated glow textures.
+- Consumables tracker in the Cooldown Manager (Healthstone, potions and more), with an icon grid to toggle which consumables are tracked and an option to add items by item ID; tracked consumables show their count, cooldown and combat lockout.
+- Profiles: assign a profile to each specialization so it switches automatically when you change spec, rename a profile, copy a whole profile, and an ordered profile list.
+- New Dragon Riding (Skyriding) HUD and settings tab: a skyriding speed bar with a Thrill threshold marker, Skyward Ascent and Second Wind charge pips, and the Whirling Surge cooldown.
+
+### Changed
+
+- Edit mode: smooth live snapping with no jitter or jump when you release an element, Shift to lock dragging to a single axis, and an adjustable snap distance; the element you are dragging now stays visible while it moves, and the pixel-nudge arrows appear only on the currently selected element.
+
+### Fixed
+
+- Demonology Soul Shard pip count no longer shows one shard too few.
+- Guardian summons (Summon Demonic Tyrant and Call Dreadstalkers) now show both their remaining duration and the countdown digits on Tracked Bars.
+- Tracked Bars and Tracked Icons now respect the "hide when mounted" option.
+- Improved cast bar empower and secret-value handling, and various combat-display robustness fixes.
+
 ## [0.2.0] - 2026-06-20
 
 ### Added
