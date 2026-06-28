@@ -154,6 +154,72 @@ local function dtrace(fmt, ...)
     end
 end
 
+function Auras._renderAlphaProbe(kind, slotFrame)
+    if type(kind) ~= "string" then return "" end
+    local anchorName = (kind == "TrackedBars") and BAR_ANCHOR_NAME or ICON_ANCHOR_NAME
+    local disp = (kind == "TrackedBars") and Auras.BarDisplay or Auras.IconDisplay
+    local container = disp and disp.container or nil
+    local anchorFrame
+    if ns.GetAnchor then
+        local rt = ns:GetAnchor(anchorName)
+        anchorFrame = rt and rt.frame or nil
+    end
+    local function ga(f) local ok, v = pcall(f.GetAlpha, f) return ok and v or nil end
+    local function gea(f) local ok, v = pcall(f.GetEffectiveAlpha, f) return ok and v or nil end
+    local function gsh(f) local ok, v = pcall(f.IsShown, f) return ok and (v and true or false) or nil end
+    local selfA = (type(slotFrame) == "table") and ga(slotFrame) or nil
+    local effA  = (type(slotFrame) == "table") and gea(slotFrame) or nil
+    local cA    = (type(container) == "table") and ga(container) or nil
+    local cSh   = (type(container) == "table") and gsh(container) or nil
+    local aA    = (type(anchorFrame) == "table") and ga(anchorFrame) or nil
+    local aSh   = (type(anchorFrame) == "table") and gsh(anchorFrame) or nil
+    local visHidden = (ns.Anchors and ns.Anchors.IsAnchorVisHidden and ns.Anchors:IsAnchorVisHidden(anchorName)) and true or false
+    local fillStr = "-"
+    local barFrame = (kind == "TrackedBars" and disp and disp.bars and disp.bars[1] and disp.bars[1].bar) or nil
+    if type(barFrame) == "table" and type(barFrame.GetValue) == "function" then
+        local okV, v = pcall(barFrame.GetValue, barFrame)
+        if okV then
+            if isSecret(v) then fillStr = "<secret>"
+            elseif type(v) == "number" then fillStr = ("%.3f"):format(v)
+            else fillStr = tostring(v) end
+        end
+    end
+    return ("selfAlpha=%s effAlpha=%s containerAlpha=%s containerShown=%s anchorAlpha=%s anchorShown=%s visHidden=%s fill=%s"):format(
+        tostring(selfA), tostring(effA), tostring(cA), tostring(cSh),
+        tostring(aA), tostring(aSh), tostring(visHidden), fillStr)
+end
+
+function Auras._renderTrace(kind, item, slotIdx, shownFlag, stage, slotFrame, decision)
+    if not (ns.Debug and ns.Debug.IsVerbose and ns.Debug:IsVerbose(AURAS_MODULE)) then return end
+    local cdID = "?"
+    if type(item) == "table" then
+        local id = item.cooldownID
+        if type(id) == "number" then cdID = tostring(id) end
+    end
+    local probe = ""
+    if (tonumber(slotIdx) == 1) and (stage == nil or stage == "reached-end") then
+        local now = (GetTime and GetTime()) or 0
+        Auras._renderProbeNext = Auras._renderProbeNext or {}
+        local key = tostring(kind)
+        if now >= (Auras._renderProbeNext[key] or 0) then
+            Auras._renderProbeNext[key] = now + 1.0
+            local okP, p = pcall(Auras._renderAlphaProbe, kind, slotFrame)
+            if okP and type(p) == "string" and p ~= "" then probe = " " .. p end
+        end
+    end
+    local decisionStr = ""
+    if type(decision) == "string" and decision ~= "" then
+        decisionStr = " " .. decision
+    end
+    dverbose("[RENDER %s] cdm:%s slot=%d shown=%s combat=%s%s%s stage=%s",
+        tostring(kind), cdID, tonumber(slotIdx) or -1,
+        shownFlag and "true" or "false",
+        tostring(InCombatLockdown and InCombatLockdown() or false),
+        decisionStr,
+        probe,
+        tostring(stage or "reached-end"))
+end
+
 local _warnOnceSeen = {}
 local function dwarnOnce(key, fmt, ...)
     if _warnOnceSeen[key] then return end
@@ -238,17 +304,28 @@ end
 
 Auras.PLACEHOLDER_ICON = [[Interface\Icons\INV_Misc_QuestionMark]]
 
+Auras._useViewerChildEmit = false
+
+Auras._useViewerStateAsPrimary = true
+
+function Auras._validTexture(v)
+    if isSecret(v) then return true end
+    if type(v) == "string" then return v ~= "" end
+    if type(v) == "number" then return v > 0 and v == math.floor(v) end
+    return false
+end
+
 function Auras._catalogDisplayTexture(e)
     if type(e) ~= "table" then return nil end
     local cached = e.displayIcon
-    if not isSecret(cached) and cached ~= nil and cached ~= false then return cached end
+    if Auras._validTexture(cached) then return cached end
     cached = e.icon
-    if not isSecret(cached) and cached ~= nil and cached ~= false then return cached end
+    if Auras._validTexture(cached) then return cached end
     if C_Spell and C_Spell.GetSpellTexture then
         for _, sid in ipairs({ e.spellID, e.overrideTooltipSpellID, e.overrideSpellID, e.linkedSpellID }) do
             if type(sid) == "number" and not isSecret(sid) and sid > 0 then
                 local ok, t = pcall(C_Spell.GetSpellTexture, sid)
-                if ok and t ~= nil and not isSecret(t) then return t end
+                if ok and Auras._validTexture(t) then return t end
             end
         end
     end
@@ -284,11 +361,25 @@ function Auras._repairOwnParentChain(f)
         guard = guard + 1
         if type(node.GetName) == "function" then
             local okN, name = pcall(node.GetName, node)
-            if okN and type(name) == "string"
-               and (name == "UIParent"
-                    or name == "TenUIAnchorParent"
-                    or name:sub(1, 12) == "TenUIAnchor_") then
-                break
+            if okN and type(name) == "string" then
+                if name == "UIParent" or name == "TenUIAnchorParent" then
+                    break
+                end
+                if name:sub(1, 12) == "TenUIAnchor_" then
+                    local anchorName = name:sub(13)
+                    local hidden = ns.Anchors and ns.Anchors.IsAnchorVisHidden
+                        and ns.Anchors:IsAnchorVisHidden(anchorName) or false
+                    if not hidden and type(node.GetAlpha) == "function" then
+                        local okA, av = pcall(node.GetAlpha, node)
+                        if okA and type(av) == "number" and av <= 0 and type(node.SetAlpha) == "function" then
+                            local restore = ns.Anchors and ns.Anchors.GetSavedAlpha
+                                and ns.Anchors:GetSavedAlpha(anchorName) or 1
+                            if type(restore) ~= "number" or restore <= 0 then restore = 1 end
+                            pcall(node.SetAlpha, node, restore)
+                        end
+                    end
+                    break
+                end
             end
         end
         local a
@@ -758,6 +849,16 @@ local function applySwipe(iconWidget, item, spellID)
         iconWidget._liveDurObjSecret = isSecret(sdur)
         pcall(iconWidget.SetCooldown, iconWidget, sdur)
         iconWidget._lastArmPath = "auras:summonBar"
+        return
+    end
+
+    if type(item) == "table" and item._probeDurObj ~= nil then
+        local pdur = item._probeDurObj
+        iconWidget._liveDurObj = pdur
+        iconWidget._liveDurObjType = type(pdur)
+        iconWidget._liveDurObjSecret = isSecret(pdur)
+        pcall(iconWidget.SetCooldown, iconWidget, pdur)
+        iconWidget._lastArmPath = "auras:spellIDprobe"
         return
     end
 
@@ -1405,6 +1506,19 @@ local function applyBarFill(slot, item, spellID)
     end
 
     if type(bar.SetTimerDuration) == "function"
+       and type(item) == "table" and item._probeDurObj ~= nil then
+        local pdur = item._probeDurObj
+        local okSet = pcall(bar.SetTimerDuration, bar, pdur,
+            BAR_TIMER_INTERP_IMMEDIATE, BAR_TIMER_DIR_REMAINING)
+        if okSet then
+            slot._liveDurObj = pdur
+            slot._liveDurObjType = type(pdur)
+            slot._liveDurObjSecret = isSecret(pdur)
+            return
+        end
+    end
+
+    if type(bar.SetTimerDuration) == "function"
        and spellID and C_Spell and C_Spell.GetSpellCooldownDuration then
         local ok, dur = pcall(C_Spell.GetSpellCooldownDuration, spellID, false)
         if ok and ns._auraPresentTruthy(dur) then
@@ -1441,7 +1555,8 @@ local function applyBarFill(slot, item, spellID)
         pcall(bar.SetTimerDuration, bar, nil)
     end
     bar:SetMinMaxValues(0, 1)
-    if type(item) == "table" and item.auraInstanceID ~= nil then
+    if type(item) == "table"
+       and (item.auraInstanceID ~= nil or item._presentSecret == true) then
         bar:SetValue(1)
     else
         bar:SetValue(0)
@@ -1807,7 +1922,10 @@ local function itemRuntimeActive(item)
                 local ok, ad = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
                 if ok and ad ~= nil then return true end
             end
-            if hasTarget and C_UnitAuras.GetAuraDataBySpellID then
+            if hasTarget and C_UnitAuras.GetUnitAuraBySpellID then
+                local ok, ad = pcall(C_UnitAuras.GetUnitAuraBySpellID, "target", sid)
+                if ok and ad ~= nil then return true end
+            elseif hasTarget and C_UnitAuras.GetAuraDataBySpellID then
                 local ok, ad = pcall(C_UnitAuras.GetAuraDataBySpellID, "target", sid, "HARMFUL")
                 if ok and ad ~= nil then return true end
             end
@@ -3057,11 +3175,38 @@ local function readChildCooldownID(child)
     return nil
 end
 
-local function childShownActive(child)
-    if type(child) ~= "table" then return false end
+function Auras._childIsActiveSecretSafe(child)
+    if type(child) ~= "table" then return nil end
     if child.auraInstanceID ~= nil then return true end
     local icon = child.Icon
     if type(icon) == "table" and icon.auraInstanceID ~= nil then return true end
+    if type(child.IsActive) == "function" then
+        local ok, active = pcall(child.IsActive, child)
+        if ok then return active and true or false end
+    end
+    local sc = child.cooldownSwipeColor
+    if sc and type(sc) ~= "number" and sc.GetRGBA then
+        local r = sc:GetRGBA()
+        if r and type(r) == "number" and not isSecret(r) then
+            return r ~= 0
+        end
+    end
+    local fieldActive
+    local okF = pcall(function() fieldActive = child.isActive end)
+    if okF then
+        if isSecret(fieldActive) then
+            return fieldActive and true or false
+        elseif type(fieldActive) == "boolean" then
+            return fieldActive
+        end
+    end
+    return nil
+end
+
+local function childShownActive(child)
+    if type(child) ~= "table" then return false end
+    local active = Auras._childIsActiveSecretSafe(child)
+    if active ~= nil then return active end
     if child.preferredTotemUpdateSlot ~= nil then return true end
     return false
 end
@@ -3150,28 +3295,37 @@ local function findLiveViewerChildByCooldownID(cooldownID, displayType)
     if type(cooldownID) ~= "number" then return nil end
     local vname = DISPLAYTYPE_VIEWER_NAME[displayType]
     if not vname then return nil end
+    local matchedInactive = false
+    local poolCount = 0
     local function searchViewer(viewerName)
         local viewer = getViewer(viewerName)
         if not viewer then return nil end
         local items = getItemFrames(viewer) or {}
+        poolCount = poolCount + #items
         for i = 1, #items do
             local child = items[i]
-            if readChildCooldownID(child) == cooldownID and childShownActive(child) then
-                local aInst = child.auraInstanceID
-                if aInst == nil and type(child.Icon) == "table" then
-                    aInst = child.Icon.auraInstanceID
-                end
-                if aInst ~= nil then
+            if readChildCooldownID(child) == cooldownID then
+                if childShownActive(child) then
                     return child
                 end
+                matchedInactive = true
             end
         end
         return nil
     end
     local child = searchViewer(vname)
-    if child then return child end
-    local otherName = (vname == BAR_VIEWER_NAME) and ICON_VIEWER_NAME or BAR_VIEWER_NAME
-    return searchViewer(otherName)
+    if not child then
+        local otherName = (vname == BAR_VIEWER_NAME) and ICON_VIEWER_NAME or BAR_VIEWER_NAME
+        child = searchViewer(otherName)
+    end
+    if child == nil and ns.Debug and ns.Debug.IsVerbose and ns.Debug:IsVerbose(AURAS_MODULE) then
+        dverbose("findLiveViewerChild MISS cdID=%s type=%s pool=%d reason=%s",
+            tostring(cooldownID), tostring(displayType), poolCount,
+            (poolCount == 0 and "pool-empty(viewer-unpopulated)")
+            or (matchedInactive and "matched-but-inactive")
+            or "no-cdID-match")
+    end
+    return child
 end
 
 Auras._readLiveBarDurationText = function(cooldownID)
@@ -3207,6 +3361,105 @@ Auras._readLiveBarDurationText = function(cooldownID)
         end
     end
     return nil
+end
+
+function Auras._viewerChildIsLive(child)
+    if type(child) ~= "table" then return false end
+    for vname in pairs(BUFF_VIEWER_NAMES) do
+        local viewer = getViewer(vname)
+        if viewer then
+            local items = getItemFrames(viewer) or {}
+            for i = 1, #items do
+                if items[i] == child then return true end
+            end
+        end
+    end
+    return false
+end
+
+function Auras._viewerChildActiveSignal(child)
+    if type(child) ~= "table" then return nil end
+    local active = Auras._childIsActiveSecretSafe(child)
+    if active ~= nil then return active and true or false end
+    if childShownActive(child) then return true end
+    if type(child.IsShown) == "function" then
+        local ok, shown = pcall(child.IsShown, child)
+        if ok and not isSecret(shown) and shown == true then return true end
+    end
+    return nil
+end
+
+function Auras._viewerChildAuraInstanceID(child)
+    if type(child) ~= "table" then return nil end
+    local aInst
+    local ok = pcall(function() aInst = child.auraInstanceID end)
+    if ok and aInst ~= nil then return aInst end
+    aInst = nil
+    if type(child.Icon) == "table" then
+        local ok2 = pcall(function() aInst = child.Icon.auraInstanceID end)
+        if ok2 and aInst ~= nil then return aInst end
+    end
+    if type(child.GetAuraSpellInstanceID) == "function" then
+        local ok3, v = pcall(child.GetAuraSpellInstanceID, child)
+        if ok3 and v ~= nil then return v end
+    end
+    return nil
+end
+
+function Auras._viewerChildAuraUnit(child)
+    if type(child) ~= "table" then return nil end
+    local unit
+    local ok = pcall(function() unit = child.auraDataUnit end)
+    if ok and type(unit) == "string" and not isSecret(unit) then return unit end
+    return nil
+end
+
+function Auras:ResolveAuraStateFromViewer(entry)
+    if type(entry) ~= "table" then return nil, nil end
+
+    local cdID = tonumber(entry.cooldownID)
+    if not cdID then return nil, nil end
+
+    local child = findLiveViewerChildByCooldownID(cdID, "TrackedBars")
+        or findLiveViewerChildByCooldownID(cdID, "TrackedIcon")
+    if type(child) ~= "table" then return false, nil end
+
+    local aInst = Auras._viewerChildAuraInstanceID(child)
+    if isSecret(aInst) then aInst = nil end
+    local unit = Auras._viewerChildAuraUnit(child) or "player"
+    local cooldownID = readChildCooldownID(child)
+
+    local duration, expirationTime, startTime, applications
+
+    local icon
+    do
+        local iconField = child.Icon
+        if type(iconField) == "table" and type(iconField.GetTexture) == "function" then
+            local ok, tex = pcall(iconField.GetTexture, iconField)
+            if ok and ns._auraPresentTruthy(tex) then icon = tex end
+        end
+    end
+
+    if aInst ~= nil and C_UnitAuras and C_UnitAuras.GetAuraApplicationDisplayCount then
+        local ok, txt = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, unit, aInst)
+        if ok and type(txt) == "string" then applications = txt end
+    end
+
+    local spellID = entry.overrideTooltipSpellID or entry.overrideSpellID or entry.spellID
+
+    local info = {
+        child          = child,
+        auraInstanceID = aInst,
+        auraDataUnit   = unit,
+        cooldownID     = cooldownID,
+        spellID        = spellID,
+        duration       = duration,
+        expirationTime = expirationTime,
+        startTime      = startTime,
+        applications   = applications,
+        icon           = icon,
+    }
+    return true, info
 end
 
 function Auras:GetCurrentScopeKey()
@@ -3469,6 +3722,167 @@ function Auras._clearBarCountdownNumbers(slot)
     pcall(cd.Hide, cd)
 end
 
+Auras._blizzBarFSCache = Auras._blizzBarFSCache or setmetatable({}, { __mode = "k" })
+
+function Auras._getBlizzBarFontStrings(blizzBar)
+    if type(blizzBar) ~= "table" then return nil, nil end
+    local cache = Auras._blizzBarFSCache
+    local cached = cache[blizzBar]
+    if cached and cached.nameFS ~= nil and cached.timerFS ~= nil then
+        local nameFS = cached.nameFS or nil
+        local timerFS = cached.timerFS or nil
+        if nameFS == false then nameFS = nil end
+        if timerFS == false then timerFS = nil end
+        return nameFS, timerFS
+    end
+    local nameFS, timerFS
+    if type(blizzBar.Name) == "table" and type(blizzBar.Name.GetText) == "function" then
+        nameFS = blizzBar.Name
+    end
+    if type(blizzBar.Duration) == "table" and type(blizzBar.Duration.GetText) == "function" then
+        timerFS = blizzBar.Duration
+    end
+    if (nameFS == nil or timerFS == nil) and type(blizzBar.GetRegions) == "function" then
+        local okR, regions = pcall(function() return { blizzBar:GetRegions() } end)
+        if okR and type(regions) == "table" then
+            local fsIdx = 0
+            for i = 1, #regions do
+                local rgn = regions[i]
+                if type(rgn) == "table" and type(rgn.GetObjectType) == "function" then
+                    local okT, objType = pcall(rgn.GetObjectType, rgn)
+                    if okT and objType == "FontString" then
+                        fsIdx = fsIdx + 1
+                        if fsIdx == 1 and nameFS == nil then nameFS = rgn end
+                        if fsIdx == 2 and timerFS == nil then timerFS = rgn end
+                    end
+                end
+            end
+        end
+    end
+    cache[blizzBar] = { nameFS = nameFS or false, timerFS = timerFS or false }
+    return nameFS, timerFS
+end
+
+function Auras._mirrorBlizzBarIntoSlot(slot, child, opts)
+    if type(slot) ~= "table" or type(child) ~= "table" then return false end
+    local bar = slot.bar
+    if type(bar) ~= "table" then return false end
+    opts = type(opts) == "table" and opts or nil
+
+    local blizzBar
+    do
+        local ok, b = pcall(function() return child.Bar end)
+        if ok and type(b) == "table" then blizzBar = b end
+    end
+    if blizzBar == nil and type(child.GetBarFrame) == "function" then
+        local ok, b = pcall(child.GetBarFrame, child)
+        if ok and type(b) == "table" then blizzBar = b end
+    end
+    if type(blizzBar) ~= "table" then return false end
+
+    local active = true
+    do
+        local laundered = Auras._childIsActiveSecretSafe(child)
+        if laundered ~= nil then
+            active = laundered and true or false
+        elseif type(child.IsShown) == "function" then
+            local okS, shown = pcall(child.IsShown, child)
+            if okS then active = shown and true or false end
+        end
+    end
+
+    pcall(function()
+        if type(bar.SetReverseFill) == "function" then bar:SetReverseFill(false) end
+    end)
+    pcall(function()
+        if type(bar.SetTimerDuration) == "function" then bar:SetTimerDuration(nil) end
+    end)
+    slot._liveDurObj = nil
+    slot._liveDurObjType = nil
+    slot._liveDurObjSecret = nil
+
+    pcall(function()
+        bar:SetMinMaxValues(blizzBar:GetMinMaxValues())
+    end)
+    pcall(function()
+        bar:SetValue(blizzBar:GetValue())
+    end)
+
+    if not (opts and opts.mirrorColor == false) then
+        pcall(function()
+            local srcTex = blizzBar:GetStatusBarTexture()
+            local dstTex = bar:GetStatusBarTexture()
+            if type(srcTex) == "table" and type(dstTex) == "table" then
+                local r, g, b, a = srcTex:GetVertexColor()
+                if r ~= nil then dstTex:SetVertexColor(r, g, b, a) end
+            end
+        end)
+    end
+
+    local aInst
+    pcall(function() aInst = child.auraInstanceID end)
+    if aInst == nil and type(child.Icon) == "table" then
+        pcall(function() aInst = child.Icon.auraInstanceID end)
+    end
+    if isSecret(aInst) then aInst = nil end
+    local unit
+    pcall(function() unit = child.auraDataUnit end)
+    if type(unit) ~= "string" or isSecret(unit) then unit = "player" end
+
+    if slot.nameFS and slot.nameFS.IsShown and slot.nameFS:IsShown() then
+        local nameStr
+        if aInst ~= nil and C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID then
+            local ok, ad = pcall(C_UnitAuras.GetAuraDataByAuraInstanceID, unit, aInst)
+            if ok and type(ad) == "table" and ad.name ~= nil then nameStr = ad.name end
+        end
+        if nameStr == nil then
+            local blizzNameFS = Auras._getBlizzBarFontStrings(blizzBar)
+            if type(blizzNameFS) == "table" and type(blizzNameFS.GetText) == "function" then
+                local ok, txt = pcall(blizzNameFS.GetText, blizzNameFS)
+                if ok and txt ~= nil then nameStr = txt end
+            end
+        end
+        if nameStr == nil then
+            local sid = type(slot._mirrorSpellID) == "number" and slot._mirrorSpellID or nil
+            if sid and C_Spell and C_Spell.GetSpellInfo then
+                local ok, si = pcall(C_Spell.GetSpellInfo, sid)
+                if ok and type(si) == "table" and si.name ~= nil then nameStr = si.name end
+            end
+        end
+        if nameStr ~= nil then pcall(slot.nameFS.SetText, slot.nameFS, ns._auraSafeText(nameStr)) end
+    end
+
+    if slot.icon and (slot._iconShown ~= false) then
+        local iconTex
+        if aInst ~= nil then iconTex = Auras._resolveLiveVariantIcon(unit, aInst) end
+        if not ns._auraPresentTruthy(iconTex) then iconTex = readViewerChildIconTexture(child) end
+        if not ns._auraPresentTruthy(iconTex) then
+            local sid = type(slot._mirrorSpellID) == "number" and slot._mirrorSpellID or nil
+            if sid and C_Spell and C_Spell.GetSpellInfo then
+                local ok, si = pcall(C_Spell.GetSpellInfo, sid)
+                if ok and type(si) == "table" and ns._auraPresentTruthy(si.iconID) then iconTex = si.iconID end
+            end
+        end
+        if Auras._validTexture(iconTex) then pcall(slot.icon.SetTexture, slot.icon, iconTex) end
+    end
+
+    local durText = ""
+    if not (opts and opts.showTimer == false) and slot.durFS then
+        local _, blizzTimerFS = Auras._getBlizzBarFontStrings(blizzBar)
+        if type(blizzTimerFS) == "table" and type(blizzTimerFS.GetText) == "function" then
+            local ok, txt = pcall(blizzTimerFS.GetText, blizzTimerFS)
+            if ok then durText = ns._auraSafeText(txt) end
+        end
+        pcall(slot.durFS.SetText, slot.durFS, durText)
+    elseif slot.durFS then
+        pcall(slot.durFS.SetText, slot.durFS, "")
+    end
+    pcall(Auras._clearBarCountdownNumbers, slot)
+    slot._mirrorDurText = durText
+
+    return active
+end
+
 local IconDisplay = {}
 IconDisplay.__index = IconDisplay
 
@@ -3581,21 +3995,9 @@ function IconDisplay:DestroyIcons()
     end
 end
 
-local function suppressViewerChildren(viewer)
-    if not viewer then return end
-    local items = getItemFrames(viewer) or {}
-    for i = 1, #items do
-        local item = items[i]
-        if type(item) == "table" and type(item.SetAlpha) == "function" then
-            pcall(item.SetAlpha, item, 0)
-        end
-    end
-end
-
 function IconDisplay:BuildActive()
     if not self:Enabled() then return {} end
     local viewer = getViewer(ICON_VIEWER_NAME)
-    suppressViewerChildren(viewer)
 
     local preview = cdmPreviewOpen()
     local active = buildActiveFromCatalog("TrackedIcon", preview) or {}
@@ -3701,29 +4103,47 @@ function IconDisplay:_RenderActiveImpl(active, suppressSet)
                 end
             end
 
-            local ok, err = pcall(function()
-                local tex = readItemIconTexture(item)
-                if ns._auraPresentTruthy(tex) then w:SetTexture(tex) end
-                local sid = readItemSpellID(item)
-                applySwipe(w, item, sid)
-                if showStack then
-                    local stack = readItemStackText(item)
-                    w:SetStackTextRaw(ns._auraSafeText(stack))
-                else
-                    w:SetStackTextRaw("")
+            if w.Show then pcall(w.Show, w) end
+            Auras._forceShowOwnFrame(self.container, 1)
+            Auras._forceShowOwnFrame(w.frame, 1)
+            if w.frame and w.frame.icon then Auras._forceShowOwnFrame(w.frame.icon, 1) end
+            Auras._repairOwnParentChain(w.frame)
+            shown = shown + 1
+
+            local sid
+            local okSid, sidRes = pcall(readItemSpellID, item)
+            if okSid then sid = sidRes end
+
+            do
+                local okTex = pcall(function()
+                    local tex = readItemIconTexture(item)
+                    if Auras._validTexture(tex) then w:SetTexture(tex) end
+                end)
+                if not okTex then Auras._renderTrace("TrackedIcon", item, i, true, "caught:texture") end
+            end
+            do
+                local okCd = pcall(applySwipe, w, item, sid)
+                if not okCd then Auras._renderTrace("TrackedIcon", item, i, true, "caught:cooldown") end
+            end
+            do
+                local okCnt = pcall(function()
+                    if showStack then
+                        local stack = readItemStackText(item)
+                        w:SetStackTextRaw(ns._auraSafeText(stack))
+                    else
+                        w:SetStackTextRaw("")
+                    end
+                end)
+                if not okCnt then Auras._renderTrace("TrackedIcon", item, i, true, "caught:count") end
+            end
+            do
+                local okCurve, curveApplied = pcall(Auras._applyIconLowTimeCurve, w, item, sid, "icon")
+                if okCurve and curveApplied ~= true then
+                    pcall(Auras._applyIconLowTimeTextColor, w, "icon")
                 end
-                if w.Show then w:Show() end
-                local curveApplied = Auras._applyIconLowTimeCurve(w, item, sid, "icon")
-                if not curveApplied then
-                    Auras._applyIconLowTimeTextColor(w, "icon")
-                end
-            end)
-            if ok then
-                shown = shown + 1
-                Auras._forceShowOwnFrame(self.container, 1)
-                Auras._forceShowOwnFrame(w.frame, 1)
-                if w.frame and w.frame.icon then Auras._forceShowOwnFrame(w.frame.icon, 1) end
-                Auras._repairOwnParentChain(w.frame)
+            end
+            do
+                local okGlow = pcall(function()
                 local pslot = ensurePandemicGlowIcon(w)
                 local pOpts = pandemicOpts(self.mod)
                 local okPP, perPandOn, perPandOpts = pcall(Auras.PerAuraPandemicGlow, item, pOpts)
@@ -3817,18 +4237,23 @@ function IconDisplay:_RenderActiveImpl(active, suppressSet)
                         pcall(applyPandemicGlow, pslot, false, pOpts)
                     end
                 end
-            else
-                if w.ClearCooldown then pcall(w.ClearCooldown, w) end
-                if w.SetStackTextRaw then pcall(w.SetStackTextRaw, w, "") end
-                if w.Hide then pcall(w.Hide, w) end
-                if w.frame and w.frame.ClearAllPoints then
-                    pcall(w.frame.ClearAllPoints, w.frame)
-                end
-                if w._pandemicSlot then
-                    pcall(applyPandemicGlow, w._pandemicSlot, false, nil)
-                end
-                dlogItemErrorOnce(item, "IconDisplay:Refresh", err)
+                end)
+                if not okGlow then Auras._renderTrace("TrackedIcon", item, i, true, "caught:glow") end
             end
+            local iconSrc = "live"
+            if type(item) == "table" then
+                if item.activeAuraSource == "viewerState" then
+                    iconSrc = "viewerState"
+                elseif item.activeAuraSource == "spellIDprobe" then
+                    iconSrc = "spellIDprobe"
+                elseif item._fromViewer then
+                    iconSrc = "viewerChild"
+                elseif item.auraInstanceID == nil then
+                    iconSrc = "live-secretInst"
+                end
+            end
+            Auras._renderTrace("TrackedIcon", item, i, true, "reached-end", w.frame,
+                "src=" .. iconSrc .. " arm=" .. tostring(w._lastArmPath))
         end
     end
 
@@ -4181,7 +4606,6 @@ end
 function BarDisplay:BuildActive()
     if not self:Enabled() then return {} end
     local viewer = getViewer(BAR_VIEWER_NAME)
-    suppressViewerChildren(viewer)
 
     local preview = cdmPreviewOpen()
     local active = buildActiveFromCatalog("TrackedBars", preview) or {}
@@ -4283,10 +4707,25 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
 
             local isIdle = type(item) == "table" and item._idle == true
 
-            local ok, err = pcall(function()
-                local tex = readItemIconTexture(item)
-                if slot.icon and ns._auraPresentTruthy(tex) then slot.icon:SetTexture(tex) end
-                if isIdle then
+            pcall(slot.frame.SetAlpha, slot.frame, isIdle and 0.5 or 1)
+            if slot.frame.Show then pcall(slot.frame.Show, slot.frame) end
+            Auras._forceShowOwnFrame(self.container, 1)
+            Auras._forceShowOwnFrame(slot.frame, isIdle and 0.5 or 1)
+            if slot.icon and slot._iconShown ~= false then Auras._forceShowOwnFrame(slot.icon, 1) end
+            if slot.bar then Auras._forceShowOwnFrame(slot.bar, 1) end
+            Auras._repairOwnParentChain(slot.frame)
+            shown = shown + 1
+
+            do
+                local okTex = pcall(function()
+                    local tex = readItemIconTexture(item)
+                    if slot.icon and Auras._validTexture(tex) then slot.icon:SetTexture(tex) end
+                end)
+                if not okTex then Auras._renderTrace("TrackedBars", item, i, true, "caught:texture") end
+            end
+
+            if isIdle then
+                pcall(function()
                     if slot.nameFS then
                         slot.nameFS:SetText(ns._auraSafeText(readBarName(item)))
                     end
@@ -4307,68 +4746,126 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
                     slot._liveDurObj = nil
                     slot._liveDurObjType = nil
                     slot._liveDurObjSecret = nil
-                    slot.frame:SetAlpha(0.5)
-                    slot.frame:Show()
-                    return
-                end
-                slot.frame:SetAlpha(1)
-                if slot.nameFS then
-                    local nameText = ""
-                    if showName then nameText = ns._auraSafeText(readBarName(item)) end
-                    slot.nameFS:SetText(nameText)
-                end
-                local isSummon = type(item) == "table" and item._summonDurObj ~= nil
-                local summonDigits = false
-                if isSummon and showTimer then
-                    summonDigits = Auras._driveBarCountdownNumbers(slot, item._summonDurObj)
-                else
-                    Auras._clearBarCountdownNumbers(slot)
-                end
-                local durText = ""
-                if showTimer and not summonDigits then
-                    durText = ns._auraSafeText(readBarDuration(item))
-                end
-                if slot.durFS then
-                    slot.durFS:SetText(durText)
-                end
-                local sid = readItemSpellID(item)
-                applyBarFill(slot, item, sid)
-                local curveApplied = Auras._applyBarLowTimeCurve(slot, item, sid)
-                if not curveApplied then
-                    if slot.durFS then
-                        Auras._applyAuraTimerTextColor(slot.durFS, durText, "bar")
-                    end
-                    Auras._applyBarLowTimeFill(slot, durText)
-                end
-                slot.frame:Show()
-            end)
-            do
-                local fw, iw = -1, -1
-                if type(f.GetWidth) == "function" then
-                    local okW, w = pcall(f.GetWidth, f)
-                    if okW and type(w) == "number" then fw = w end
-                end
-                if slot.bar and type(slot.bar.GetWidth) == "function" then
-                    local okIW, w = pcall(slot.bar.GetWidth, slot.bar)
-                    if okIW and type(w) == "number" then iw = w end
-                end
-                dtrace("BarDisplay:slot[%d] barW=%s frameW=%.0f innerW=%.0f preview=%s",
-                    i, tostring(barW), fw, iw, tostring(type(item) == "table" and item._preview == true))
-            end
-            if ok then
-                Auras._forceShowOwnFrame(self.container, 1)
-                Auras._forceShowOwnFrame(slot.frame, isIdle and 0.5 or 1)
-                if slot.icon and slot._iconShown ~= false then Auras._forceShowOwnFrame(slot.icon, 1) end
-                if slot.bar then Auras._forceShowOwnFrame(slot.bar, 1) end
-                Auras._repairOwnParentChain(slot.frame)
-            end
-            if ok and isIdle then
-                shown = shown + 1
+                end)
                 pcall(clearSecretPandemicVisual, slot)
                 pcall(applyPandemicGlow, slot, false, nil)
                 Auras.RecordActiveGlowEval(slot, "skip:idle-row")
-            elseif ok then
-                shown = shown + 1
+                Auras._renderTrace("TrackedBars", item, i, true, "reached-end", slot.frame,
+                    "alphaBranch=idle(0.5) active=no")
+            else
+                local sid
+                local okSid, sidRes = pcall(readItemSpellID, item)
+                if okSid then sid = sidRes end
+                slot._mirrorSpellID = sid
+
+                local mirrorChild
+                if type(item) == "table" and type(item.cooldownID) == "number" then
+                    local okC, c = pcall(findLiveViewerChildByCooldownID, item.cooldownID, "TrackedBars")
+                    if okC and type(c) == "table" then mirrorChild = c end
+                end
+                local mirrored = false
+                local mirrorInactive = false
+                if mirrorChild then
+                    local okM, mActive = pcall(Auras._mirrorBlizzBarIntoSlot, slot, mirrorChild, {
+                        showName  = showName,
+                        showTimer = showTimer,
+                        showIcon  = showIcon,
+                    })
+                    if okM then
+                        if mActive == false then
+                            mirrorInactive = true
+                        else
+                            mirrored = true
+                        end
+                    else
+                        Auras._renderTrace("TrackedBars", item, i, true, "caught:mirror")
+                    end
+                end
+
+                local durText = ""
+                local isSummon = type(item) == "table" and item._summonDurObj ~= nil
+                if mirrorInactive then
+                    pcall(function()
+                        if slot.frame then slot.frame:SetAlpha(0.5) end
+                        if slot.nameFS then slot.nameFS:SetText(ns._auraSafeText(readBarName(item))) end
+                        if slot.durFS then slot.durFS:SetText("") end
+                        Auras._clearBarCountdownNumbers(slot)
+                        if slot.bar then
+                            if type(slot.bar.SetTimerDuration) == "function" then
+                                pcall(slot.bar.SetTimerDuration, slot.bar, nil)
+                            end
+                            slot.bar:SetMinMaxValues(0, 1)
+                            slot.bar:SetValue(0)
+                            slot.bar:SetStatusBarColor(
+                                type(slot._baseFillR) == "number" and slot._baseFillR or 1,
+                                type(slot._baseFillG) == "number" and slot._baseFillG or 1,
+                                type(slot._baseFillB) == "number" and slot._baseFillB or 1,
+                                type(slot._baseFillA) == "number" and slot._baseFillA or 1)
+                        end
+                        slot._liveDurObj = nil
+                        slot._liveDurObjType = nil
+                        slot._liveDurObjSecret = nil
+                    end)
+                    pcall(clearSecretPandemicVisual, slot)
+                    pcall(applyPandemicGlow, slot, false, nil)
+                    Auras.RecordActiveGlowEval(slot, "skip:mirror-inactive")
+                    Auras._renderTrace("TrackedBars", item, i, true, "reached-end", slot.frame,
+                        "alphaBranch=idle(0.5) active=no src=viewerState arm=mirror:inactive")
+                elseif mirrored then
+                    durText = type(slot._mirrorDurText) == "string" and slot._mirrorDurText
+                        or ns._auraSafeText(slot._mirrorDurText)
+                    do
+                        local okCurve, curveApplied = pcall(Auras._applyBarLowTimeCurve, slot, item, sid)
+                        if not okCurve or curveApplied ~= true then
+                            if slot.durFS then
+                                pcall(Auras._applyAuraTimerTextColor, slot.durFS, durText, "bar")
+                            end
+                        end
+                    end
+                else
+                do
+                    local okName = pcall(function()
+                        if slot.nameFS then
+                            local nameText = ""
+                            if showName then nameText = ns._auraSafeText(readBarName(item)) end
+                            slot.nameFS:SetText(nameText)
+                        end
+                    end)
+                    if not okName then Auras._renderTrace("TrackedBars", item, i, true, "caught:name") end
+                end
+
+                local okFill = pcall(applyBarFill, slot, item, sid)
+                if not okFill then Auras._renderTrace("TrackedBars", item, i, true, "caught:cooldown") end
+
+                local durDigits = false
+                if showTimer then
+                    local digitDurObj = isSummon and item._summonDurObj or slot._liveDurObj
+                    local okDigits, drove = pcall(Auras._driveBarCountdownNumbers, slot, digitDurObj)
+                    durDigits = okDigits and drove == true
+                    if not okDigits then Auras._renderTrace("TrackedBars", item, i, true, "caught:count") end
+                else
+                    pcall(Auras._clearBarCountdownNumbers, slot)
+                end
+                if showTimer and not durDigits then
+                    local okDur, dt = pcall(readBarDuration, item)
+                    if okDur then durText = ns._auraSafeText(dt) end
+                end
+                pcall(function()
+                    if slot.durFS then slot.durFS:SetText(durText) end
+                end)
+                do
+                    local okCurve, curveApplied = pcall(Auras._applyBarLowTimeCurve, slot, item, sid)
+                    if not okCurve or curveApplied ~= true then
+                        if slot.durFS then
+                            pcall(Auras._applyAuraTimerTextColor, slot.durFS, durText, "bar")
+                        end
+                        pcall(Auras._applyBarLowTimeFill, slot, durText)
+                    end
+                end
+                end
+
+                if not mirrorInactive then
+                local okGlow = pcall(function()
                 local pOpts = pandemicOpts(self.mod)
                 local okPP, perPandOn, perPandOpts = pcall(Auras.PerAuraPandemicGlow, item, pOpts)
                 if not okPP then perPandOn, perPandOpts = nil, nil end
@@ -4461,11 +4958,56 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
                         pcall(applyPandemicGlow, slot, false, pOpts)
                     end
                 end
-            else
-                pcall(slot.frame.Hide, slot.frame)
-                pcall(slot.frame.ClearAllPoints, slot.frame)
-                pcall(applyPandemicGlow, slot, false, nil)
-                dlogItemErrorOnce(item, "BarDisplay:Refresh", err)
+                end)
+                if not okGlow then Auras._renderTrace("TrackedBars", item, i, true, "caught:glow") end
+                local presenceTag
+                if mirrored then
+                    presenceTag = "viewerState"
+                elseif isSummon then
+                    presenceTag = "summon"
+                elseif type(item) == "table" and item.activeAuraSource == "viewerState" then
+                    presenceTag = "viewerState"
+                elseif type(item) == "table" and item.activeAuraSource == "spellIDprobe" then
+                    presenceTag = "spellIDprobe"
+                elseif type(item) == "table" and item._fromViewer then
+                    presenceTag = "viewerChild"
+                elseif type(item) == "table" and item.auraInstanceID == nil then
+                    presenceTag = "live-secretInst"
+                else
+                    presenceTag = "reconstruct"
+                end
+                local fillState = "fill?"
+                if mirrored then
+                    fillState = "fillMirror"
+                elseif slot._liveDurObj ~= nil then
+                    fillState = "fill>0"
+                elseif type(slot.bar) == "table" and type(slot.bar.GetValue) == "function" then
+                    local okV, v = pcall(slot.bar.GetValue, slot.bar)
+                    if okV and type(v) == "number" and not isSecret(v) then
+                        fillState = v > 0 and "fill>0" or "fill=0"
+                    elseif okV and isSecret(v) then
+                        fillState = "fillSecret"
+                    end
+                end
+                local armTag = mirrored and "mirror:blizzBar" or "reconstruct"
+                Auras._renderTrace("TrackedBars", item, i, true, "reached-end", slot.frame,
+                    "alphaBranch=present(1.0) active=yes src=" .. presenceTag .. " arm=" .. armTag
+                    .. " " .. fillState)
+                end
+            end
+
+            do
+                local fw, iw = -1, -1
+                if type(f.GetWidth) == "function" then
+                    local okW, ww = pcall(f.GetWidth, f)
+                    if okW and type(ww) == "number" then fw = ww end
+                end
+                if slot.bar and type(slot.bar.GetWidth) == "function" then
+                    local okIW, ww = pcall(slot.bar.GetWidth, slot.bar)
+                    if okIW and type(ww) == "number" then iw = ww end
+                end
+                dtrace("BarDisplay:slot[%d] barW=%s frameW=%.0f innerW=%.0f preview=%s",
+                    i, tostring(barW), fw, iw, tostring(type(item) == "table" and item._preview == true))
             end
         end
     end
@@ -5616,6 +6158,177 @@ function Auras:DumpActiveDiagnostic()
     return lines
 end
 
+function Auras:DumpViewerState()
+    local lines = {}
+    local function push(fmt, ...)
+        if select("#", ...) > 0 then
+            local ok, s = pcall(string.format, fmt, ...)
+            lines[#lines + 1] = ok and s or fmt
+        else
+            lines[#lines + 1] = fmt
+        end
+    end
+    local function S(v)
+        if isSecret(v) then return "<secret>" end
+        if v == nil then return "nil" end
+        return tostring(v)
+    end
+    local function boolMethod(child, methodName)
+        if type(child) ~= "table" or type(child[methodName]) ~= "function" then return "-" end
+        local ok, v = pcall(child[methodName], child)
+        if not ok then return "err" end
+        return S(v)
+    end
+    local function fieldStr(child, fieldName)
+        if type(child) ~= "table" then return "-" end
+        local ok, v = pcall(function() return child[fieldName] end)
+        if not ok then return "err" end
+        if v == nil then return "-" end
+        return S(v)
+    end
+
+    local function poolActiveChildren(viewer)
+        local out = {}
+        if type(viewer) ~= "table" then return out, false end
+        local pool = viewer.itemFramePool
+        if type(pool) ~= "table" or type(pool.EnumerateActive) ~= "function" then
+            return out, false
+        end
+        pcall(function()
+            for itemFrame in pool:EnumerateActive() do
+                out[#out + 1] = itemFrame
+            end
+        end)
+        return out, true
+    end
+
+    local function childName(child)
+        if type(child) ~= "table" or type(child.GetName) ~= "function" then return "-" end
+        local ok, n = pcall(child.GetName, child)
+        if ok and type(n) == "string" and n ~= "" then return n end
+        return "(anon)"
+    end
+
+    local inCombat = InCombatLockdown and InCombatLockdown()
+    local totalActive = 0
+    local resolvedActive = 0
+    push("=== /tenui auras viewerstate -- buff-viewer pool + resolver dump ===")
+    push("  context: %s   target=%s   useViewerStateAsPrimary=%s",
+        inCombat and "IN COMBAT" or "out of combat",
+        (UnitExists and UnitExists("target")) and "yes" or "no",
+        tostring(self._useViewerStateAsPrimary == true))
+
+    for _, vName in ipairs({ ICON_VIEWER_NAME, BAR_VIEWER_NAME }) do
+        local viewer = getViewer(vName)
+        if not viewer then
+            push("  %s: GLOBAL FRAME ABSENT (getViewer returned nil)", vName)
+        else
+            local shownN = "?"
+            if type(viewer.IsShown) == "function" then
+                local ok, s = pcall(viewer.IsShown, viewer)
+                if ok then shownN = s and "shown" or "hidden" end
+            end
+            local active, hasPool = poolActiveChildren(viewer)
+            totalActive = totalActive + #active
+            if not hasPool then
+                push("  %s: EXISTS IsShown=%s  itemFramePool ABSENT or no EnumerateActive",
+                    vName, shownN)
+            else
+                push("  %s: EXISTS IsShown=%s  itemFramePool:EnumerateActive() -> %d active child(ren)",
+                    vName, shownN, #active)
+            end
+            do
+                local hasSecret, anyAspect, anchorSecret = "n/a", "n/a", "n/a"
+                if type(viewer.HasSecretValues) == "function" then
+                    local ok, v = pcall(viewer.HasSecretValues, viewer)
+                    if ok then hasSecret = v and "YES" or "no" end
+                end
+                if type(viewer.HasAnySecretAspect) == "function" then
+                    local ok, v = pcall(viewer.HasAnySecretAspect, viewer)
+                    if ok then anyAspect = v and "YES" or "no" end
+                end
+                if type(viewer.IsAnchoringSecret) == "function" then
+                    local ok, v = pcall(viewer.IsAnchoringSecret, viewer)
+                    if ok then anchorSecret = v and "YES" or "no" end
+                end
+                push("    TAINT: HasSecretValues=%s HasAnySecretAspect=%s IsAnchoringSecret=%s  (if any YES -> viewer tainted -> RefreshData faults on SPELL_UPDATE_COOLDOWN -> :382/:454 flood. Source: C_EditMode.SaveLayouts reapply. /reload to clear.)",
+                    hasSecret, anyAspect, anchorSecret)
+            end
+            if #active == 0 then
+                push("    POOL EMPTY (0 active children)")
+            end
+            for i = 1, #active do
+                local child = active[i]
+                local cdID = readChildCooldownID(child)
+                push("    [%d] name=%s cdID=%s IsShown=%s inEnumerateActive=yes IsActive=%s childShownActive=%s",
+                    i, childName(child), S(cdID),
+                    boolMethod(child, "IsShown"),
+                    boolMethod(child, "IsActive"),
+                    tostring(childShownActive(child)))
+                push("        auraInstanceID=%s auraDataUnit=%s isActive=%s isOnCooldown=%s",
+                    fieldStr(child, "auraInstanceID"),
+                    fieldStr(child, "auraDataUnit"),
+                    fieldStr(child, "isActive"),
+                    fieldStr(child, "isOnCooldown"))
+                if type(child) == "table" and cdID then
+                    local liveTxt = Auras._readLiveBarDurationText(cdID)
+                    push("        liveDurationText=%s  (GetCooldownValues NOT called: mutates child -> taint)",
+                        isSecret(liveTxt) and "<secret>" or S(liveTxt))
+                end
+            end
+        end
+    end
+
+    local function dumpEntries(displayType, header)
+        push("--- %s: per-tracked-entry resolver result ---", header)
+        local cat = buildAuraCatalog(displayType)
+        if type(cat) ~= "table" or #cat == 0 then
+            push("  (no tracked entries configured for this category)")
+            return
+        end
+        for i = 1, #cat do
+            local e = cat[i]
+            if type(e) == "table" then
+                local cdNum = tonumber(e.cooldownID)
+                local foundChild
+                if cdNum then
+                    foundChild = findLiveViewerChildByCooldownID(cdNum, "TrackedBars")
+                        or findLiveViewerChildByCooldownID(cdNum, "TrackedIcon")
+                end
+                local active, info = self:ResolveAuraStateFromViewer(e)
+                if active == true then resolvedActive = resolvedActive + 1 end
+                local activeStr
+                if active == nil then activeStr = "|cffffcc00nil(fall back)|r"
+                elseif active == true then activeStr = "|cff66ff66ACTIVE|r"
+                else activeStr = "|cffaaaaaafalse(no live child)|r" end
+                push("  [%s] cdID=%s sid=%s -> childByCooldownID=%s resolver=%s",
+                    S(e.label or e.displayName), S(e.cooldownID), S(e.spellID),
+                    (type(foundChild) == "table") and "FOUND" or "none", activeStr)
+                if type(info) == "table" then
+                    push("        info: aInst=%s unit=%s cdID=%s dur=%s exp=%s stacks=%s icon=%s",
+                        S(info.auraInstanceID), S(info.auraDataUnit), S(info.cooldownID),
+                        S(info.duration), S(info.expirationTime), S(info.applications),
+                        S(info.icon))
+                end
+            end
+        end
+    end
+    local okI = pcall(dumpEntries, "TrackedIcon", "Tracked Buffs (icons)")
+    if not okI then push("  (TrackedIcon entry dump errored)") end
+    local okB = pcall(dumpEntries, "TrackedBars", "Tracked Bars")
+    if not okB then push("  (TrackedBars entry dump errored)") end
+    push("=== SUMMARY: %d total active pool child(ren) across both viewers; %d tracked entr(ies) resolved ACTIVE ===",
+        totalActive, resolvedActive)
+    if totalActive == 0 then
+        push("  VERDICT: viewer pools are EMPTY -- Blizzard is not populating BuffIconCooldownViewer/BuffBarCooldownViewer, so cooldownID matching cannot find children. Next step: ensure the Blizzard CDM is enabled/populated for these categories.")
+    elseif resolvedActive == 0 then
+        push("  VERDICT: pools have children but NO tracked entry matched by cooldownID+active. Compare per-child cdID above against per-entry cdID.")
+    else
+        push("  VERDICT: %d entr(ies) resolve ACTIVE via cooldownID -- these should render in combat with src=viewerState.", resolvedActive)
+    end
+    return lines
+end
+
 function Auras:DumpAuraIdentity()
     local lines = {}
     local function push(fmt, ...)
@@ -5838,7 +6551,7 @@ function Auras:DumpPipeline()
     push("  forceViewerPopulated: %s  (%s)",
         forcePop and "ON" or "OFF (default)",
         forcePop
-            and "viewer kept IsShown()==true+invisible; viewerChild is a LEGITIMATE presence source"
+            and "viewerChild used as a presence source WHEN Blizzard shows the viewer (we never SetShown/Show the Blizzard viewer -- that would taint its refresh); primary presence is _liveAuraByEntry from UNIT_AURA deltas"
             or "engine spellID-family ticker query is the SOLE presence source")
     if self.GetLowTimeTextConfig then
         local ltEn, ltThr = self:GetLowTimeTextConfig()
@@ -6177,10 +6890,10 @@ function Auras:DumpPipeline()
             if inCombat then
                 if forcePop then
                     push("    -> SOURCE produced 0 IN COMBAT with forceViewerPopulated ON.")
-                    push("       If a TARGET debuff is actually up, confirm the viewer is")
-                    push("       IsShown()==true (section A) so its engine can fill the")
-                    push("       child auraInstanceID. If IsShown==false, Blizzard reverted")
-                    push("       our SetShown(true) -- the next ticker tick re-asserts it.")
+                    push("       Primary presence is _liveAuraByEntry (UNIT_AURA deltas); the")
+                    push("       viewerChild fallback only works while BLIZZARD shows the viewer")
+                    push("       (section A IsShown()==true). We never force-show it (taint). If")
+                    push("       IsShown==false, set the spell's CDM visibility to Always/InCombat.")
                 else
                     push("    -> SOURCE produced 0 IN COMBAT. If auras are actually up, the")
                     push("       engine by-spellID query is combat-blinded; presence then")
@@ -6613,15 +7326,14 @@ function Auras:PandemicProbe(cdID)
                     local okI, inT = pcall(item.IsInPandemicTime, item, GetTime())
                     push("  IsInPandemicTime(now) = %s", okI and tostring(inT) or "errored")
                 end
-                if type(item.GetValidAlertTypes) == "function" then
-                    local okA, vat = pcall(item.GetValidAlertTypes, item)
-                    if okA and type(vat) == "table" then
-                        local keys = {}
-                        for k in pairs(vat) do keys[#keys + 1] = tostring(k) end
-                        push("  GetValidAlertTypes(): { %s }", table.concat(keys, ", "))
-                    else
-                        push("  GetValidAlertTypes(): %s", okA and "non-table" or "errored")
-                    end
+                local vat = type(item.validAlertTypes) == "table" and item.validAlertTypes or nil
+                if vat then
+                    local keys = {}
+                    for k in pairs(vat) do keys[#keys + 1] = tostring(k) end
+                    push("  validAlertTypes field: { %s }", table.concat(keys, ", "))
+                else
+                    push("  validAlertTypes field: %s  (GetValidAlertTypes NOT called: mutates child -> taint)",
+                        item.validAlertTypes == nil and "nil" or type(item.validAlertTypes))
                 end
                 if type(item.IsShown) == "function" then
                     local okIS, ish = pcall(item.IsShown, item)
@@ -6801,11 +7513,122 @@ local function migrateSchema(p)
     p._migratedSplit = true
 end
 
+if type(_G.StaticPopupDialogs) == "table" and not _G.StaticPopupDialogs["TENUI_CDM_EDITMODE_RELOAD"] then
+    _G.StaticPopupDialogs["TENUI_CDM_EDITMODE_RELOAD"] = {
+        text = "TenUI updated your Cooldown Manager Edit Mode settings so cooldown/aura tracking works in combat.\n\nA UI reload is REQUIRED now. Until you reload, cooldown/aura tracking will be broken in combat.",
+        button1 = _G.RELOADUI or "Reload UI",
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = false,
+        noCancelOnReuse = true,
+        preferredIndex = 3,
+        showAlert = true,
+        OnAccept = function() if _G.ReloadUI then _G.ReloadUI() end end,
+    }
+end
+
+function Auras:EnforceCDMViewerAlwaysVisible()
+    if self._editModePolicyApplied then return false end
+    if InCombatLockdown and InCombatLockdown() then return false end
+    if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts
+            and Enum and Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
+            and Enum.EditModeCooldownViewerSetting and Enum.CooldownViewerVisibleSetting
+            and Enum.EditModeCooldownViewerSetting.VisibleSetting ~= nil
+            and Enum.CooldownViewerVisibleSetting.Always ~= nil) then
+        return false
+    end
+
+    local okLayout, layoutInfo = pcall(C_EditMode.GetLayouts)
+    if not okLayout or type(layoutInfo) ~= "table" or type(layoutInfo.layouts) ~= "table" then
+        return false
+    end
+
+    local numPresets = 0
+    if _G.EditModePresetLayoutManager
+       and type(_G.EditModePresetLayoutManager.GetCopyOfPresetLayouts) == "function"
+       and type(_G.tAppendAll) == "function" then
+        local okP, presets = pcall(_G.EditModePresetLayoutManager.GetCopyOfPresetLayouts, _G.EditModePresetLayoutManager)
+        if okP and type(presets) == "table" then
+            numPresets = #presets
+            _G.tAppendAll(presets, layoutInfo.layouts)
+            layoutInfo.layouts = presets
+        end
+    end
+
+    local activeIdx = layoutInfo.activeLayout
+    local activeLayout = type(activeIdx) == "number" and layoutInfo.layouts[activeIdx]
+    if type(activeLayout) ~= "table" or type(activeLayout.systems) ~= "table" then
+        return false
+    end
+
+    if numPresets > 0 and type(activeIdx) == "number" and activeIdx <= numPresets then
+        self._editModePolicyApplied = true
+        return false
+    end
+
+    local cooldownSystem = Enum.EditModeSystem.CooldownViewer
+    local visSetting     = Enum.EditModeCooldownViewerSetting.VisibleSetting
+    local visAlways      = Enum.CooldownViewerVisibleSetting.Always
+    local changed = false
+
+    for _, sysInfo in ipairs(activeLayout.systems) do
+        if sysInfo.system == cooldownSystem and type(sysInfo.settings) == "table" then
+            for _, s in ipairs(sysInfo.settings) do
+                if s.setting == visSetting then
+                    if s.value ~= visAlways then
+                        s.value = visAlways
+                        changed = true
+                    end
+                    break
+                end
+            end
+        end
+    end
+
+    self._editModePolicyApplied = true
+    dinfo("EnforceCDMViewerAlwaysVisible: latched changed=%s presets=%d",
+        tostring(changed), numPresets)
+    if not changed then return false end
+
+    dwarn("EnforceCDMViewerAlwaysVisible: calling C_EditMode.SaveLayouts -- this triggers EDIT_MODE_LAYOUTS_UPDATED -> UpdateSystems in TenUI's tainted context, which TAINTS the CooldownViewer system frames until /reload. Forcing a reload now. (one-shot per session)")
+    local okSave = pcall(C_EditMode.SaveLayouts, layoutInfo)
+    if not okSave then
+        dwarn("EnforceCDMViewerAlwaysVisible: SaveLayouts failed")
+        return false
+    end
+
+    if _G.StaticPopup_Show then
+        pcall(_G.StaticPopup_Show, "TENUI_CDM_EDITMODE_RELOAD")
+    end
+    return true
+end
+
+function Auras:EnsureCDMViewerEditModePolicy()
+    if self._editModePolicyApplied then return end
+    if not (InCombatLockdown and InCombatLockdown()) then
+        self:EnforceCDMViewerAlwaysVisible()
+        return
+    end
+    if self._editModePolicyDeferred then return end
+    self._editModePolicyDeferred = true
+    local f = CreateFrame("Frame")
+    self._editModePolicyDeferFrame = f
+    f:RegisterEvent("PLAYER_REGEN_ENABLED")
+    f:SetScript("OnEvent", function(frame)
+        frame:UnregisterAllEvents()
+        frame:SetScript("OnEvent", nil)
+        Auras._editModePolicyDeferred = nil
+        Auras._editModePolicyDeferFrame = nil
+        Auras:EnforceCDMViewerAlwaysVisible()
+    end)
+end
+
 local SUPPRESSED_VIEWER_NAMES = { ICON_VIEWER_NAME, BAR_VIEWER_NAME }
 
 local _lastLoggedAlpha = {}
 
 local function setViewerAlpha(name, alpha)
+    if InCombatLockdown and InCombatLockdown() then return false end
     local v = _G[name]
     if type(v) ~= "table" or type(v.SetAlpha) ~= "function" then
         if _lastLoggedAlpha[name] ~= "missing" then
@@ -6845,21 +7668,53 @@ local function forceShownViewer(name)
     end
     if isShown == false then
         if _lastForceShownLog[name] ~= true then
-            dtrace("forceShownViewer " .. tostring(name) .. " -> SetShown(true) (was hidden)")
+            dtrace("forceShownViewer " .. tostring(name)
+                .. " -> Blizzard hides this viewer (CDM visibility); NOT force-shown (would taint Blizzard refresh)")
             _lastForceShownLog[name] = true
         end
-        if type(v.SetShown) == "function" then
-            pcall(v.SetShown, v, true)
-        elseif type(v.Show) == "function" then
-            pcall(v.Show, v)
-        end
+    else
+        _lastForceShownLog[name] = nil
     end
-    return true
+    return isShown == true
 end
 
 function Auras:IsForceViewerPopulated()
     local p = self.profileRef
     return p and p.forceViewerPopulated == true
+end
+
+function Auras:_ViewerFrameTainted(name)
+    local v = _G[name]
+    if type(v) ~= "table" then return false end
+    if type(v.HasSecretValues) == "function" then
+        local ok, s = pcall(v.HasSecretValues, v)
+        if ok and s == true then return true end
+    end
+    if type(v.HasAnySecretAspect) == "function" then
+        local ok, s = pcall(v.HasAnySecretAspect, v)
+        if ok and s == true then return true end
+    end
+    if type(v.IsAnchoringSecret) == "function" then
+        local ok, s = pcall(v.IsAnchoringSecret, v)
+        if ok and s == true then return true end
+    end
+    return false
+end
+
+function Auras:_CheckViewerTaintAndPromptReload()
+    if not (self:_ViewerFrameTainted(BAR_VIEWER_NAME)
+            or self:_ViewerFrameTainted(ICON_VIEWER_NAME)
+            or self:_ViewerFrameTainted("EssentialCooldownViewer")
+            or self:_ViewerFrameTainted("UtilityCooldownViewer")) then
+        self._viewerTaintPrompted = nil
+        return
+    end
+    if self._viewerTaintPrompted then return end
+    self._viewerTaintPrompted = true
+    dwarn("CooldownViewer frame is TAINTED (secret aspect present) -- Blizzard RefreshData will fault on SPELL_UPDATE_COOLDOWN (:382/:454 flood) and tracked bars will not populate. A /reload clears it. Source: an addon (this session) called C_EditMode.SaveLayouts, whose reapply taints the viewers.")
+    if _G.StaticPopup_Show and not (InCombatLockdown and InCombatLockdown()) then
+        pcall(_G.StaticPopup_Show, "TENUI_CDM_EDITMODE_RELOAD")
+    end
 end
 
 local _lastSuppressLog = 0
@@ -6873,26 +7728,34 @@ function Auras:SuppressNativeViewers()
                 .. " BuffBar=" .. tostring(_G.BuffBarCooldownViewer ~= nil))
         end
     end
+    pcall(self._CheckViewerTaintAndPromptReload, self)
     local forcePop = self:IsForceViewerPopulated()
     for i = 1, #SUPPRESSED_VIEWER_NAMES do
         local name = SUPPRESSED_VIEWER_NAMES[i]
         if forcePop then
             forceShownViewer(name)
-            local v = _G[name]
-            if type(v) == "table" and type(v.EnableMouse) == "function" then
-                pcall(v.EnableMouse, v, false)
-            end
         end
-        setViewerAlpha(name, 0)
-        if forcePop then
-            local v = _G[name]
-            if type(v) == "table" then
-                local items = getItemFrames(v) or {}
-                for j = 1, #items do
-                    local it = items[j]
-                    if type(it) == "table" and type(it.EnableMouse) == "function" then
-                        pcall(it.EnableMouse, it, false)
+        if not (InCombatLockdown and InCombatLockdown()) then
+            setViewerAlpha(name, 0)
+            if name == BAR_VIEWER_NAME then
+                local v = _G[name]
+                if type(v) == "table" and type(v.SetPoint) == "function"
+                   and type(v.ClearAllPoints) == "function" then
+                    if not self._buffBarOrigPoints and type(v.GetNumPoints) == "function" then
+                        local saved = {}
+                        local okN, n = pcall(v.GetNumPoints, v)
+                        if okN and type(n) == "number" and n > 0 then
+                            for pi = 1, n do
+                                local okP, point, rel, relPoint, x, y = pcall(v.GetPoint, v, pi)
+                                if okP and point ~= nil then
+                                    saved[#saved + 1] = { point, rel, relPoint, x, y }
+                                end
+                            end
+                        end
+                        self._buffBarOrigPoints = saved
                     end
+                    pcall(v.ClearAllPoints, v)
+                    pcall(v.SetPoint, v, "TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
                 end
             end
         end
@@ -6915,21 +7778,19 @@ function Auras:UnsuppressNativeViewers()
         local ok = setViewerAlpha(name, 1)
         dlog("unsuppress native viewer %s -> %s", name, tostring(ok))
         _lastForceShownLog[name] = nil
-        local v = _G[name]
-        if type(v) == "table" then
-            if type(v.EnableMouse) == "function" then
-                pcall(v.EnableMouse, v, true)
-            end
-            local items = getItemFrames(v) or {}
-            for j = 1, #items do
-                local it = items[j]
-                if type(it) == "table" and type(it.SetAlpha) == "function" then
-                    pcall(it.SetAlpha, it, 1)
-                end
-                if type(it) == "table" and type(it.EnableMouse) == "function" then
-                    pcall(it.EnableMouse, it, true)
+        if name == BAR_VIEWER_NAME and self._buffBarOrigPoints
+           and not (InCombatLockdown and InCombatLockdown()) then
+            local v = _G[name]
+            if type(v) == "table" and type(v.SetPoint) == "function"
+               and type(v.ClearAllPoints) == "function" then
+                pcall(v.ClearAllPoints, v)
+                local pts = self._buffBarOrigPoints
+                for pi = 1, #pts do
+                    local p = pts[pi]
+                    pcall(v.SetPoint, v, p[1], p[2], p[3], p[4], p[5])
                 end
             end
+            self._buffBarOrigPoints = nil
         end
     end
 end
@@ -6957,6 +7818,8 @@ function Auras:OnEnable(_, profile)
     self.IconDisplay:EnsureContainer()
     self.BarDisplay:EnsureContainer()
 
+    pcall(self.EnsureCDMViewerEditModePolicy, self)
+
     ensureAuraCacheFrame()
     Auras._refreshSummonSpecGate()
     if self._auraCacheFrame then
@@ -6977,7 +7840,9 @@ function Auras:OnEnable(_, profile)
         local mod = self
         ef:SetScript("OnEvent", function(_, event, ...)
             if event == "PLAYER_ENTERING_WORLD" then
-                if mod._enabled then mod:SuppressNativeViewers() end
+                if mod._enabled then
+                    mod:SuppressNativeViewers()
+                end
                 mod:InvalidateViewerAuraMap()
             end
             if event == "TRAIT_CONFIG_UPDATED"
@@ -7041,12 +7906,10 @@ function Auras:OnEnable(_, profile)
                     if C_Timer and C_Timer.After then
                         C_Timer.After(0, function()
                             mod:Refresh()
-                            pcall(suppressViewerChildren, self_)
                             pcall(installPandemicHooks)
                         end)
                     else
                         mod:Refresh()
-                        pcall(suppressViewerChildren, self_)
                         pcall(installPandemicHooks)
                     end
                 end)
@@ -7088,9 +7951,6 @@ function Auras:OnEnable(_, profile)
                 end
             end
             mod:Refresh()
-            if mod._enabled then
-                pcall(Auras.SuppressNativeViewers, Auras)
-            end
         end)
     end
 
@@ -7334,7 +8194,10 @@ anyPlayerOrTargetAura = function(ids)
             local ok, ad = pcall(C_UnitAuras.GetPlayerAuraBySpellID, sid)
             if ok and ad ~= nil then return true end
         end
-        if hasTarget and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID then
+        if hasTarget and C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID then
+            local ok, ad = pcall(C_UnitAuras.GetUnitAuraBySpellID, "target", sid)
+            if ok and ad ~= nil then return true end
+        elseif hasTarget and C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID then
             local ok, ad = pcall(C_UnitAuras.GetAuraDataBySpellID, "target", sid, "HARMFUL")
             if ok and ad ~= nil then return true end
         end
@@ -7485,7 +8348,7 @@ local function GetDisplayTexture(entry)
         if not (sid and C_Spell and C_Spell.GetSpellTexture) then return nil end
         if isSecret(sid) then return nil end
         local ok, t = pcall(C_Spell.GetSpellTexture, sid)
-        if ok and t then return t end
+        if ok and Auras._validTexture(t) then return t end
         return nil
     end
     local auraSpellID = GetAuraSpellID(entry)
@@ -7503,7 +8366,8 @@ local function GetDisplayTexture(entry)
     end
     local t = tex(entry.spellID)
     if t then return t, "base" end
-    return entry.icon, "fallback"
+    if Auras._validTexture(entry.icon) then return entry.icon, "fallback" end
+    return nil, "fallback"
 end
 
 local function GetDisplayName(entry)
@@ -7543,9 +8407,11 @@ local function RefreshDisplayFields(entry)
     local name, labelSource = GetDisplayName(entry)
     entry.displayName  = name
     entry.labelSource  = labelSource
-    local icon, iconSource = GetDisplayTexture(entry)
-    entry.displayIcon  = icon
-    entry.iconSource   = iconSource
+    if not Auras._validTexture(entry.displayIcon) then
+        local icon, iconSource = GetDisplayTexture(entry)
+        entry.displayIcon  = icon
+        entry.iconSource   = iconSource
+    end
 end
 
 local function SetAuraInstanceInfo(entry, auraInfo, unit)
@@ -7882,34 +8748,54 @@ end
 local function storeLiveAura(entry, aura, unit, via)
     if type(entry) ~= "table" or type(aura) ~= "table" then return end
     local aInst = aura.auraInstanceID
-    if aInst == nil or isSecret(aInst) then return end
+    if aInst == nil then return end
+    local instSecret = isSecret(aInst)
     local key = entry.stableEntryID
     if key == nil then return end
     local prev = _liveAuraByEntry[key]
-    local changed = not (prev and prev.auraInstanceID == aInst and prev.auraDataUnit == unit)
+    local changed
+    if instSecret then
+        changed = not (prev and prev._presentSecret == true and prev.auraDataUnit == unit)
+    else
+        changed = not (prev and prev.auraInstanceID == aInst and prev.auraDataUnit == unit)
+    end
     if prev and prev.auraInstanceID ~= nil then
         local pk = instanceKey(prev.auraDataUnit, prev.auraInstanceID)
         if pk and _entryByInstance[pk] == key then _entryByInstance[pk] = nil end
     end
     forEachEntryCopy(key, function(copy)
-        if changed or copy.auraInstanceID ~= aInst or copy.auraDataUnit ~= unit then
+        local needSet = changed or copy.auraDataUnit ~= unit
+        if not needSet and not instSecret and copy.auraInstanceID ~= aInst then
+            needSet = true
+        end
+        if needSet then
             SetAuraInstanceInfo(copy, aura, unit)
         end
     end)
-    _liveAuraByEntry[key] = {
-        auraInstanceID = aInst,
-        auraDataUnit   = unit,
-        auraSpellID    = entry.auraSpellID,
-        linkedSpellID  = entry.linkedSpellID,
-    }
-    local nk = instanceKey(unit, aInst)
-    if nk then _entryByInstance[nk] = key end
+    if instSecret then
+        _liveAuraByEntry[key] = {
+            auraInstanceID = nil,
+            _presentSecret = true,
+            auraDataUnit   = unit,
+            auraSpellID    = entry.auraSpellID,
+            linkedSpellID  = entry.linkedSpellID,
+        }
+    else
+        _liveAuraByEntry[key] = {
+            auraInstanceID = aInst,
+            auraDataUnit   = unit,
+            auraSpellID    = entry.auraSpellID,
+            linkedSpellID  = entry.linkedSpellID,
+        }
+        local nk = instanceKey(unit, aInst)
+        if nk then _entryByInstance[nk] = key end
+    end
     if changed and ns.Debug and ns.Debug.IsVerbose and ns.Debug:IsVerbose(AURAS_MODULE) then
         local sid = aura.spellId
         local src = aura.sourceUnit
         dverbose("[ATTR] %s (%s) <- aura inst=%s spellId=%s source=%s unit=%s via=%s combat=%s",
             tostring(key), tostring(entry.displayName or entry.label),
-            tostring(aInst),
+            instSecret and "<secret>" or tostring(aInst),
             isSecret(sid) and "<secret>" or tostring(sid),
             isSecret(src) and "<secret>" or tostring(src),
             tostring(unit), tostring(via or "?"),
@@ -7938,12 +8824,18 @@ local function clearLiveAura(entry)
 end
 
 local function tryResolveEntryBySpellID(entry, unit, filter)
-    if not (C_UnitAuras and C_UnitAuras.GetAuraDataBySpellID) then return nil end
+    if not (C_UnitAuras and (C_UnitAuras.GetUnitAuraBySpellID or C_UnitAuras.GetAuraDataBySpellID)) then return nil end
     local function try(sid)
         if sid == nil or isSecret(sid) then return nil end
-        local ok, ad = pcall(C_UnitAuras.GetAuraDataBySpellID, unit, sid, filter)
-        if ok and type(ad) == "table" and ad.auraInstanceID ~= nil
-           and not isSecret(ad.auraInstanceID) then
+        local ad
+        if C_UnitAuras.GetUnitAuraBySpellID then
+            local ok, res = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, sid)
+            if ok then ad = res end
+        elseif C_UnitAuras.GetAuraDataBySpellID then
+            local ok, res = pcall(C_UnitAuras.GetAuraDataBySpellID, unit, sid, filter)
+            if ok then ad = res end
+        end
+        if type(ad) == "table" and ad.auraInstanceID ~= nil then
             return ad, sid
         end
         return nil
@@ -8181,11 +9073,20 @@ resolveLiveAuraForEntry = function(e)
     local rec = _liveAuraByEntry[key]
     if type(rec) ~= "table" then return nil end
 
-    local aInst = rec.auraInstanceID
-    if aInst == nil or isSecret(aInst) then return nil end
-
     local unit = rec.auraDataUnit
     if type(unit) ~= "string" then return nil end
+
+    if rec._presentSecret == true then
+        local ad = {
+            auraInstanceID = nil,
+            spellId        = rec.auraSpellID,
+            _presentSecret = true,
+        }
+        return ad, unit, rec.auraSpellID
+    end
+
+    local aInst = rec.auraInstanceID
+    if aInst == nil or isSecret(aInst) then return nil end
 
     local ad = {
         auraInstanceID = aInst,
@@ -8238,6 +9139,7 @@ local function makeSyntheticItem(e, ad, unit)
     local item = {
         _synthetic     = true,
         _entry         = rt,
+        _presentSecret = (type(ad) == "table" and ad._presentSecret == true) or nil,
         cooldownID     = rt.cooldownID,
         _spellID       = safeSpellID,
         _iconTexture   = displayIcon,
@@ -8295,6 +9197,8 @@ local function makeSyntheticItemFromViewerChild(entry, child)
     if aInst == nil and type(child.Icon) == "table" then
         aInst = child.Icon.auraInstanceID
     end
+    local instSecret = isSecret(aInst)
+    if instSecret then aInst = nil end
     local unit = child.auraDataUnit
     if type(unit) ~= "string" then unit = "player" end
 
@@ -8324,6 +9228,7 @@ local function makeSyntheticItemFromViewerChild(entry, child)
         _iconTexture   = iconTex,
         _barName       = barName,
         auraInstanceID = aInst,
+        _presentSecret = instSecret or (aInst == nil),
         auraDataUnit   = unit,
         stableEntryID  = entry.stableEntryID,
         cooldownInfo   = (type(entry.cooldownInfo) == "table" and entry.cooldownInfo) or {
@@ -8369,6 +9274,127 @@ function Auras._makeSummonBarItem(entry, durObj)
             linkedSpellIDs         = entry.linkedSpellIDs,
         },
     }
+end
+
+function Auras._auraProbeShowsCooldown(durObj)
+    if durObj == nil then return false end
+    local sc = Auras._auraProbeScratchCooldown
+    if not sc then
+        local parent = CreateFrame("Frame", "TenUIAurasProbeScratchParent")
+        parent:Hide()
+        sc = CreateFrame("Cooldown", nil, parent, "CooldownFrameTemplate")
+        Auras._auraProbeScratchCooldown = sc
+    end
+    if type(sc.SetCooldownFromDurationObject) ~= "function" then return false end
+    local ok = pcall(sc.SetCooldownFromDurationObject, sc, durObj)
+    if not ok then return false end
+    local shown = sc:IsShown()
+    pcall(sc.Clear, sc)
+    return shown and true or false
+end
+
+function Auras._entryKnownAuraSpellIDs(e, out)
+    out = out or {}
+    if type(e) ~= "table" then return out end
+    local function add(v)
+        if _IsUsableSID(v) then
+            for i = 1, #out do if out[i] == v then return end end
+            out[#out + 1] = v
+        end
+    end
+    add(e.auraSpellID)
+    add(e.linkedSpellID)
+    add(e.overrideTooltipSpellID)
+    add(e.overrideSpellID)
+    add(e.spellID)
+    if type(e.linkedSpellIDs) == "table" then
+        for i = 1, #e.linkedSpellIDs do add(e.linkedSpellIDs[i]) end
+    end
+    if type(e.matchSpellIDs) == "table" then
+        for i = 1, #e.matchSpellIDs do add(e.matchSpellIDs[i]) end
+    end
+    return out
+end
+
+function Auras._resolveTrackedAuraPresence(e)
+    if type(e) ~= "table" then return false end
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return false end
+    local ids = Auras._entryKnownAuraSpellIDs(e)
+    if #ids == 0 then return false end
+    local function resolveFrom(ad, unit, sid)
+        local instId = ad.auraInstanceID
+        local safeInst = (instId ~= nil and not isSecret(instId)) and instId or nil
+        local durObj
+        if safeInst ~= nil and C_UnitAuras.GetAuraDuration then
+            local okD, dur = pcall(C_UnitAuras.GetAuraDuration, unit, safeInst)
+            if okD and dur ~= nil and Auras._auraProbeShowsCooldown(dur) then
+                durObj = dur
+            end
+        end
+        local liveIcon
+        if ns._auraPresentTruthy(ad.icon) then liveIcon = ad.icon end
+        return true, safeInst, unit, durObj, sid, liveIcon
+    end
+    for i = 1, #ids do
+        local ok, ad = pcall(C_UnitAuras.GetPlayerAuraBySpellID, ids[i])
+        if ok and type(ad) == "table" then
+            return resolveFrom(ad, "player", ids[i])
+        end
+    end
+    if type(e.matchSpellIDs) == "table" and C_UnitAuras.GetUnitAuraBySpellID
+       and UnitExists and UnitExists("target") then
+        for i = 1, #ids do
+            local ok, ad = pcall(C_UnitAuras.GetUnitAuraBySpellID, "target", ids[i])
+            if ok and type(ad) == "table" then
+                return resolveFrom(ad, "target", ids[i])
+            end
+        end
+    end
+    return false
+end
+
+function Auras._makeTrackedAuraProbeItem(e, instId, unit, matchedSpellID, liveIcon)
+    if type(e) ~= "table" then return nil end
+    local safeSpellID = e.overrideTooltipSpellID or e.overrideSpellID or e.spellID
+        or matchedSpellID
+    if type(unit) ~= "string" then unit = "player" end
+    local iconTex = Auras._resolveLiveVariantIcon(unit, instId)
+    if not ns._auraPresentTruthy(iconTex) and ns._auraPresentTruthy(liveIcon) then
+        iconTex = liveIcon
+    end
+    if not ns._auraPresentTruthy(iconTex) then
+        iconTex = Auras._catalogDisplayTexture(e)
+    end
+    if not ns._auraPresentTruthy(iconTex) then iconTex = Auras.PLACEHOLDER_ICON end
+    local barName = Auras._catalogDisplayName(e)
+    if type(barName) ~= "string" or barName == "" then
+        barName = e.displayName or e.label
+    end
+    local item = {
+        _synthetic       = true,
+        _entry           = e,
+        _presentSecret   = (instId == nil) or nil,
+        cooldownID       = e.cooldownID,
+        _spellID         = safeSpellID,
+        _iconTexture     = iconTex,
+        _barName         = barName,
+        auraInstanceID   = instId,
+        auraDataUnit     = unit,
+        stableEntryID    = e.stableEntryID,
+        activeAuraSource = "spellIDprobe",
+        cooldownInfo     = (type(e.cooldownInfo) == "table" and e.cooldownInfo) or {
+            spellID                = e.spellID,
+            overrideSpellID        = e.overrideSpellID,
+            overrideTooltipSpellID = e.overrideTooltipSpellID,
+            linkedSpellIDs         = e.linkedSpellIDs,
+        },
+    }
+    if instId ~= nil and not isSecret(instId) and C_UnitAuras
+       and C_UnitAuras.GetAuraApplicationDisplayCount then
+        local ok, txt = pcall(C_UnitAuras.GetAuraApplicationDisplayCount, unit, instId)
+        if ok and type(txt) == "string" then item._stackText = txt end
+    end
+    return item
 end
 
 function Auras._makeSyntheticItemFromViewerChildDirect(child, displayType)
@@ -8657,8 +9683,34 @@ buildActiveFromCatalog = function(displayType, preview)
         if type(e) == "table" then
             local enabled = entryDisplayEnabled(e)
             if enabled then
-                local ad, unit = resolveLiveAuraForEntry(e)
-                if ad then
+                local viewerStateEmitted = false
+                if not preview and Auras._useViewerStateAsPrimary then
+                    local okV, vActive, vInfo = pcall(Auras.ResolveAuraStateFromViewer, Auras, e)
+                    if okV and vActive == true and type(vInfo) == "table"
+                       and type(vInfo.child) == "table" then
+                        local okI, item = pcall(makeSyntheticItemFromViewerChild, e, vInfo.child)
+                        if okI and type(item) == "table" then
+                            item.activeAuraSource = "viewerState"
+                            item._fromViewer = nil
+                            item._fromViewerDirect = nil
+                            if vInfo.applications ~= nil then item._stackText = vInfo.applications end
+                            out[#out + 1] = item
+                            viewerStateEmitted = true
+                            logEmitTransition(displayType, e,
+                                "viewerState cdID=" .. tostring(vInfo.cooldownID)
+                                .. " inst=" .. (vInfo.auraInstanceID == nil
+                                    and "<secret/nil>" or tostring(vInfo.auraInstanceID)))
+                        else
+                            dlogItemErrorOnce(e, "makeViewerStateItem", item)
+                        end
+                    end
+                end
+
+                local ad, unit
+                if not viewerStateEmitted then
+                    ad, unit = resolveLiveAuraForEntry(e)
+                end
+                if not viewerStateEmitted and ad then
                     local ok, item = pcall(makeSyntheticItem, e, ad, unit)
                     if ok and item then
                         out[#out + 1] = item
@@ -8668,10 +9720,10 @@ buildActiveFromCatalog = function(displayType, preview)
                     else
                         dlogItemErrorOnce(e, "makeSyntheticItem", item)
                     end
-                else
+                elseif not viewerStateEmitted then
                     local emitted = false
 
-                    if not preview and forcePop then
+                    if not preview and forcePop and Auras._useViewerChildEmit then
                         local child = findLiveViewerChildByCooldownID(e.cooldownID, displayType)
                         if child then
                             local ok, item = pcall(makeSyntheticItemFromViewerChild, e, child)
@@ -8682,6 +9734,39 @@ buildActiveFromCatalog = function(displayType, preview)
                                     "viewerChild cdID=" .. tostring(e.cooldownID))
                             else
                                 dlogItemErrorOnce(e, "makeSyntheticItemFromViewerChild", item)
+                            end
+                        end
+                    end
+
+                    if not emitted and not preview and displayType == "TrackedBars" then
+                        local okC, child = pcall(findLiveViewerChildByCooldownID, e.cooldownID, "TrackedBars")
+                        if okC and type(child) == "table" then
+                            local okI, item = pcall(makeSyntheticItemFromViewerChild, e, child)
+                            if okI and type(item) == "table" then
+                                out[#out + 1] = item
+                                emitted = true
+                                logEmitTransition(displayType, e,
+                                    "barViewerChild cdID=" .. tostring(e.cooldownID))
+                            else
+                                dlogItemErrorOnce(e, "barViewerChild", item)
+                            end
+                        end
+                    end
+
+                    if not emitted and not preview then
+                        local okR, present, instId, unit, durObj, matchedSID, liveIcon =
+                            pcall(Auras._resolveTrackedAuraPresence, e)
+                        if okR and present then
+                            local okI, item = pcall(Auras._makeTrackedAuraProbeItem, e, instId, unit, matchedSID, liveIcon)
+                            if okI and item then
+                                if durObj ~= nil then item._probeDurObj = durObj end
+                                out[#out + 1] = item
+                                emitted = true
+                                logEmitTransition(displayType, e,
+                                    "spellIDprobe sid=" .. tostring(matchedSID)
+                                    .. " inst=" .. (instId == nil and "<secret/nil>" or tostring(instId)))
+                            else
+                                dlogItemErrorOnce(e, "makeTrackedAuraProbeItem", item)
                             end
                         end
                     end

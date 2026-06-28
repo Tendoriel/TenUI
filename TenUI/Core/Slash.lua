@@ -1208,6 +1208,23 @@ local function handleAuras(rest)
         return
     end
 
+    if sub == "viewerstate" then
+        if not Auras then out("auras module not registered") return end
+        if not Auras.DumpViewerState then
+            out("viewerstate-dump helper not loaded (Auras.lua out of date)")
+            return
+        end
+        local lines = Auras:DumpViewerState() or {}
+        if ns.Debug and ns.Debug.Log then
+            for i = 1, #lines do ns.Debug:Log("%s", lines[i]) end
+            if ns.Debug.Show then ns.Debug:Show() end
+            out(("viewer-state dump (%d lines) sent to the debug window -- |cffffd200/tenui debug|r to view/copy"):format(#lines))
+        else
+            for i = 1, #lines do out(lines[i]) end
+        end
+        return
+    end
+
     if sub == "dump" then
         if not Auras then out("auras module not registered") return end
         if not Auras.DumpAuraIdentity then
@@ -1292,7 +1309,7 @@ local function handleAuras(rest)
         return
     end
 
-    out("usage: |cffffd200/tenui auras|r [|cffffd200icons on|off|r | |cffffd200bars on|off|r | |cffffd200rescan|r | |cffffd200reset|r | |cffffd200unsuppress|r | |cffffd200suppress|r | |cffffd200map|r | |cffffd200active|r | |cffffd200dump|r | |cffffd200pipeline|r | |cffffd200rawset|r | |cffffd200verifydk|r | |cffffd200pandemic ...|r | |cffffd200prefer bar|icon|r | |cffffd200probe on|off|r | |cffffd200lookup <spellID>|r | |cffffd200dedup dump|r | |cffffd200activeglow on|off|r | |cffffd200lowtime on|off|threshold <N>|color <r> <g> <b>|r | |cffffd200barpreview on|off|r [count] | |cffffd200glow dump|r [N]]")
+    out("usage: |cffffd200/tenui auras|r [|cffffd200icons on|off|r | |cffffd200bars on|off|r | |cffffd200rescan|r | |cffffd200reset|r | |cffffd200unsuppress|r | |cffffd200suppress|r | |cffffd200map|r | |cffffd200active|r | |cffffd200viewerstate|r | |cffffd200dump|r | |cffffd200pipeline|r | |cffffd200rawset|r | |cffffd200verifydk|r | |cffffd200pandemic ...|r | |cffffd200prefer bar|icon|r | |cffffd200probe on|off|r | |cffffd200lookup <spellID>|r | |cffffd200dedup dump|r | |cffffd200activeglow on|off|r | |cffffd200lowtime on|off|threshold <N>|color <r> <g> <b>|r | |cffffd200barpreview on|off|r [count] | |cffffd200glow dump|r [N]]")
 end
 
 local function trim(s) return (s or ""):gsub("^%s+", ""):gsub("%s+$", "") end

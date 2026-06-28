@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.1] - 2026-06-28
+
+### Fixed
+
+- Tracked auras (both tracked icons and tracked bars) now display correctly during combat instead of staying idle.
+- Resolved Lua error spam and conflicts with the Blizzard Cooldown Manager that could occur in combat.
+- Essential cooldown icons no longer flash as usable for a moment right after a cast when the resource requirement is not met; they now stay correctly dimmed and colored to match the Blizzard Cooldown Manager.
+- Abilities enabled in the Blizzard Cooldown Manager are no longer mislabeled as "out of combat only".
+- Some abilities could show an incorrect or placeholder icon; tracked displays now only use valid ability icons.
+
+### Changed
+
+- Tracked-aura display now follows the Blizzard Cooldown Manager more closely for both icons and bars.
+
 ## [0.3.0] - 2026-06-27
 
 ### Added

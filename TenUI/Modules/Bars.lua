@@ -32,7 +32,9 @@ local math_floor        = math.floor
 local math_max          = math.max
 
 local TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B = 1.0, 1.0, 1.0
-local TINT_OOR_R,    TINT_OOR_G,    TINT_OOR_B    = 1.0, 0.3, 0.3
+local TINT_OOR_R,    TINT_OOR_G,    TINT_OOR_B    = 0.64, 0.15, 0.15
+local TINT_NOMANA_R, TINT_NOMANA_G, TINT_NOMANA_B = 0.5, 0.5, 1.0
+local TINT_UNUSABLE_R, TINT_UNUSABLE_G, TINT_UNUSABLE_B = 0.4, 0.4, 0.4
 
 local POLL_INTERVAL_SEC = 0.2
 
@@ -295,16 +297,6 @@ local function mirrorViewerItems(viewer)
     return out
 end
 
-local function mirrorSetItemMouse(viewer, enabled)
-    local items = mirrorViewerItems(viewer) or {}
-    for i = 1, #items do
-        local it = items[i]
-        if type(it) == "table" and type(it.EnableMouse) == "function" then
-            pcall(it.EnableMouse, it, enabled and true or false)
-        end
-    end
-end
-
 local function hookMirrorViewer(name, viewer)
     if _mirrorHooked[name] then return end
     if type(viewer.RefreshLayout) ~= "function" then return end
@@ -321,39 +313,27 @@ local function suppressMirrorViewers()
         local viewer = getMirrorViewer(name)
         if viewer then
             hookMirrorViewer(name, viewer)
-            local shown
-            if type(viewer.IsShown) == "function" then
-                local okS, s = pcall(viewer.IsShown, viewer)
-                if okS then shown = s end
-            end
-            if shown == false and not (InCombatLockdown and InCombatLockdown()) then
-                pcall(viewer.SetShown, viewer, true)
-                _mirrorMapDirty = true
-                vlog("mirror force-show %s", name)
-            end
-            local alpha
-            if type(viewer.GetAlpha) == "function" then
-                local okA, a = pcall(viewer.GetAlpha, viewer)
-                if okA and not isSecret(a) then alpha = a end
-            end
-            if alpha ~= 0 then
-                pcall(viewer.SetAlpha, viewer, 0)
-                pcall(viewer.EnableMouse, viewer, false)
-                mirrorSetItemMouse(viewer, false)
+            if not (InCombatLockdown and InCombatLockdown()) then
+                local alpha
+                if type(viewer.GetAlpha) == "function" then
+                    local okA, a = pcall(viewer.GetAlpha, viewer)
+                    if okA and not isSecret(a) then alpha = a end
+                end
+                if alpha ~= 0 then
+                    pcall(viewer.SetAlpha, viewer, 0)
+                end
             end
         end
     end
 end
 
 local function unsuppressMirrorViewers()
+    if InCombatLockdown and InCombatLockdown() then return end
     for i = 1, #MIRROR_VIEWER_NAMES do
         local viewer = getMirrorViewer(MIRROR_VIEWER_NAMES[i])
         if viewer then
             pcall(viewer.SetAlpha, viewer, 1)
-            pcall(viewer.EnableMouse, viewer, true)
-            mirrorSetItemMouse(viewer, true)
-            if type(viewer.UpdateShownState) == "function"
-               and not (InCombatLockdown and InCombatLockdown()) then
+            if type(viewer.UpdateShownState) == "function" then
                 pcall(viewer.UpdateShownState, viewer)
             end
         end
@@ -1999,6 +1979,7 @@ function Row:RefreshIcon(icon, entry, desat)
             if tex then icon:SetTexture(tex) end
             icon:SetDesaturated(false)
             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+            icon._lastTintKey = "normal"
             icon._readyNowCached = false
             applyReadyGlow(icon, sid, false)
             applyMaxStacksGlow(icon, sid, false)
@@ -2034,6 +2015,7 @@ function Row:RefreshIcon(icon, entry, desat)
                             if tex then icon:SetTexture(tex) end
                             icon:SetDesaturated(false)
                             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+                            icon._lastTintKey = "normal"
                             icon._readyNowCached = false
                             applyReadyGlow(icon, sid, false)
                             applyMaxStacksGlow(icon, sid, false)
@@ -2057,6 +2039,7 @@ function Row:RefreshIcon(icon, entry, desat)
         if not known and desat then
             icon:SetDesaturated(true)
             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+            icon._lastTintKey = "normal"
             icon:ClearCooldown()
             icon:SetStackTextRaw("")
             icon._readyNowCached = false
@@ -2065,13 +2048,15 @@ function Row:RefreshIcon(icon, entry, desat)
             return
         end
 
-        local usable, _noMana = true, false
+        local usable, noMana = true, false
+        local usableSecret = false
         if C_Spell and C_Spell.IsSpellUsable then
             local ok, u, n = pcall(C_Spell.IsSpellUsable, activeSID)
             if ok then
+                if isSecret(u) or isSecret(n) then usableSecret = true end
                 if isSecret(u) then u = true end
                 if isSecret(n) then n = false end
-                usable, _noMana = u, n
+                usable, noMana = u, n
             end
         end
 
@@ -2079,11 +2064,6 @@ function Row:RefreshIcon(icon, entry, desat)
         if C_Spell and C_Spell.IsSpellInRange and UnitExists and UnitExists("target") then
             local ok, r = pcall(C_Spell.IsSpellInRange, activeSID, "target")
             if ok then inRange = r end
-        end
-        if inRange == false then
-            icon:SetVertexColor(TINT_OOR_R, TINT_OOR_G, TINT_OOR_B, 1)
-        else
-            icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
         end
 
         local chargesInfo
@@ -2228,9 +2208,39 @@ function Row:RefreshIcon(icon, entry, desat)
         local hasEmphasis = (icon._summonActiveUntil and GetTime() < icon._summonActiveUntil)
                          or (icon._procApplied == true)
         local readyVisual = (not onRealCooldown) and (usable ~= false)
-        local shouldDesat = (not hasEmphasis)
-                         and (not onGCD)
-                         and (not readyVisual)
+
+        local tintKey
+        if inRange == false then
+            tintKey = "oor"
+        elseif usableSecret then
+            tintKey = icon._lastTintKey or "normal"
+        elseif usable ~= false then
+            tintKey = "normal"
+        elseif noMana then
+            tintKey = "nomana"
+        else
+            tintKey = "unusable"
+        end
+        if tintKey ~= icon._lastTintKey then
+            icon._lastTintKey = tintKey
+            if tintKey == "oor" then
+                icon:SetVertexColor(TINT_OOR_R, TINT_OOR_G, TINT_OOR_B, 1)
+            elseif tintKey == "nomana" then
+                icon:SetVertexColor(TINT_NOMANA_R, TINT_NOMANA_G, TINT_NOMANA_B, 1)
+            elseif tintKey == "unusable" then
+                icon:SetVertexColor(TINT_UNUSABLE_R, TINT_UNUSABLE_G, TINT_UNUSABLE_B, 1)
+            else
+                icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
+            end
+        end
+
+        local reconDesat = (not hasEmphasis)
+                        and (not onGCD)
+                        and onRealCooldown
+        local shouldDesat = reconDesat
+        if not hasEmphasis and not onGCD and not resourceGated and viewerSrc ~= nil then
+            shouldDesat = viewerReal and true or false
+        end
         icon:SetDesaturated(shouldDesat and true or false)
 
         local readyNow = (known and readyVisual) and true or false
@@ -2992,7 +3002,6 @@ function Bars:RenameCustomBar(id, newName)
 end
 
 function Bars:_TickAll()
-    suppressMirrorViewers()
     for _, r in pairs(self.rows) do
         if r and r._enabled and r.RequestRefresh then
             r:RequestRefresh()
@@ -3022,6 +3031,10 @@ function Bars:OnEnable(_, profile)
     if self._enabled then return end
     self.profileRef = profile
     self._enabled = true
+
+    if ns.Auras and type(ns.Auras.EnsureCDMViewerEditModePolicy) == "function" then
+        pcall(ns.Auras.EnsureCDMViewerEditModePolicy, ns.Auras)
+    end
 
     migrateLegacyRows()
 

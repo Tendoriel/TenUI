@@ -156,7 +156,8 @@ end
 
 function Bar:SetTimerDuration(durationObject, interpolation, direction)
     if not self.frame or not self.frame.SetTimerDuration then return false end
-    if not durationObject then return false end
+    local durSecret = type(issecretvalue) == "function" and issecretvalue(durationObject)
+    if not durSecret and not durationObject then return false end
     local ok, err = pcall(self.frame.SetTimerDuration, self.frame,
         durationObject, interpolation, direction)
     if not ok then

@@ -2,7 +2,7 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
-[![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.0.7-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
+[![Website](https://img.shields.io/badge/Website-tenuiaddon.com-08979c?style=flat)](https://tenuiaddon.com/) [![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.0.7-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
 ## Screenshots
 
@@ -23,14 +23,16 @@ Options window, CDM Bars page with the per-spell list:
 ## Features
 
 ### Cooldown Bars
-- Rows of square cooldown icons driven by the built-in Cooldown Manager, organized into Essential, Utility, Defensive, Trinkets and Custom groups.
+- Rows of square cooldown icons driven by the built-in Cooldown Manager, organized into Essential, Utility, Defensive, Trinkets, Consumables and Custom groups.
 - Per-ability settings: visibility, ordering and display behavior for each tracked spell.
+- Resource and usability color coding that mirrors the Cooldown Manager: ready, out of range, not enough resource and unusable are shown with distinct tints, and icons dim while on cooldown.
+- Consumables tracker for healthstones, potions and more, with an icon grid to choose what to track and the option to add items by ID.
 - Built-in scanner keeps tracked abilities in sync with your current spec and talents.
 
 ### Aura Tracking
 - Track buffs and debuffs as icon rows or timer bars, with stack counts and cooldown swipes.
 - Low-time coloring for timers so expiring effects stand out.
-- Designed around the 12.0.x combat data restrictions so timers and swipes keep working in combat.
+- Tracked icons and bars follow the built-in Cooldown Manager closely and keep displaying through combat.
 
 ### Cast Bar
 - Replacement player cast bar with support for casts, channels and empowered spells.
@@ -42,7 +44,12 @@ Options window, CDM Bars page with the per-spell list:
 
 ### Glow Effects
 - Animated border glows for procs and ability highlights, with ten distinct flipbook styles.
+- Separate glows for procs, ready abilities, maximum charges, active auras and pandemic windows, each with its own style, color and on/off toggle.
 - Per-purpose defaults with a live preview in the options window.
+
+### Skyriding
+- A skyriding HUD with a speed bar and a configurable Thrill of the Skies threshold marker.
+- Charge pips for Skyward Ascent and Second Wind, plus the Whirling Surge cooldown.
 
 ### Quality of Life
 - Combat enter/leave text alerts.
@@ -52,10 +59,12 @@ Options window, CDM Bars page with the per-spell list:
 
 ### Layout and Anchoring
 - Every element sits on a named anchor: unlock, drag, snap and fine-tune with X/Y, scale and alpha controls.
+- Smooth live snapping in edit mode, hold Shift to lock dragging to a single axis, and an adjustable snap distance.
+- Per-element visibility by state (always, never, in combat, out of combat, in raid, in party or solo), with options to show only inside instances and to hide while in housing or while mounted.
 - Anchor reset commands for individual elements or the whole layout.
 
 ### Profiles
-- Multiple profiles with copy support.
+- Multiple profiles with rename and copy support, and an ordered profile list.
 - Automatic profile swapping per specialization.
 - Export any profile as a text string and import it on another character or share it with friends.
 
@@ -96,12 +105,13 @@ Useful commands:
 The options window is organized by module:
 
 - **Layout** — select any anchor and adjust position, scale and alpha with sliders and snap controls.
-- **CDM Bars** — manage Essential, Utility, Defensive, Trinkets and Custom cooldown groups, with per-ability sub-pages.
+- **CDM Bars** — manage Essential, Utility, Defensive, Trinkets, Consumables and Custom cooldown groups, with per-ability sub-pages.
 - **Auras** — configure tracked icons and tracked bars, including which buffs and debuffs to follow.
 - **Glow Effects** — choose glow styles per purpose and preview them live.
 - **Resources** — resource bar appearance and visibility.
 - **Cast Bar** — cast bar appearance and behavior.
-- **Profiles** — manage, copy, export and import profiles, and set up per-spec swapping.
+- **Dragon Riding** — skyriding speed bar, charge pips and Whirling Surge cooldown.
+- **Profiles** — manage, rename, copy, export and import profiles, and set up per-spec swapping.
 - **Information** — version, module status and a quick command reference.
 
 ## FAQ

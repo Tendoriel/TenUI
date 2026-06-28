@@ -14,7 +14,7 @@ local function buildInformationPage(sc)
     children[#children + 1] = C.CreateSection(sc, "Information")
 
     local verLabel = C.Text(sc, C.Fonts.title, Theme.color.accent,
-        "TenUI  v" .. tostring(ns.version or "0.1.0") .. "  (WoW 12.0.5)")
+        "TenUI  v" .. tostring(ns.version or "0.1.0") .. "  (WoW 12.0.7)")
     children[#children + 1] = verLabel
 
     children[#children + 1] = C.CreateSubSection(sc, "Loaded Modules")

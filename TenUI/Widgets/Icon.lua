@@ -164,8 +164,9 @@ end
 
 local function texturePresent(v)
     if type(issecretvalue) == "function" and issecretvalue(v) then return true end
-    if v == nil then return false end
-    return v ~= false
+    if type(v) == "string" then return v ~= "" end
+    if type(v) == "number" then return v > 0 and v == math.floor(v) end
+    return false
 end
 
 function Icon:SetTexture(texture)
@@ -192,7 +193,8 @@ end
 function Icon:SetCooldown(durationObject)
     local cd = self.frame.cooldown
     if not cd then return end
-    if not durationObject then
+    local durSecret = type(issecretvalue) == "function" and issecretvalue(durationObject)
+    if not durSecret and not durationObject then
         cd:Clear()
         self._lastArmPath = "clear-nil"
         return
