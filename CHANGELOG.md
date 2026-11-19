@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.6] - 2026-11-17
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Cooldown Manager
+
+- Drag the larger icons in the pinned preview to reorder Cooldowns, Tracked Icons, and Tracked Bars. Right-click an icon to open its settings.
+- `Enable 2nd Row` is at the top of Cooldown Display. Move cooldowns between rows directly in the preview. The duplicate list has been removed, and entries in either row stay out of Candidates.
+- `Group Layout` opens the layout settings for the current group. Tracked Icons and Tracked Bars also have a shortcut to `Display Settings`.
+- A cooldown can show the selected player buff's icon and remaining duration while the buff is active, then return to its usual display.
+
+### Tracked Bars
+
+- Set each bar's visibility, fill color and direction, icon, name, and timer. A bar can keep its group position or use its own X and Y offsets.
+- Copy another tracked bar's appearance or reset to the group's appearance.
+
+### Cast Bar and Resources
+
+- The Cast Bar can show tick marks for supported channels and elapsed / total cast time. Both options are reflected in the settings preview.
+- The Primary Resource Bar can fill the space of an unavailable Secondary Resource Bar when the two are aligned and close together.
+
+### Reminders
+
+- Class Reminders and Stealth have pinned icon previews. Click an icon to jump to its setting, or use `Test on HUD` to see the display in game.
+- Class Reminders shows a preview for your class and spec. Class buffs and forms, pets, and group buffs have their own sections alongside appearance, visibility, and position.
+- Stealth previews Stealth, Prowl, and Burning Rush. Class Reminder labels have space to stay readable at larger font sizes.
+
+### Tracked Auras and Cast Bar
+
+- Tracked Icons and active-only Tracked Bars follow the same order as the preview, including when player buffs and current-target debuffs are interleaved.
+- In Aura Settings, `Expiring Aura Glow` lets you choose a threshold in seconds, a glow style and a color for each aura. It has its own preview and works independently of the Pandemic warning and timer color.
+- Animated aura glows use the configured icon and bar dimensions, keeping them visible when Blizzard restricts access to live frame dimensions.
+- Added channel tick marks for Arcane Missiles, Rapid Fire, Disintegrate, Fel Devastation, Eye Beam, Void Ray, Mind Sear and Void Torrent. Arcane Missiles, Rapid Fire, Disintegrate and Penance account for supported tick-count modifiers.
+- Aura identity, native tracker configuration and diagnostics now live in separate modules.
+
 ## [0.5.5] - 2026-11-17
 
 For WoW Retail 12.1.5 (Interface 120105).

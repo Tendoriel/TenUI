@@ -101,9 +101,8 @@ local function _onUpdateDriver(c, elapsed)
     end
 end
 
-local function _layout(c)
-    local w = c:GetWidth()
-    local h = c:GetHeight()
+local function _layout(c, w, h)
+    if not (w and h) then w, h = c:GetSize() end
     if not w or not h or w <= 0 or h <= 0 then return end
     local e = c._extent or DEFAULT_EXTENT
     e = mathmin(e, w / 4, h / 4)
@@ -247,10 +246,16 @@ function GlowFX:Start(target, styleName, opts)
     if not trigger then c:SetParent(f) end
     c:SetFrameLevel((f:GetFrameLevel() or 1) + 7)
     c:ClearAllPoints()
+    local width, height
     if trigger then
-        local width, height = f:GetSize()
+        if opts.width and opts.height then
+            width, height = opts.width, opts.height
+        else
+            width, height = f:GetSize()
+        end
+        width, height = width + 2 * offset, height + 2 * offset
         c:SetPoint("CENTER", f)
-        c:SetSize(width + 2 * offset, height + 2 * offset)
+        c:SetSize(width, height)
     else
         c:SetPoint("TOPLEFT", f, "TOPLEFT", -offset, offset)
         c:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", offset, -offset)
@@ -277,7 +282,7 @@ function GlowFX:Start(target, styleName, opts)
         t:SetVertexColor(r, g, b)
     end
     c._style = styleName
-    _layout(c)
+    _layout(c, width, height)
     c._fps = fps
     if c.animGroup then
         if not trigger and c.animGroup:IsPlaying() then
@@ -373,6 +378,8 @@ local function _registerIntentStyles()
                     colorG   = tint and o.colorG,
                     colorB   = tint and o.colorB,
                     auraTrigger = o and o.auraTrigger,
+                    width    = o and o.width,
+                    height   = o and o.height,
                     previewAura = o and o.previewAura,
                 })
                 return animation

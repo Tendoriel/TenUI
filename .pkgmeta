@@ -1,14 +1,31 @@
 package-as: TenUI
 
+enable-nolib-creation: no
+
 move-folders:
     TenUI/TenUI: TenUI
 
 ignore:
+    - docs
+    - _ref
+    - _design
+    - _tools
+    - tools
+    - scripts
+    - site
+    - releases
+    - dist
+    - SharedMedia
+    - RULES.md
     - README.md
+    - README_PUBLIC.md
     - CHANGELOG.md
-    - LICENSE
-    - .gitignore
     - .pkgmeta
+    - .claude
+    - .github
+    - "*.jsx"
+    - .DS_Store
+    - Ability_Creature_Cursed_03.png
 
 license-output: TenUI/LICENSE.txt
 

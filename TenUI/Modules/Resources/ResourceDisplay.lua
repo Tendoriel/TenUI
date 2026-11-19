@@ -477,10 +477,50 @@ local function primary_Layout()
     if not (Primary.bar and Primary.bar.frame and Primary.anchor and Primary.anchor.frame) then
         return
     end
-    Primary.bar.frame:ClearAllPoints()
-    Primary.bar.frame:SetAllPoints(Primary.anchor.frame)
+    local bar, anchor = Primary.bar.frame, Primary.anchor.frame
+    bar:ClearAllPoints()
+    bar:SetAllPoints(anchor)
+    local profile, opts = Primary.profileRef, Primary.selfProfile
+    if opts and opts.expandIfNoSecondary and not _previewActive and ns:AreAnchorsLocked()
+       and (not ns.EditMode or not ns.EditMode:IsActive()) then
+        local desc = getSpecDescriptor()
+        local secondaryOpts = profile and profile.secondary or {}
+        local secondary = ns:GetAnchor("ResourceSecondary")
+        local other = secondary and secondary.frame
+        if desc and other and (not desc.secondary or secondaryOpts.enabled == false
+            or not resolveSecondaryEnabled(profile)) then
+            local pScale, sScale = anchor:GetEffectiveScale(), other:GetEffectiveScale()
+            local px, py, pw, ph = anchor:GetRect()
+            local sx, sy, sw, sh = other:GetRect()
+            if px and sx then
+                local pLeft, pRight = px * pScale, (px + pw) * pScale
+                local sLeft, sRight = sx * sScale, (sx + sw) * sScale
+                local pBottom, pTop = py * pScale, (py + ph) * pScale
+                local sBottom, sTop = sy * sScale, (sy + sh) * sScale
+                if math.abs(pLeft - sLeft) <= 6 and math.abs(pRight - sRight) <= 6 then
+                    if sBottom >= pTop - 1 and sBottom <= pTop + 16 * pScale then
+                        bar:ClearAllPoints()
+                        bar:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT")
+                        bar:SetPoint("TOPRIGHT", anchor, "TOPRIGHT", 0, (sTop - pTop) / pScale)
+                    elseif sTop <= pBottom + 1 and sTop >= pBottom - 16 * pScale then
+                        bar:ClearAllPoints()
+                        bar:SetPoint("TOPRIGHT", anchor, "TOPRIGHT")
+                        bar:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", 0, (sBottom - pBottom) / pScale)
+                    end
+                end
+            end
+        end
+    end
     if thLines_Reposition then thLines_Reposition() end
 end
+
+ns:RegisterMessage("ANCHOR_MOVED", function(_, name)
+    if name == "Resources" or name == "ResourceSecondary" then primary_Layout() end
+end)
+ns:RegisterMessage("ANCHOR_RESIZED", function(_, name)
+    if name == "ResourceSecondary" then primary_Layout() end
+end)
+ns:RegisterMessage("LOCK_STATE_CHANGED", function() primary_Layout() end)
 
 local function formatNumber(n)
     if type(n) ~= "number" then return "" end

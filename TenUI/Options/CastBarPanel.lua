@@ -145,11 +145,11 @@ local function buildEmbeddedPreview(block)
     icon:Hide()
 
     local pips = {}
+    local pipFractions = {}
     local function layoutPips()
         local w = bar.frame and bar.frame:GetWidth()
         if not w or w <= 0 then return end
-        for i = 1, #PREVIEW_STAGE_FRACS do
-            local frac = PREVIEW_STAGE_FRACS[i]
+        for i, frac in ipairs(pipFractions) do
             local tex = pips[i]
             if not tex then
                 tex = bar.frame:CreateTexture(nil, "OVERLAY", nil, 2)
@@ -162,10 +162,9 @@ local function buildEmbeddedPreview(block)
             tex:SetWidth(1)
             tex:SetPoint("TOP",    bar.frame, "TOPLEFT",    w * frac, -1)
             tex:SetPoint("BOTTOM", bar.frame, "BOTTOMLEFT", w * frac, 1)
+            tex:Show()
         end
-    end
-    local function setPipsShown(shown)
-        for i = 1, #pips do pips[i]:SetShown(shown) end
+        for i = #pipFractions + 1, #pips do pips[i]:Hide() end
     end
 
     local strip = CreateFrame("Frame", nil, block)
@@ -244,7 +243,7 @@ local function buildEmbeddedPreview(block)
     local phaseElapsed = 0
     local lastTenths   = nil
     local curStage     = nil
-    local showTimeFlag  = true
+    local timerProfile  = nil
     local empowerBase   = PREVIEW_COLORS.empower
 
     local function phaseColor(cp, key)
@@ -257,13 +256,14 @@ local function buildEmbeddedPreview(block)
         local phase = PREVIEW_PHASES[phaseIdx]
         if not phase then return end
         local cp = getCBResolved()
-        showTimeFlag = cp.showTime ~= false
+        timerProfile = cp
         empowerBase  = phaseColor(cp, "empower")
 
         if phase.mode == "instant" then
             bar:Hide()
             icon:Hide()
-            setPipsShown(false)
+            pipFractions = {}
+            layoutPips()
             strip:Show()
             return
         end
@@ -286,19 +286,24 @@ local function buildEmbeddedPreview(block)
         end
 
         if phase.stages then
-            layoutPips()
-            setPipsShown(true)
+            pipFractions = PREVIEW_STAGE_FRACS
             curStage = nil
+        elseif phase.mode == "drain" and cp.showChannelTicks then
+            pipFractions = ns.CastBar:GetChannelTickFractions(phase.spell) or {}
         else
-            setPipsShown(false)
+            pipFractions = {}
         end
+        layoutPips()
 
         if phase.mode == "hold" then
             bar:SetValue(phase.fill or 1)
             bar:SetRightText("")
         elseif previewScenario ~= 0 and phase.mode == "drain" then
             bar:SetValue(0.5)
-            bar:SetRightText(showTimeFlag and ("%.1fs"):format(phase.dur / 2) or "")
+            bar:SetRightText(ns.CastBar:FormatTimerText(cp, phase.dur / 2, phase.dur))
+        else
+            bar:SetRightText(ns.CastBar:FormatTimerText(cp, phase.dur - phaseElapsed, phase.dur))
+            lastTenths = nil
         end
     end
 
@@ -337,14 +342,13 @@ local function buildEmbeddedPreview(block)
         local frac = phaseElapsed / phase.dur
         bar:SetValue(phase.mode == "drain" and (1 - frac) or frac)
 
-        if showTimeFlag then
+        if timerProfile.showTime then
             local remaining = phase.dur - phaseElapsed
             if remaining < 0 then remaining = 0 end
             local tenths = math_floor(remaining * 10)
             if tenths ~= lastTenths then
                 lastTenths = tenths
-                local ok, txt = pcall(string.format, "%.1f", remaining)
-                bar:SetRightText(ok and (txt .. "s") or "")
+                bar:SetRightText(ns.CastBar:FormatTimerText(timerProfile, remaining, phase.dur))
             end
         end
 
@@ -614,6 +618,22 @@ local function buildCastBarPage(sc)
         function(v)
             local cp = getCBProfile()
             cp.showTime = v
+            applyOptions()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show elapsed / total cast time",
+        function() return getCBProfile().showTotalDuration == true end,
+        function(v)
+            getCBProfile().showTotalDuration = v and true or nil
+            applyOptions()
+        end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show channel tick marks",
+        function() return getCBProfile().showChannelTicks == true end,
+        function(v)
+            getCBProfile().showChannelTicks = v and true or nil
             applyOptions()
         end
     )

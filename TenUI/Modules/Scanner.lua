@@ -322,13 +322,18 @@ function Scanner:GetCandidates(container, filter)
 
     local displayedSet = {}
     if filter.hideDisplayed and ns.Bars and ns.Bars.GetCurrentRows then
+        local function addDisplayed(entries)
+            if type(entries) ~= "table" then return end
+            for _, entry in ipairs(entries) do
+                local key = ns.Bars.EntryKey(entry)
+                if key then displayedSet[key] = true end
+            end
+        end
         local rows = ns.Bars:GetCurrentRows() or {}
         for _, row in pairs(rows) do
-            if type(row) == "table" and type(row.displayed) == "table" then
-                for _, entry in ipairs(row.displayed) do
-                    local key = ns.Bars.EntryKey(entry)
-                    if key then displayedSet[key] = true end
-                end
+            if type(row) == "table" then
+                addDisplayed(row.displayed)
+                if type(row.rows2) == "table" then addDisplayed(row.rows2.displayed) end
             end
         end
     end

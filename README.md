@@ -84,6 +84,10 @@ Options window, CDM Bars page with the per-spell list:
 2. Extract the archive so that the `TenUI` folder is inside `World of Warcraft/_retail_/Interface/AddOns/`.
 3. Restart the game or run `/reload`.
 
+### Build from source
+
+Run `python3 scripts/build-release.py` from the checkout to build the ZIP in `releases/`. The script reads the version from `TenUI/TenUI.toc`, validates the TOC and XML includes, and writes the same ZIP bytes for the same source files. Pass `--output /path/to/TenUI.zip` to write elsewhere.
+
 ## Getting Started
 
 1. Type `/tenui` to open the version summary and command list, or use the addon compartment button on the minimap.

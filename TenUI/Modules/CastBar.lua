@@ -172,10 +172,18 @@ local function resolveCastBarBlock(baseBlock)
     return baseBlock
 end
 
-local function safeFormatTime(fmtStr, seconds)
-    if type(seconds) ~= "number" then return "" end
-    local ok, result = pcall(string.format, fmtStr or "%.1f", seconds)
-    if ok then return result .. "s" end
+function CastBar:FormatTimerText(profile, remaining, total)
+    if not (profile and profile.showTime) or isSecret(remaining) or type(remaining) ~= "number" then
+        return ""
+    end
+    local fmt = profile.timeFormat or "%.1f"
+    if profile.showTotalDuration and not isSecret(total) and type(total) == "number" and total > 0 then
+        local elapsed = math.max(0, math.min(total, total - remaining))
+        local ok, text = pcall(string.format, fmt .. " / " .. fmt, elapsed, total)
+        if ok then return text end
+    end
+    local ok, text = pcall(string.format, fmt, remaining)
+    if ok then return text .. "s" end
     return ""
 end
 
@@ -236,12 +244,7 @@ end
 
 function CastBar:SetStartTimeText(totalSeconds)
     if not self.bar then return end
-    local profile = getProfile()
-    if not (profile and profile.showTime) then
-        self.bar:SetRightText("")
-        return
-    end
-    self.bar:SetRightText(safeFormatTime(profile.timeFormat, totalSeconds))
+    self.bar:SetRightText(self:FormatTimerText(getProfile(), totalSeconds, totalSeconds))
 end
 
 function CastBar:ClearTimeText()
@@ -275,13 +278,12 @@ local function tick_OnUpdate(_self, _elapsed)
     CastBar._lastDisplayedTenths = tenths
 
     local profile = CastBar.profileRef
-    local fmt = (profile and profile.timeFormat) or "%.1f"
-    local ok2, text = pcall(string.format, fmt, remaining)
-    if ok2 and CastBar.bar then
-        CastBar.bar:SetRightText(text .. "s")
-    elseif CastBar.bar then
-        CastBar.bar:SetRightText("")
+    local total
+    if profile and profile.showTime and profile.showTotalDuration then
+        local okTotal, seconds = pcall(duration.GetTotalDuration, duration)
+        if okTotal then total = seconds end
     end
+    if CastBar.bar then CastBar.bar:SetRightText(CastBar:FormatTimerText(profile, remaining, total)) end
 end
 
 function CastBar:_EnsureTickFrame()
@@ -309,14 +311,51 @@ function CastBar:StopLiveTimer()
 end
 
 local STAGE_PIP_COLOR = { 1, 1, 1, 0.75 }
-local STAGE_TINT_STEP = 0.18
-local STAGE_TINT_CAP  = 0.66
+
+local CHANNEL_INTERVALS = {
+    [15407] = 6, [48045] = 6, [64843] = 4, [205065] = 5,
+    [740] = 4, [12051] = 6, [205021] = 5,
+    [198590] = 5, [755] = 5, [234153] = 5, [206931] = 3,
+    [113656] = 4, [115175] = 12, [443028] = 4, [291944] = 6,
+    [212084] = 10, [356995] = 3, [5143] = 4, [257044] = 6,
+}
+
+local CHANNEL_EXTRA_INTERVALS = {
+    [356995] = { [1219723] = 1 }, -- Azure Celerity
+    [5143] = { [236628] = 2, [1296581] = 1 }, -- Amplification and tier bonus
+    [257044] = { [459794] = 3 }, -- Quick Draw
+}
 
 local function plainNumber(v)
-    if type(v) ~= "number" then return nil end
-    if type(issecretvalue) == "function" and issecretvalue(v) then return nil end
+    if type(v) ~= "number" or isSecret(v) then return nil end
     return v
 end
+
+function CastBar:GetChannelTickFractions(spellID, totalSeconds)
+    if not plainNumber(spellID) then return nil end
+    local count = CHANNEL_INTERVALS[spellID]
+    if spellID == 47540 or spellID == 47757 or spellID == 47758 or spellID == 373129 or spellID == 400171 then
+        count = IsPlayerSpell and IsPlayerSpell(193134) and 3 or 2
+    end
+    local extra = CHANNEL_EXTRA_INTERVALS[spellID]
+    if extra and IsPlayerSpell then
+        for talent, intervals in pairs(extra) do
+            if IsPlayerSpell(talent) then count = count + intervals end
+        end
+    end
+    local marks = {}
+    if count then
+        for i = 1, count - 1 do marks[i] = 1 - i / count end
+    elseif (spellID == 198013 or spellID == 473728) and plainNumber(totalSeconds) and totalSeconds > 0 then
+        for elapsed = 0.2, totalSeconds - 0.001, 0.2 do
+            marks[#marks + 1] = 1 - elapsed / totalSeconds
+        end
+    end
+    return #marks > 0 and marks or nil
+end
+
+local STAGE_TINT_STEP = 0.18
+local STAGE_TINT_CAP  = 0.66
 
 local function computeStageData(numStages)
     if GetUnitEmpowerStageDuration and GetUnitEmpowerHoldAtMaxTime then
@@ -389,11 +428,13 @@ function CastBar:ClearStagePips()
     self._stageStartSec = nil
     self._stageCurrent = nil
     self._stageNotInterruptible = nil
+    self._channelTicks = nil
 end
 
 function CastBar:LayoutStagePips()
     local fracs = self._stageFracs
-    if not fracs then return end
+    local profile = getProfile()
+    if not fracs and profile and profile.showChannelTicks then fracs = self._channelTicks end
     local barFrame = self.bar and self.bar.frame
     if not barFrame then return end
     local w = barFrame:GetWidth()
@@ -401,7 +442,7 @@ function CastBar:LayoutStagePips()
     self._stagePips = self._stagePips or {}
     local pips = self._stagePips
     local used = 0
-    for i = 1, #fracs do
+    for i = 1, #(fracs or {}) do
         local frac = fracs[i]
         if type(frac) == "number" and frac > 0.01 and frac < 0.995 then
             used = used + 1
@@ -717,7 +758,7 @@ function CastBar:OnSpellcastDelayed(castGUID, castBarID)
     end
 end
 
-function CastBar:OnChannelStart(castGUID, castBarID)
+function CastBar:OnChannelStart(castGUID, castBarID, eventSpellID)
     if self._state ~= "idle" then
         dlog("CastBar: preempting previous cast (state="
             .. tostring(self._state) .. ") for new CHANNEL_START")
@@ -747,6 +788,11 @@ function CastBar:OnChannelStart(castGUID, castBarID)
     self._failedFlag    = false
 
     self:ApplyCastVisual("channel", displayName or name, texture, notInterruptible)
+    local channelStart, channelEnd = plainNumber(startMs), plainNumber(endMs)
+    local channelLength = channelStart and channelEnd and (channelEnd - channelStart) / 1000
+    self._channelTicks = self:GetChannelTickFractions(spellID, channelLength)
+        or self:GetChannelTickFractions(eventSpellID, channelLength)
+    self:LayoutStagePips()
 
     local duration = UnitChannelDuration("player")
     if duration then
@@ -1133,7 +1179,7 @@ function CastBar:Relayout(width, height)
         end
     end
 
-    if self._stageFracs then
+    if self._stageFracs or self._channelTicks then
         self:LayoutStagePips()
     end
 end
@@ -1218,7 +1264,7 @@ local EVENT_DISPATCH = {
     UNIT_SPELLCAST_INTERRUPTED         = function(_unit, castGUID, _spellID, _interruptedBy, castBarID) CastBar:OnSpellcastInterrupted(castGUID, castBarID) end,
     UNIT_SPELLCAST_INTERRUPTIBLE       = function() CastBar:OnInterruptibleChanged(false) end,
     UNIT_SPELLCAST_NOT_INTERRUPTIBLE   = function() CastBar:OnInterruptibleChanged(true) end,
-    UNIT_SPELLCAST_CHANNEL_START       = function(_unit, castGUID, _spellID, castBarID) CastBar:OnChannelStart(castGUID, castBarID) end,
+    UNIT_SPELLCAST_CHANNEL_START       = function(_unit, castGUID, spellID, castBarID) CastBar:OnChannelStart(castGUID, castBarID, spellID) end,
     UNIT_SPELLCAST_CHANNEL_STOP        = function(_unit, castGUID, _spellID, interruptedBy, castBarID)
         local complete
         if not isSecret(interruptedBy) then complete = interruptedBy == nil end
@@ -1479,6 +1525,7 @@ function CastBar:ApplyOptions()
     local profile = self.profileRef
     if not profile then return end
     if not self.bar then return end
+    self._lastDisplayedTenths = nil
 
     self:ApplyBlizzardSuppression()
     if profile.enabled == false then

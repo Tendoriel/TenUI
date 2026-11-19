@@ -353,14 +353,14 @@ local function petIsFelguard()
     return FELGUARD_NPC_IDS[npcID] == true
 end
 
-local function evaluate(o)
+local function evaluate(o, preview)
     local out = {}
     local activeEntries = {}
     local class = playerClass()
-    local function push(icon, label, active)
+    local function push(key, icon, label, active)
         local entries = active and o.showActive and activeEntries or (not active and out)
         if entries and #entries < MAX_SLOTS then
-            entries[#entries + 1] = { icon = icon, label = label, active = active }
+            entries[#entries + 1] = { key = key, icon = icon, label = label, active = active }
         end
     end
 
@@ -368,11 +368,11 @@ local function evaluate(o)
         local knowsAny = spellKnown(EARTH_SHIELD) or spellKnown(LIGHTNING_SHIELD)
             or spellKnown(WATER_SHIELD)
         if knowsAny then
-            local activeShield = anyPlayerAuraPresent(EARTH_SHIELD_SELF) and EARTH_SHIELD
+            local activeShield = not preview and (anyPlayerAuraPresent(EARTH_SHIELD_SELF) and EARTH_SHIELD
                 or playerAuraPresent(LIGHTNING_SHIELD) and LIGHTNING_SHIELD
-                or playerAuraPresent(WATER_SHIELD) and WATER_SHIELD
+                or playerAuraPresent(WATER_SHIELD) and WATER_SHIELD)
             if activeShield then
-                push(spellIcon(activeShield, FALLBACK_SHIELD), "Shield", true)
+                push("shamanShields", spellIcon(activeShield, FALLBACK_SHIELD), "Shield", true)
             else
                 local spec = GetSpecialization and GetSpecialization()
                 local iconSpell
@@ -387,7 +387,7 @@ local function evaluate(o)
                 else
                     iconSpell = WATER_SHIELD
                 end
-                push(spellIcon(iconSpell, FALLBACK_SHIELD), "Shield")
+                push("shamanShields", spellIcon(iconSpell, FALLBACK_SHIELD), "Shield")
             end
         end
     end
@@ -396,12 +396,12 @@ local function evaluate(o)
         and currentSpecID() == HOLY_PALADIN_SPEC
         and not spellKnown(BEACON_OF_VIRTUE) then
         if spellKnown(BEACON_OF_LIGHT) then
-            local active = groupHasAura(BEACON_OF_LIGHT)
-            if active ~= nil then push(spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", active) end
+            local active = not preview and groupHasAura(BEACON_OF_LIGHT)
+            if active ~= nil then push("paladinBeacons", spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", active) end
         end
         if spellKnown(BEACON_OF_FAITH) then
-            local active = groupHasAura(BEACON_OF_FAITH)
-            if active ~= nil then push(spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", active) end
+            local active = not preview and groupHasAura(BEACON_OF_FAITH)
+            if active ~= nil then push("paladinBeacons", spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", active) end
         end
     end
 
@@ -420,7 +420,7 @@ local function evaluate(o)
             for i = 1, #WARLOCK_SUMMONS do
                 if spellKnown(WARLOCK_SUMMONS[i]) then knowsSummon = true break end
             end
-            petExpected = knowsSummon and not playerAuraPresent(GRIM_SAC_BUFF)
+            petExpected = knowsSummon and (preview or not playerAuraPresent(GRIM_SAC_BUFF))
             missingIcon, missingLabel = spellIcon(688, FALLBACK_PET), "Pet"
         elseif class == "DEATHKNIGHT" then
             petExpected = currentSpecID() == UNHOLY_SPEC
@@ -433,33 +433,33 @@ local function evaluate(o)
         end
 
         if petExpected then
-            push(missingIcon, missingLabel, petAlive())
+            push("pets", missingIcon, missingLabel, not preview and petAlive())
         end
 
         if class == "WARLOCK" and currentSpecID() == DEMONOLOGY_SPEC
-            and petAlive() and spellKnown(SUMMON_FELGUARD) then
-            if petIsFelguard() == false then
-                push(spellIcon(SUMMON_FELGUARD, FALLBACK_PET), "Felguard!")
+            and (preview or petAlive()) and spellKnown(SUMMON_FELGUARD) then
+            if preview or petIsFelguard() == false then
+                push("pets", spellIcon(SUMMON_FELGUARD, FALLBACK_PET), "Felguard!")
             end
         end
 
-        if o.petPassive and petAlive() and petOnPassive() then
-            push(FALLBACK_PASSIVE, "Passive!")
+        if o.petPassive and (preview and petExpected or not preview and petAlive() and petOnPassive()) then
+            push("petPassive", FALLBACK_PASSIVE, "Passive!")
         end
     end
 
     if class == "PRIEST" and o.shadowform
         and currentSpecID() == SHADOW_SPEC
         and spellKnown(SHADOWFORM) then
-        local missing = shadowformMissing()
+        local missing = preview or shadowformMissing()
         if missing ~= nil then
-            push(spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform", not missing)
+            push("shadowform", spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform", not missing)
         end
     end
 
     if class == "DRUID" and o.moonkinForm and currentSpecID() == BALANCE_SPEC then
-        local active = formState(MOONKIN_FORMS)
-        if active ~= nil then push(spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active) end
+        local active = not preview and formState(MOONKIN_FORMS)
+        if active ~= nil then push("moonkinForm", spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active) end
     end
 
     if class == "ROGUE" and o.roguePoisons then
@@ -471,19 +471,22 @@ local function evaluate(o)
             if spellKnown(NONLETHAL_POISONS[i]) then knowsNonLethal = true break end
         end
         if knowsLethal then
-            push(spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal", anyPlayerAuraPresent(LETHAL_POISONS))
+            push("roguePoisons", spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal",
+                not preview and anyPlayerAuraPresent(LETHAL_POISONS))
         end
         if knowsNonLethal then
-            push(spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal", anyPlayerAuraPresent(NONLETHAL_POISONS))
+            push("roguePoisons", spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal",
+                not preview and anyPlayerAuraPresent(NONLETHAL_POISONS))
         end
     end
 
-    if o.raidBuffs and IsInGroup() then
+    if o.raidBuffs and (preview or IsInGroup()) then
         local roster = ClassReminders._rosterClasses or {}
         for i = 1, #RAID_BUFFS do
             local def = RAID_BUFFS[i]
-            if roster[def.class] then
-                push(spellIcon(def.iconSpell, def.fallback), def.label, anyPlayerAuraPresent(def.buffIDs))
+            if roster[def.class] or (preview and def.class == class and spellKnown(def.iconSpell)) then
+                push("raidBuffs", spellIcon(def.iconSpell, def.fallback), def.label,
+                    not preview and anyPlayerAuraPresent(def.buffIDs))
             end
         end
     end
@@ -569,11 +572,7 @@ local function buildFrame()
     return f
 end
 
-local function render(entries)
-    local f = ClassReminders.frame
-    local o = getOpts()
-    if not (f and o) then return end
-
+local function renderSlots(f, entries, o)
     local n = #entries
     if n == 0 then
         f:Hide()
@@ -584,26 +583,22 @@ local function render(entries)
     local fontSz  = o.fontSize or DEFAULTS.fontSize
     local spacing = 6
     local labelH  = fontSz + 4
-    local width   = n * size + (n - 1) * spacing
     local fontPath = resolveFont()
-
-    f:SetSize(width, size + labelH)
-    if not f._dragging then
-        f:ClearAllPoints()
-        f:SetPoint(o.point or "CENTER", UIParent, o.point or "CENTER", o.x or 0, o.y or 0)
-    end
-
+    local x = 0
     for i = 1, MAX_SLOTS do
         local slot = f.slots[i]
         local e = entries[i]
+        slot.entry = e
         if e then
-            slot:SetSize(size, size)
-            slot:ClearAllPoints()
-            slot:SetPoint("TOPLEFT", f, "TOPLEFT", (i - 1) * (size + spacing), 0)
-            slot.icon:SetTexture(e.icon)
-            slot.glow:SetSize(size * 1.6, size * 1.6)
             slot.label:SetFont(fontPath, fontSz, "OUTLINE")
             slot.label:SetText(e.label or "")
+            local width = math.max(size, slot.label:GetStringWidth())
+            slot:SetSize(size, size)
+            slot:ClearAllPoints()
+            slot:SetPoint("TOPLEFT", f, "TOPLEFT", x + (width - size) / 2, 0)
+            x = x + width + spacing
+            slot.icon:SetTexture(e.icon)
+            slot.glow:SetSize(size * 1.6, size * 1.6)
             slot.label:SetTextColor(e.active and 0.5 or 1, 1, e.active and 0.5 or 1)
             slot.check:SetShown(e.active == true)
             if o.glow and not e.active then
@@ -621,13 +616,70 @@ local function render(entries)
         end
     end
 
+    f:SetSize(x - spacing, size + labelH)
     f:SetAlpha(1)
     f:Show()
 end
 
+local function render(entries)
+    local f, o = ClassReminders.frame, getOpts()
+    if not (f and o) then return end
+    if not f._dragging then
+        f:ClearAllPoints()
+        f:SetPoint(o.point or "CENTER", UIParent, o.point or "CENTER", o.x or 0, o.y or 0)
+    end
+    renderSlots(f, entries, o)
+end
+
+local function previewEntries(o)
+    local entries = evaluate(o, true)
+    if entries[1] and o.showActive then entries[1].active = true end
+    return entries
+end
+
+function ClassReminders:CreateOptionsPreview(parent, openSettings)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetPoint("CENTER", parent, "CENTER", 0, -8)
+    frame.slots = {}
+    for i = 1, MAX_SLOTS do
+        local slot = buildSlot(frame)
+        slot:EnableMouse(true)
+        slot:SetScript("OnEnter", function(self)
+            if not self.entry then return end
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:SetText(self.entry.label)
+            GameTooltip:AddLine("Click to find this setting", 0.6, 0.8, 1)
+            GameTooltip:Show()
+        end)
+        slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        slot:SetScript("OnHide", function(self)
+            self.glowAnim:Stop()
+            if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+        end)
+        slot:SetScript("OnMouseUp", function(self, button)
+            if self.entry and (button == "LeftButton" or button == "RightButton") then
+                GameTooltip:Hide()
+                openSettings(self.entry.key)
+            end
+        end)
+        frame.slots[i] = slot
+    end
+    return function(o)
+        local entries = previewEntries(o)
+        renderSlots(frame, entries, o)
+        if #entries == 0 then return 0 end
+        local width = parent:GetWidth()
+        local scale = width > 26 and math.min(1, (width - 26) / frame:GetWidth()) or 1
+        frame:SetScale(scale)
+        return frame:GetHeight() * scale
+    end
+end
+
 local TEST_ENTRIES = nil
 
-local function buildTestEntries()
+local function buildTestEntries(o)
+    local preview = previewEntries(o)
+    if #preview > 0 then return preview end
     if TEST_ENTRIES then return TEST_ENTRIES end
     TEST_ENTRIES = {
         { icon = spellIcon(EARTH_SHIELD, FALLBACK_SHIELD), label = "Shield" },
@@ -645,7 +697,7 @@ local function update()
     if not o then return end
 
     if f._locked == false then
-        render(buildTestEntries())
+        render(buildTestEntries(o))
         return
     end
 
@@ -653,7 +705,7 @@ local function update()
     local testing = ClassReminders._testUntil > now
 
     if testing then
-        render(buildTestEntries())
+        render(buildTestEntries(o))
         return
     end
 

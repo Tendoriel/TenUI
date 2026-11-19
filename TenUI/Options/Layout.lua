@@ -803,6 +803,12 @@ local function buildLayoutPage(sc)
     sc:SetHeight(math.max(totalH, 10))
 end
 
+function ns.Options:OpenLayoutForAnchor(anchor)
+    if not anchor then return end
+    _selectedAnchor = anchor
+    self:SelectPage("layout", true)
+end
+
 ns.Options:RegisterPage({
     key   = "layout",
     label = "Layout",

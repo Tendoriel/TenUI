@@ -655,6 +655,14 @@ local function buildResourcesPage(sc)
 
     children[#children + 1] = C.CreateSubSection(sc, "Primary Resource Bar")
 
+    children[#children + 1] = C.CreateCheckBox(sc, "Fill the space of an unavailable secondary bar",
+        function() return getResProfile().primary.expandIfNoSecondary == true end,
+        function(v)
+            getResProfile().primary.expandIfNoSecondary = v and true or nil
+            applyOptions()
+        end
+    )
+
     children[#children + 1] = C.CreateCheckBox(sc, "Enable Primary Resource Bar",
         function()
             local entry = getActiveSpecColorEntry()

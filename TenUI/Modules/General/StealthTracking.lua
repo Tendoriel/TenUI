@@ -19,6 +19,7 @@ local SPELL_BURNING_RUSH = 111400
 local FALLBACK_STEALTH      = 132320
 local FALLBACK_PROWL        = 132089
 local FALLBACK_BURNING_RUSH = 538043
+local DRUID_SPEC_OPTIONS = { "druidBalance", "druidFeral", "druidGuardian", "druidResto" }
 
 local DEFAULTS = {
     enabled          = false,
@@ -90,12 +91,7 @@ local function stealthRelevant(o)
         return o.rogue == true
     end
     if class == "DRUID" then
-        local spec = GetSpecialization()
-        if spec == 2 then return o.druidFeral    == true end
-        if spec == 1 then return o.druidBalance  == true end
-        if spec == 3 then return o.druidGuardian == true end
-        if spec == 4 then return o.druidResto    == true end
-        return o.druidFeral == true
+        return o[DRUID_SPEC_OPTIONS[GetSpecialization()] or "druidFeral"] == true
     end
     return false
 end
@@ -105,6 +101,22 @@ local function stealthIconForClass()
         return spellIcon(SPELL_PROWL, FALLBACK_PROWL)
     end
     return spellIcon(SPELL_STEALTH, FALLBACK_STEALTH)
+end
+
+function StealthTracking:GetOptionsPreview(o)
+    local druidKey = playerClass() == "DRUID" and DRUID_SPEC_OPTIONS[GetSpecialization()]
+    local prowlEnabled
+    if druidKey then
+        prowlEnabled = o[druidKey]
+    else
+        prowlEnabled = o.druidFeral or o.druidBalance or o.druidGuardian or o.druidResto
+    end
+    return {
+        { key = "rogue", label = "Stealth", texture = spellIcon(SPELL_STEALTH, FALLBACK_STEALTH), enabled = o.rogue },
+        { key = druidKey or "druidFeral", label = "Prowl", texture = spellIcon(SPELL_PROWL, FALLBACK_PROWL), enabled = prowlEnabled },
+        { key = "warlockBurningRush", label = "Burning Rush", texture = spellIcon(SPELL_BURNING_RUSH, FALLBACK_BURNING_RUSH),
+          enabled = o.warlockBurningRush },
+    }
 end
 
 local function buildFrame()
@@ -180,16 +192,8 @@ local function update()
     local o = getOpts()
     if not o then return end
 
-    if f._locked == false then
-        f.stealthSlot.icon:SetTexture(stealthIconForClass())
-        f.rushSlot.icon:SetTexture(spellIcon(SPELL_BURNING_RUSH, FALLBACK_BURNING_RUSH))
-        layout(true, true)
-        f:Show()
-        return
-    end
-
     local now = GetTime and GetTime() or 0
-    local testing = StealthTracking._testUntil > now
+    local testing = not f._locked or StealthTracking._testUntil > now
 
     if not o.enabled and not testing then
         f:Hide()
@@ -214,8 +218,8 @@ local function update()
     local showRush    = false
 
     if testing then
-        showStealth = true
-        showRush = (playerClass() == "WARLOCK")
+        showRush = playerClass() == "WARLOCK"
+        showStealth = not showRush
     else
         if stealthRelevant(o) and IsStealthed() then
             showStealth = true

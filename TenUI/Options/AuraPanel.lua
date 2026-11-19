@@ -9,11 +9,6 @@ local tonumber = tonumber
 local pcall    = pcall
 local ipairs   = ipairs
 
-local AURA_CONTAINERS = {
-    { key = "TrackedIcon", label = "Tracked Icons" },
-    { key = "TrackedBars", label = "Tracked Bars"  },
-}
-
 local _selectedAuraContainer = "TrackedBars"
 local _currentAuraSpellID    = nil
 local _currentAuraContainer  = nil
@@ -58,6 +53,7 @@ local function getActiveAuras(containerKey)
             active        = entry.active,
             isKnown       = entry.isKnown,
             cdmTracked    = entry.cdmTracked,
+            displayEnabled = entry.displayEnabled,
         }
     end
     return result
@@ -65,6 +61,7 @@ end
 
 local _auraListFrame = nil
 local _relayoutAuraPage = nil
+local _updateAuraPreview = nil
 
 local function makeRowCheck(C, row, initial, onToggle)
     local Theme = C.Theme
@@ -102,11 +99,21 @@ local function rebuildAuraList()
     C.ClearChildren(_auraListFrame)
 
     local auras = getActiveAuras(_selectedAuraContainer)
+    local previewItems = {}
+    local respectCDM = ns.Auras and ns.Auras.GetRespectCDMHidden and ns.Auras:GetRespectCDMHidden()
+    for _, aura in ipairs(auras) do
+        if aura.displayEnabled ~= false and (aura.cdmTracked ~= false or not respectCDM) then
+            previewItems[#previewItems + 1] = { spellID = aura.spellID, cooldownID = aura.cooldownID,
+                label = aura.label, texture = aura.icon, key = aura.stableEntryID }
+        end
+    end
+    if _updateAuraPreview then _updateAuraPreview({ previewItems }) end
     if #auras == 0 then
         local note = C.Text(_auraListFrame, C.Fonts.small, Theme.color.textDim,
             "No auras in this category. Check the tracked lists in Blizzard Cooldown Manager.")
         note:SetPoint("TOPLEFT", _auraListFrame, "TOPLEFT", 8, -8)
         _auraListFrame:SetHeight(32)
+        if _relayoutAuraPage then _relayoutAuraPage() end
         return
     end
 
@@ -139,7 +146,7 @@ local function rebuildAuraList()
                     return legacy.enabled ~= false
                 end
             end
-            return true
+            return aura.displayEnabled ~= false
         end
         local cbFrame = makeRowCheck(C, row, getEnabled())
         cbFrame:SetPoint("LEFT", row, "LEFT", 2, 0)
@@ -156,7 +163,7 @@ local function rebuildAuraList()
 
         local nameLabel = C.Text(row, C.Fonts.value, Theme.color.text, tostring(aura.label))
         nameLabel:SetPoint("LEFT", iconTex, "RIGHT", 6, 0)
-        nameLabel:SetPoint("RIGHT", row, "RIGHT", -80, 0)
+        nameLabel:SetPoint("RIGHT", row, "RIGHT", -190, 0)
         nameLabel:SetJustifyH("LEFT")
 
         local stateLabel = C.Text(row, C.Fonts.small, Theme.color.textDim)
@@ -197,7 +204,7 @@ local function rebuildAuraList()
             local displayOn = getEnabled()
             local notPinned = displayOn and (aura.cdmTracked == false)
             if notPinned then
-                cdmMarker:SetText("|cffe6a23cNot pinned|r")
+                cdmMarker:SetText(respectCDM and "|cffe6a23cHidden by CDM|r" or "|cffe6a23cOutside CDM list|r")
                 cdmMarker:Show()
                 cdmBtn:Show()
                 stateLabel:Hide()
@@ -206,9 +213,9 @@ local function rebuildAuraList()
                 cdmBtn:Hide()
                 stateLabel:Show()
                 if displayOn then
-                    stateLabel:SetText("|cff5fcf5fenabled|r")
+                    stateLabel:SetText("|cff5fcf5fEnabled|r")
                 else
-                    stateLabel:SetText("|cffb05555hidden|r")
+                    stateLabel:SetText("|cffb05555Disabled in TenUI|r")
                 end
             end
         end
@@ -225,15 +232,16 @@ local function rebuildAuraList()
             if ns.Auras and ns.Auras.OnAuraEnabledChanged then
                 pcall(ns.Auras.OnAuraEnabledChanged, ns.Auras, capturedKey, ap.enabled)
             end
+            rebuildAuraList()
         end
 
-        local hintLabel = C.Text(row, C.Fonts.small, Theme.color.textFaint, "right-click settings")
+        local hintLabel = C.Text(row, C.Fonts.small, Theme.color.textFaint, "Right-click to edit")
         hintLabel:SetPoint("RIGHT", row, "RIGHT", -4, 0)
         hintLabel:Hide()
 
         row:EnableMouse(true)
-        row:SetScript("OnMouseDown", function(self, btn)
-            if btn == "RightButton" then
+        row:SetScript("OnMouseUp", function(self, btn)
+            if capturedSpellID and btn == "RightButton" then
                 AuraPanel:OpenForAura(capturedSpellID, _selectedAuraContainer,
                     aura.cooldownID)
             end
@@ -262,10 +270,26 @@ ns:RegisterMessage("AURA_LIST_UPDATED", function()
     end
 end)
 
+local function saveAuraContainer(key)
+    _selectedAuraContainer = key
+    local ui = ns.GetUIState and ns:GetUIState()
+    if ui and ui.lastOptionsSub then ui.lastOptionsSub.auras = key end
+    if ns.savedVarsReady then
+        local p = ns:GetProfile()
+        p.modules = p.modules or {}
+        p.modules.Options = p.modules.Options or {}
+        p.modules.Options.selectedAuraContainer = key
+    end
+end
+
+function AuraPanel:OpenList(key)
+    saveAuraContainer(key)
+    ns.Options:SelectPage("auras", true)
+end
+
 local function buildAuraPage(sc)
     local C = ns.UI
     if not C then return end
-    local Theme = C.Theme
     local children = {}
 
     if ns.Auras and ns.Auras._invalidateLiveRenderCategoryMap then
@@ -274,65 +298,43 @@ local function buildAuraPage(sc)
 
     do
         local ui = ns.GetUIState and ns:GetUIState()
-        local savedContainer = ui and ui.lastOptionsSub.auras
+        local savedContainer = ui and ui.lastOptionsSub and ui.lastOptionsSub.auras
         if not savedContainer and ns.savedVarsReady then
             local p = ns:GetProfile()
             if p.modules and p.modules.Options then
                 savedContainer = p.modules.Options.selectedAuraContainer
             end
         end
-        if savedContainer then
-            for _, cont in ipairs(AURA_CONTAINERS) do
-                if cont.key == savedContainer then
-                    _selectedAuraContainer = savedContainer
-                    break
-                end
-            end
+        if savedContainer == "TrackedIcon" or savedContainer == "TrackedBars" then
+            _selectedAuraContainer = savedContainer
         end
     end
 
-    children[#children + 1] = C.CreateSection(sc, "Blizzard CDM Tracked Auras")
+    local containerKey = _selectedAuraContainer
+    local header = ns.Options:BuildCooldownHeader("auras", containerKey, 64)
+    _updateAuraPreview = ns.Options:CreateCooldownStrip(header, -29, {
+        resize = function(height) ns.Options:GetPinnedHeader("auras", height) end,
+        select = function(item) AuraPanel:OpenForAura(item.spellID, containerKey, item.cooldownID) end,
+        move = function(source, _, index, item)
+            if item and ns.Auras:MoveTrackedEntry(containerKey, source.item.key, item.key, source.index < index) then
+                rebuildAuraList()
+            end
+        end,
+    }, "No enabled auras in this group.")
+    local layout = C.CreateCompactButton(header, "Group Layout", function()
+        ns.Options:OpenLayoutForAnchor(containerKey)
+    end, 110)
+    layout:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -3)
+
+    children[#children + 1] = C.CreateSection(sc, containerKey == "TrackedBars" and "Tracked Bars" or "Tracked Icons")
 
     local depNote = C.CreateHelpText and C.CreateHelpText(sc,
         "TenUI uses Blizzard aura containers to display enabled buffs and your target debuffs.")
     if depNote then children[#children + 1] = depNote end
 
-    local tabRow = CreateFrame("Frame", nil, sc)
-    tabRow:SetHeight(28)
-    children[#children + 1] = tabRow
-
-    local tabBtns = {}
-    local prevTab
-    for i, cont in ipairs(AURA_CONTAINERS) do
-        local capturedKey = cont.key
-        local tb
-        tb = C.CreateTabButton(tabRow, cont.label, function()
-            for _, b in pairs(tabBtns) do
-                b:SetSelected(false)
-            end
-            tb:SetSelected(true)
-            _selectedAuraContainer = capturedKey
-            rebuildAuraList()
-            if ns.savedVarsReady then
-                local p = ns:GetProfile()
-                p.modules = p.modules or {}
-                p.modules.Options = p.modules.Options or {}
-                p.modules.Options.selectedAuraContainer = capturedKey
-            end
-            local ui = ns.GetUIState and ns:GetUIState()
-            if ui then
-                ui.lastOptionsSub.auras = capturedKey
-            end
-        end)
-        if prevTab then
-            tb:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
-        else
-            tb:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
-        end
-        prevTab = tb
-        tb:SetSelected(cont.key == _selectedAuraContainer)
-        tabBtns[cont.key] = tb
-    end
+    children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager", function()
+        if ns.Auras then ns.Auras:OpenBlizzardCDMSettings() end
+    end)
 
     children[#children + 1] = C.CreateButton(sc, "Refresh Aura List", function()
         if ns.Auras and ns.Auras.RefreshTrackedAuraCatalog then
@@ -342,6 +344,23 @@ local function buildAuraPage(sc)
         end
         rebuildAuraList()
     end)
+
+    children[#children + 1] = C.CreateSubSection(sc, "Tracked Auras")
+    local auraContainer = CreateFrame("Frame", nil, sc)
+    auraContainer:SetHeight(80)
+    _auraListFrame = auraContainer
+    children[#children + 1] = auraContainer
+
+    local displaySection = C.CreateSection(sc, "Display Settings")
+    children[#children + 1] = displaySection
+    local display = C.CreateCompactButton(header, "Display Settings", function()
+        local scroll = sc:GetParent()
+        local top, sectionTop = sc:GetTop(), displaySection:GetTop()
+        if top and sectionTop then
+            scroll:SetVerticalScroll(math.min(top - sectionTop, scroll:GetVerticalScrollRange()))
+        end
+    end, 140)
+    display:SetPoint("RIGHT", layout, "LEFT", -6, 0)
 
     children[#children + 1] = C.CreateHelpText(sc,
         "If the same aura is in both Tracked Icons and Tracked Bars, only one shows it. Choose which.")
@@ -380,50 +399,21 @@ local function buildAuraPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateCheckBox(sc,
-        "Show Duration Swipe (Tracked Icons)",
-        function()
-            if ns.Auras and ns.Auras.GetIconDurationSwipe then
-                return ns.Auras:GetIconDurationSwipe()
-            end
-            return true
-        end,
-        function(v)
-            if ns.Auras and ns.Auras.SetIconDurationSwipe then
-                ns.Auras:SetIconDurationSwipe(v)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc,
-        "Show Icon on Tracked Bars",
-        function()
-            if ns.Auras and ns.Auras.GetBarShowIcon then
-                return ns.Auras:GetBarShowIcon()
-            end
-            return true
-        end,
-        function(v)
-            if ns.Auras and ns.Auras.SetBarShowIcon then
-                ns.Auras:SetBarShowIcon(v)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc,
-        "Keep inactive bars visible",
-        function()
-            if ns.Auras and ns.Auras.GetBarShowInactive then
-                return ns.Auras:GetBarShowInactive()
-            end
-            return false
-        end,
-        function(v)
-            if ns.Auras and ns.Auras.SetBarShowInactive then
-                ns.Auras:SetBarShowInactive(v)
-            end
-        end
-    )
+    if containerKey == "TrackedIcon" then
+        children[#children + 1] = C.CreateCheckBox(sc, "Show Duration Swipe",
+            function() return not ns.Auras or ns.Auras:GetIconDurationSwipe() end,
+            function(v) if ns.Auras then ns.Auras:SetIconDurationSwipe(v) end end
+        )
+    else
+        children[#children + 1] = C.CreateCheckBox(sc, "Show Icon on Bars",
+            function() return not ns.Auras or ns.Auras:GetBarShowIcon() end,
+            function(v) if ns.Auras then ns.Auras:SetBarShowIcon(v) end end
+        )
+        children[#children + 1] = C.CreateCheckBox(sc, "Keep inactive bars visible",
+            function() return ns.Auras and ns.Auras:GetBarShowInactive() end,
+            function(v) if ns.Auras then ns.Auras:SetBarShowInactive(v) end end
+        )
+    end
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Tracked aura tooltips", {
         { key = "always", label = "Always" },
@@ -445,9 +435,9 @@ local function buildAuraPage(sc)
         function(v) if ns.Auras then ns.Auras:SetPandemicEnabled(v) end end
     )
 
-    for _, display in ipairs({ { key = "icon", label = "Tracked Icons" }, { key = "bar", label = "Tracked Bars" } }) do
-        local kind = display.key
-        children[#children + 1] = C.CreateCheckBox(sc, "Show stacks (" .. display.label .. ")",
+    do
+        local kind = containerKey == "TrackedIcon" and "icon" or "bar"
+        children[#children + 1] = C.CreateCheckBox(sc, "Show stacks",
             function()
                 local profile = ns.Auras and ns.Auras.profileRef
                 local options = profile and profile[kind .. "s"]
@@ -461,7 +451,7 @@ local function buildAuraPage(sc)
                 end
             end
         )
-        children[#children + 1] = C.CreateCheckBox(sc, "Active aura highlight (" .. display.label .. ")",
+        children[#children + 1] = C.CreateCheckBox(sc, "Active aura highlight",
             function() return ns.Auras and ns.Auras:IsActiveGlowEnabled(kind) end,
             function(v) if ns.Auras then ns.Auras:SetActiveGlowEnabled(v, kind) end end
         )
@@ -490,13 +480,6 @@ local function buildAuraPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateSubSection(sc, "Tracked Auras")
-
-    local auraContainer = CreateFrame("Frame", nil, sc)
-    auraContainer:SetHeight(80)
-    _auraListFrame = auraContainer
-    children[#children + 1] = auraContainer
-
     _relayoutAuraPage = function()
         local h = C.LayoutVertical(sc, children, 4, -8)
         sc:SetHeight(math.max(h, 10))
@@ -519,11 +502,12 @@ local function buildAuraSettingsPage(sc)
         if ok and n then spellName = n .. " (" .. tostring(spellID) .. ")" end
     end
 
+    local header = ns.Options:BuildCooldownHeader("aura_settings", _currentAuraContainer, spellID and 82 or 27)
     children[#children + 1] = C.CreateSection(sc, "Aura Settings: " .. spellName)
 
     if not spellID then
         children[#children + 1] = C.CreateHelpText(sc,
-            "Right-click an aura in the Auras page to open its settings.")
+            "Select an aura in Tracked Icons or Tracked Bars to open its settings.")
         C.LayoutVertical(sc, children, 4, -8)
         sc:SetHeight(60)
         return
@@ -544,10 +528,93 @@ local function buildAuraSettingsPage(sc)
         end
     )
     children[#children + 1] = C.CreateHelpText(sc,
-        "Move the aura between Tracked Icons and Tracked Bars in Blizzard Cooldown Manager. Adjust the selected group's appearance in Layout.")
+        "Move this aura between icons and bars in Blizzard Cooldown Manager.")
     children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager", function()
         if ns.Auras then ns.Auras:OpenBlizzardCDMSettings() end
     end)
+
+    if _currentAuraContainer == "TrackedBars" and ns.Auras then
+        local barKey = _currentAuraCooldownID and key or ("spell:" .. spellID)
+        local function barSettings()
+            return ns.Auras:GetTrackedBarSettings(barKey) or {}
+        end
+        local function editBar()
+            local record = getAuraProfile(barKey)
+            record.barDisplay = record.barDisplay or {}
+            return record.barDisplay
+        end
+        local function rebuild()
+            C_Timer.After(0, function()
+                if ns.Options:GetCurrentPage() == "aura_settings" and _currentAuraSpellID == spellID then
+                    ns.Options:RebuildPage("aura_settings")
+                end
+            end)
+        end
+        local function setBar(field, value)
+            editBar()[field] = value
+            ns.Auras:RequestRefresh()
+        end
+        local function setAppearance(field, value)
+            local settings = editBar()
+            settings.appearance = settings.appearance or {}
+            settings.appearance[field] = value
+            ns.Auras:RequestRefresh()
+        end
+
+        children[#children + 1] = C.CreateSection(sc, "Bar Settings")
+        children[#children + 1] = C.CreateDropdownLikeList(sc, "Visibility", {
+            { key = "group", label = "Use group setting" },
+            { key = "active", label = "Only while active" },
+            { key = "always", label = "Keep visible" },
+        }, function() return barSettings().visibility or "group" end,
+            function(value) setBar("visibility", value ~= "group" and value or nil) end)
+        children[#children + 1] = C.CreateCheckBox(sc, "Independent position", function()
+            return barSettings().independent == true
+        end, function(value)
+            setBar("independent", value and true or nil)
+            rebuild()
+        end)
+        if barSettings().independent then
+            for _, axis in ipairs({ { key = "x", label = "X from group", default = 0 },
+                                     { key = "y", label = "Y from group", default = 40 } }) do
+                children[#children + 1] = C.CreateSlider(sc, axis.label, -800, 800, 1,
+                    function() return barSettings()[axis.key] or axis.default end,
+                    function(value) setBar(axis.key, value) end)
+            end
+        end
+        children[#children + 1] = C.CreateColorSwatch(sc, "Bar fill color", function()
+            local visuals = ns.GetLayoutVisuals and ns:GetLayoutVisuals("TrackedBars")
+            local color = (barSettings().appearance or {}).fill or (visuals and visuals.fillColor)
+            if color then return color[1], color[2], color[3], color[4] or 1 end
+            return 1, 1, 1, 1
+        end, function(r, g, b, a) setAppearance("fill", { r, g, b, a or 1 }) end)
+        for _, field in ipairs({ { key = "showIcon", label = "Show icon" }, { key = "showName", label = "Show name" },
+                                { key = "showTimer", label = "Show timer" }, { key = "reverseFill", label = "Reverse fill" } }) do
+            children[#children + 1] = C.CreateCheckBox(sc, field.label, function()
+                local value = (barSettings().appearance or {})[field.key]
+                if value ~= nil then return value end
+                local group = ns.Auras.profileRef and ns.Auras.profileRef.bars or {}
+                return field.key ~= "reverseFill" and group[field.key] ~= false
+            end, function(value) setAppearance(field.key, value) end)
+        end
+
+        local copyChoices = { { key = "group", label = "Use group appearance" } }
+        for _, entry in ipairs(getActiveAuras("TrackedBars")) do
+            if entry.displayEnabled and entry.stableEntryID and entry.stableEntryID ~= barKey then
+                copyChoices[#copyChoices + 1] = { key = entry.stableEntryID, label = entry.label }
+            end
+        end
+        table.insert(copyChoices, 1, { key = "choose", label = "Choose appearance…" })
+        children[#children + 1] = C.CreateDropdownLikeList(sc, "Copy appearance from", copyChoices,
+            function() return "choose" end, function(source)
+                if source == "choose" then return end
+                local appearance = ns.Auras:GetTrackedBarAppearance(source)
+                local copy = appearance and {} or nil
+                if copy then ns._deepCopyMissing(copy, appearance) end
+                setBar("appearance", copy)
+                rebuild()
+            end)
+    end
 
     local function getGlow(kind)
         return ns.Auras and ns.Auras:GetAuraGlowSettings(key, spellID, kind)
@@ -577,8 +644,8 @@ local function buildAuraSettingsPage(sc)
     end
 
     local glowModes = {
-        { key = "inherit", label = "Use Auras setting" },
-        { key = "on", label = "Always enabled" },
+        { key = "inherit", label = "Use display default" },
+        { key = "on", label = "On for this aura" },
         { key = "off", label = "Off" },
     }
     local function addGlowMode(label, kind)
@@ -592,7 +659,7 @@ local function buildAuraSettingsPage(sc)
     local function addGlowStyle(label, kind, choices)
         local default = choices[1].key
         for _, choice in ipairs(ns.Glow:GetStyleChoices(nil, kind ~= "gain")) do
-            choices[#choices + 1] = choice
+            if choice.key ~= default then choices[#choices + 1] = choice end
         end
         children[#children + 1] = C.CreateDropdownLikeList(sc, label, choices,
             function()
@@ -642,10 +709,28 @@ local function buildAuraSettingsPage(sc)
     addGlowStyle("Proc glow style", "gain", { { key = "flash", label = "Flash (default)" } })
     addGlowColor("Proc glow color", "gain", { 0.4, 0.8, 1, 0.8 })
 
-    local preview = CreateFrame("Frame", nil, sc)
+    children[#children + 1] = C.CreateSubSection(sc, "Expiring Aura Glow")
+    children[#children + 1] = C.CreateCheckBox(sc, "Glow below a time threshold",
+        function() return ns.Auras:GetAuraGlowMode(getGlow("lowTimeGlow"), "lowTimeGlow") == "on" end,
+        function(v) setGlow("lowTimeGlow", "mode", v and "on" or "off") end
+    )
+    children[#children + 1] = C.CreateSlider(sc, "Glow threshold (seconds)", 1, 60, 1,
+        function()
+            local glow = getGlow("lowTimeGlow")
+            return glow and tonumber(glow.threshold) or 5
+        end,
+        function(v) setGlow("lowTimeGlow", "threshold", v) end
+    )
+    addGlowStyle("Expiring aura glow style", "lowTimeGlow", {
+        { key = "solid", label = "Solid Outline (default)" },
+    })
+    addGlowColor("Expiring aura glow color", "lowTimeGlow", { 1, 0.45, 0.15, 1 })
+
+    local preview = CreateFrame("Frame", nil, header)
     preview:SetHeight(54)
+    preview:SetPoint("TOPLEFT", header, "TOPLEFT", 8, -27)
+    preview:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -27)
     C.SkinPanel(preview)
-    children[#children + 1] = preview
 
     local icon = CreateFrame("Frame", nil, preview)
     icon:SetSize(30, 30)
@@ -663,12 +748,14 @@ local function buildAuraSettingsPage(sc)
         { kind = "pandemic", label = "Pandemic" },
         { kind = "activeAura", label = "Active" },
         { kind = "gain", label = "Proc" },
+        { kind = "lowTimeGlow", label = "Expiring" },
     }) do
         local button = C.CreateCompactButton(preview, effect.label, function()
             local glow = ns.Glow
             glow:ClearAll(icon)
             local settings = getGlow(effect.kind)
             local style = settings and settings.style
+            if effect.kind == "lowTimeGlow" then style = style or "solid" end
             if not glow:GetStyleRenderer(style) then
                 message:SetText("Select a custom glow style to preview it")
                 return
@@ -678,7 +765,8 @@ local function buildAuraSettingsPage(sc)
                 return
             end
             local r, g, b, a = glowColors[effect.kind]()
-            local intent = effect.kind == "gain" and "proc" or effect.kind
+            local intent = effect.kind == "gain" and "proc"
+                or effect.kind == "lowTimeGlow" and "activeAura" or effect.kind
             message:SetText(glow:GetStyleLabel(style))
             glow:Preview(icon, intent, {
                 style = style, colorR = r, colorG = g, colorB = b, colorA = a,
@@ -712,6 +800,7 @@ local function buildAuraSettingsPage(sc)
 end
 
 function AuraPanel:OpenForAura(spellID, containerKey, cooldownID)
+    if not spellID then return end
     _currentAuraSpellID = spellID
     _currentAuraContainer = containerKey
     _currentAuraCooldownID = tonumber(cooldownID)
@@ -724,11 +813,15 @@ end
 ns.Options:RegisterPage({
     key   = "auras",
     label = "Auras",
+    sidebarParent = "cdmbars",
+    rebuildOnShow = true,
     build = buildAuraPage,
 })
 
 ns.Options:RegisterPage({
     key   = "aura_settings",
     label = "Aura Settings",
+    sidebarParent = "cdmbars",
+    restorePage = "auras",
     build = buildAuraSettingsPage,
 })

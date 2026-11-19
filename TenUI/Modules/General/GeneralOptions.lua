@@ -120,6 +120,88 @@ local QOL_TABS = {
 
 local _selectedQoLTab = "combatAlerts"
 
+local function buildReminderPreview(sc, header, rows, isClass)
+    local C = ns.UI
+    local panel = CreateFrame("Frame", nil, header)
+    panel:SetPoint("TOPLEFT", header, "TOPLEFT", 8, -30)
+    panel:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -30)
+    C.SkinPanel(panel)
+
+    local title = C.Text(panel, C.Fonts.small, C.Theme.color.textDim,
+        isClass and "Preview for your class and spec" or "Stealth and Burning Rush preview")
+    title:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -9)
+    local empty = C.Text(panel, C.Fonts.small, C.Theme.color.textDim, "No enabled reminders for this class and spec.")
+    empty:SetPoint("CENTER", panel, "CENTER", 0, -7)
+
+    local function openSetting(key)
+        local row = rows[key]
+        local top, rowTop = sc:GetTop(), row and row:GetTop()
+        if top and rowTop then
+            local scroll = sc:GetParent()
+            scroll:SetVerticalScroll(math.max(0, math.min(top - rowTop - 8, scroll:GetVerticalScrollRange())))
+        end
+    end
+
+    local module = isClass and ns.ClassReminders or ns.StealthTracking
+    local test = C.CreateCompactButton(panel, "Test on HUD", function() module:Test() end, 96)
+    test:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -4)
+
+    local render
+    if isClass then
+        render = module:CreateOptionsPreview(panel, openSetting)
+    else
+        local buttons = {}
+        render = function(o)
+            local entries = module:GetOptionsPreview(o)
+            local size = o.iconSize or module.DEFAULTS.iconSize
+            for i, entry in ipairs(entries) do
+                local button = buttons[i]
+                if not button then
+                    local function selectEntry() openSetting(button.previewEntry.key) end
+                    button = C.CreateIconButton(panel, { texture = entry.texture, isKnown = true }, {
+                        onClick = selectEntry,
+                        onRightClick = selectEntry,
+                        onEnter = function(self)
+                            local data = self.previewEntry
+                            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                            GameTooltip:SetText(data.label)
+                            GameTooltip:AddLine("Click to find this setting", 0.6, 0.8, 1)
+                            GameTooltip:Show()
+                        end,
+                    })
+                    button.name = C.Text(button, C.Fonts.small, C.Theme.color.text, entry.label)
+                    button.name:SetPoint("TOP", button, "BOTTOM", 0, -2)
+                    buttons[i] = button
+                end
+                button.previewEntry = entry
+                button.iconTex:SetTexture(entry.texture)
+                button.iconTex:SetDesaturated(not entry.enabled)
+                button.iconTex:SetAlpha(entry.enabled and 1 or 0.45)
+                button.name:SetAlpha(entry.enabled and 1 or 0.65)
+                button:SetSize(size, size)
+                button:ClearAllPoints()
+                button:SetPoint("CENTER", panel, "CENTER", (i - 2) * (math.max(size, 80) + 8), 0)
+            end
+            return size + 15
+        end
+    end
+
+    local getOptions = isClass and getCR or getST
+    local function refresh()
+        local height = render(getOptions())
+        empty:SetShown(height == 0)
+        panel:SetHeight(math.max(32, height) + 32)
+        ns.Options:GetPinnedHeader("qolReminders", 32 + panel:GetHeight())
+    end
+    panel:SetScript("OnShow", function()
+        refresh()
+        if isClass then panel:RegisterEvent("SPELLS_CHANGED") end
+    end)
+    panel:SetScript("OnHide", function() panel:UnregisterAllEvents() end)
+    panel:SetScript("OnEvent", refresh)
+    return refresh
+end
+
 local function buildQoLPage(sc)
     local C = ns.UI
     if not C then return end
@@ -139,11 +221,8 @@ local function buildQoLPage(sc)
         end
     end
 
-    children[#children + 1] = C.CreateSection(sc, "Reminders")
-
-    local tabRow = CreateFrame("Frame", nil, sc)
-    tabRow:SetHeight(28)
-    children[#children + 1] = tabRow
+    ns.Options:ClearPinnedHeader("qolReminders")
+    local tabRow = ns.Options:GetPinnedHeader("qolReminders", 28)
 
     local prevTab
     for i, t in ipairs(QOL_TABS) do
@@ -168,10 +247,31 @@ local function buildQoLPage(sc)
         if prevTab then
             tb:SetPoint("LEFT", prevTab, "RIGHT", 4, 0)
         else
-            tb:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
+            tb:SetPoint("TOPLEFT", tabRow, "TOPLEFT", 8, 0)
         end
         prevTab = tb
         tb:SetSelected(t.key == _selectedQoLTab)
+    end
+
+    local isClass, isStealth = _selectedQoLTab == "classReminders", _selectedQoLTab == "stealth"
+    local settingRows = {}
+    local refreshPreview
+    if isClass or isStealth then
+        refreshPreview = buildReminderPreview(sc, tabRow, settingRows, isClass)
+    end
+    sc.refreshReminderPreview = refreshPreview
+    local getReminderOptions = isClass and getCR or getST
+    local applyReminderOptions = isClass and applyCR or applyST
+    local function addReminderToggle(key, label)
+        local row = C.CreateCheckBox(sc, label,
+            function() return getReminderOptions()[key] == true end,
+            function(value)
+                getReminderOptions()[key] = value
+                applyReminderOptions()
+                refreshPreview()
+            end)
+        settingRows[key] = row
+        children[#children + 1] = row
     end
 
     if _selectedQoLTab == "combatAlerts" then
@@ -281,225 +381,73 @@ local function buildQoLPage(sc)
         end
     )
 
-    elseif _selectedQoLTab == "stealth" then
+    elseif isClass or isStealth then
 
-    children[#children + 1] = C.CreateSubSection(sc, "Stealth Tracking")
+    children[#children + 1] = C.CreateSection(sc, isClass and "Class Reminders" or "Stealth Tracking")
+    addReminderToggle("enabled", isClass and "Enable Class Reminders" or "Enable Stealth Tracking")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Enable Stealth Tracking",
-        function() return getST().enabled == true end,
-        function(v) getST().enabled = v applyST() end
-    )
+    if isClass then
+        children[#children + 1] = C.CreateSubSection(sc, "Class Buffs and Forms")
+        addReminderToggle("shamanShields", "Shaman: shield missing")
+        addReminderToggle("paladinBeacons", "Holy Paladin: beacons missing")
+        addReminderToggle("shadowform", "Shadow Priest: Shadowform missing")
+        addReminderToggle("moonkinForm", "Balance Druid: Moonkin Form missing")
+        addReminderToggle("roguePoisons", "Rogue: lethal and non-lethal poisons")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Rogue (Stealth)",
-        function() return getST().rogue == true end,
-        function(v) getST().rogue = v applyST() end
-    )
+        children[#children + 1] = C.CreateSubSection(sc, "Pets")
+        addReminderToggle("pets", "Pet missing or wrong pet")
+        addReminderToggle("petPassive", "Warn when the pet is on passive")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Feral Druid (Prowl)",
-        function() return getST().druidFeral == true end,
-        function(v) getST().druidFeral = v applyST() end
-    )
+        children[#children + 1] = C.CreateSubSection(sc, "Group Buffs")
+        addReminderToggle("raidBuffs", "Raid buffs (only when a provider class is in the group)")
+    else
+        children[#children + 1] = C.CreateSubSection(sc, "Stealth Indicators")
+        addReminderToggle("rogue", "Rogue (Stealth)")
+        addReminderToggle("druidFeral", "Feral Druid (Prowl)")
+        addReminderToggle("druidBalance", "Balance Druid (Prowl in cat form)")
+        addReminderToggle("druidGuardian", "Guardian Druid (Prowl in cat form)")
+        addReminderToggle("druidResto", "Restoration Druid (Prowl in cat form)")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Balance Druid (Prowl in cat form)",
-        function() return getST().druidBalance == true end,
-        function(v) getST().druidBalance = v applyST() end
-    )
+        children[#children + 1] = C.CreateSubSection(sc, "Burning Rush")
+        addReminderToggle("warlockBurningRush", "Warlock: show while Burning Rush is active")
+    end
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Guardian Druid (Prowl in cat form)",
-        function() return getST().druidGuardian == true end,
-        function(v) getST().druidGuardian = v applyST() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Restoration Druid (Prowl in cat form)",
-        function() return getST().druidResto == true end,
-        function(v) getST().druidResto = v applyST() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Warlock: Burning Rush warning icon",
-        function() return getST().warlockBurningRush == true end,
-        function(v) getST().warlockBurningRush = v applyST() end
-    )
-
+    children[#children + 1] = C.CreateSection(sc, "Appearance")
+    if isClass then
+        addReminderToggle("showActive", "Show active buffs, forms and pets with a check mark")
+        addReminderToggle("glow", "Glow when a reminder needs attention")
+        children[#children + 1] = C.CreateSlider(sc, "Label Font Size", 8, 24, 1,
+            function() return getCR().fontSize or 11 end,
+            function(value)
+                getCR().fontSize = value
+                applyCR()
+                refreshPreview()
+            end)
+    end
     children[#children + 1] = C.CreateSlider(sc, "Icon Size", 16, 96, 1,
-        function() return getST().iconSize or 36 end,
-        function(v) getST().iconSize = v applyST() end
-    )
+        function() return getReminderOptions().iconSize or 36 end,
+        function(value)
+            getReminderOptions().iconSize = value
+            applyReminderOptions()
+            refreshPreview()
+        end)
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Hide while mounted",
-        function() return getST().hideWhileMounted == true end,
-        function(v) getST().hideWhileMounted = v applyST() end
-    )
+    children[#children + 1] = C.CreateSection(sc, "Visibility")
+    addReminderToggle("hideWhileMounted", "Hide while mounted")
+    addReminderToggle("instanceOnly", "Only show in instances")
+    if isClass then
+        addReminderToggle("showInRaid", "Show in raid groups")
+        addReminderToggle("hideInRested", "Hide in rested areas")
+        addReminderToggle("onlyOutOfCombat", "Only out of combat")
+    end
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Only show in instances",
-        function() return getST().instanceOnly == true end,
-        function(v) getST().instanceOnly = v applyST() end
-    )
-
+    children[#children + 1] = C.CreateSection(sc, "Position")
+    local module = isClass and ns.ClassReminders or ns.StealthTracking
     children[#children + 1] = C.CreateCheckBox(sc, "Unlock to move",
-        function()
-            local f = ns.StealthTracking and ns.StealthTracking.frame
-            return f and f._locked == false or false
-        end,
-        function(v)
-            if ns.StealthTracking and ns.StealthTracking.SetUnlocked then
-                ns.StealthTracking:SetUnlocked(v)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateButton(sc, "Test Stealth Icon",
-        function()
-            if ns.StealthTracking and ns.StealthTracking.Test then
-                ns.StealthTracking:Test()
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateButton(sc, "Reset Position",
-        function()
-            if ns.StealthTracking and ns.StealthTracking.ResetPosition then
-                ns.StealthTracking:ResetPosition()
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateButton(sc, "Center Horizontally",
-        function()
-            if ns.StealthTracking and ns.StealthTracking.CenterHorizontally then
-                ns.StealthTracking:CenterHorizontally()
-            end
-        end
-    )
-
-    elseif _selectedQoLTab == "classReminders" then
-
-    children[#children + 1] = C.CreateSubSection(sc, "Class Reminders")
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Enable Class Reminders",
-        function() return getCR().enabled == true end,
-        function(v) getCR().enabled = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Shaman: shield missing",
-        function() return getCR().shamanShields == true end,
-        function(v) getCR().shamanShields = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Holy Paladin: beacons missing",
-        function() return getCR().paladinBeacons == true end,
-        function(v) getCR().paladinBeacons = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Pets: missing pet (Hunter/Warlock/Unholy DK/Frost Mage)",
-        function() return getCR().pets == true end,
-        function(v) getCR().pets = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Pets: pet-on-passive warning",
-        function() return getCR().petPassive == true end,
-        function(v) getCR().petPassive = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Shadow Priest: not in Shadowform",
-        function() return getCR().shadowform == true end,
-        function(v) getCR().shadowform = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Balance Druid: not in Moonkin Form",
-        function() return getCR().moonkinForm == true end,
-        function(v) getCR().moonkinForm = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Show active buffs and pets with a check mark",
-        function() return getCR().showActive == true end,
-        function(v) getCR().showActive = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Rogue: poison upkeep (lethal + non-lethal)",
-        function() return getCR().roguePoisons == true end,
-        function(v) getCR().roguePoisons = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Raid buffs (only when a provider class is in group)",
-        function() return getCR().raidBuffs == true end,
-        function(v) getCR().raidBuffs = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Only show in instances",
-        function() return getCR().instanceOnly == true end,
-        function(v) getCR().instanceOnly = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Show in raid groups",
-        function() return getCR().showInRaid == true end,
-        function(v) getCR().showInRaid = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Hide in rested areas",
-        function() return getCR().hideInRested == true end,
-        function(v) getCR().hideInRested = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Hide while mounted",
-        function() return getCR().hideWhileMounted == true end,
-        function(v) getCR().hideWhileMounted = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Only out of combat",
-        function() return getCR().onlyOutOfCombat == true end,
-        function(v) getCR().onlyOutOfCombat = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Enable glow",
-        function() return getCR().glow == true end,
-        function(v) getCR().glow = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateSlider(sc, "Icon Size", 16, 96, 1,
-        function() return getCR().iconSize or 36 end,
-        function(v) getCR().iconSize = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateSlider(sc, "Label Font Size", 8, 24, 1,
-        function() return getCR().fontSize or 11 end,
-        function(v) getCR().fontSize = v applyCR() end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Unlock to move",
-        function()
-            local f = ns.ClassReminders and ns.ClassReminders.frame
-            return f and f._locked == false or false
-        end,
-        function(v)
-            if ns.ClassReminders and ns.ClassReminders.SetUnlocked then
-                ns.ClassReminders:SetUnlocked(v)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateButton(sc, "Test Class Reminders",
-        function()
-            if ns.ClassReminders and ns.ClassReminders.Test then
-                ns.ClassReminders:Test()
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateButton(sc, "Reset Position",
-        function()
-            if ns.ClassReminders and ns.ClassReminders.ResetPosition then
-                ns.ClassReminders:ResetPosition()
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateButton(sc, "Center Horizontally",
-        function()
-            if ns.ClassReminders and ns.ClassReminders.CenterHorizontally then
-                ns.ClassReminders:CenterHorizontally()
-            end
-        end
-    )
+        function() return module.frame and module.frame._locked == false end,
+        function(value) module:SetUnlocked(value) end)
+    children[#children + 1] = C.CreateButton(sc, "Reset Position", function() module:ResetPosition() end)
+    children[#children + 1] = C.CreateButton(sc, "Center Horizontally", function() module:CenterHorizontally() end)
 
     elseif _selectedQoLTab == "talentReminder" then
 
@@ -583,6 +531,7 @@ local function buildQoLPage(sc)
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math_max(totalH, 10))
+    if refreshPreview then refreshPreview() end
 end
 
 local function refreshQoLPage(sc)
@@ -592,6 +541,7 @@ local function refreshQoLPage(sc)
             pcall(kids[i].Refresh, kids[i])
         end
     end
+    if sc.refreshReminderPreview then sc.refreshReminderPreview() end
 end
 
 if ns.Options and ns.Options.RegisterPage then

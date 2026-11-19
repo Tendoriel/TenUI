@@ -4,17 +4,23 @@ local TrackedAuras = {}
 ns.TrackedAuras = TrackedAuras
 
 local groups = {}
+local orderedDisplays = {}
 local fixedBars
+local independentBars = {}
 local failures = {}
 local groupKey = "tracked"
 local maxTrackedIcons = 40
 local unitFilters = { player = "HELPFUL", target = "HARMFUL|PLAYER" }
 local cooldownDebuffs = setmetatable({}, { __mode = "k" })
 local cooldownDebuffFailures = setmetatable({}, { __mode = "k" })
+local cooldownBuffs = setmetatable({}, { __mode = "k" })
+local cooldownBuffFailures = setmetatable({}, { __mode = "k" })
 local iconAlignment
 local iconTimerOptions
 local auraCountFormatter
 local timerCurves = setmetatable({}, { __mode = "v" })
+local lowTimeGlows = setmetatable({}, { __mode = "k" })
+local lowTimeTicker
 
 local function signature(value)
     if type(value) ~= "table" then return tostring(value) end
@@ -97,6 +103,7 @@ end
 
 local auraAnimations = {
     activeAura = { "AddAuraShownAnimation", "RemoveAuraShownAnimation" },
+    lowTimeAura = { "AddAuraShownAnimation", "RemoveAuraShownAnimation" },
     pandemic = { "AddAuraShownAnimation", "RemoveAuraShownAnimation" },
     proc = { "AddAuraAssignedAnimation", "RemoveAuraAssignedAnimation" },
 }
@@ -116,7 +123,10 @@ local function applyCustomGlow(button, regions, config, intent, name, color)
     end
     local host = state.host
     local key = signature(color) .. "/" .. config.width .. "/" .. config.height
-    if state.renderer == renderer and state.signature == key then return host end
+    if state.renderer == renderer and state.signature == key then
+        if renderer then return host end
+        return nil
+    end
     local methods = auraAnimations[intent]
     if state.animation then
         button[methods[2]](button, state.animation)
@@ -133,6 +143,7 @@ local function applyCustomGlow(button, regions, config, intent, name, color)
     color = color or { 1, 1, 1, 1 }
     local ok, animation = pcall(renderer.apply, host, intent, {
         colorR = color[1], colorG = color[2], colorB = color[3], colorA = color[4],
+        width = config.width, height = config.height,
         auraTrigger = button[methods[1]] and intent or nil,
     })
     if not ok then
@@ -257,6 +268,72 @@ local function applyGainFlash(button, regions, config)
     button:AddAuraAssignedAnimation(animation)
 end
 
+local function updateLowTimeGlow(host, state)
+    if not state.parent:IsVisible() then return end
+    local duration = state.bar:GetTimerDuration()
+    local alpha = duration:EvaluateRemainingDuration(state.curve).a
+    host:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(duration:IsZero(), 0, alpha))
+end
+
+local function tickLowTimeGlows()
+    for host, state in pairs(lowTimeGlows) do
+        local ok, err = pcall(updateLowTimeGlow, host, state)
+        if not ok then
+            host:SetAlpha(0)
+            lowTimeGlows[host] = nil
+            if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] low-time glow: %s", tostring(err)) end
+        end
+    end
+    if not next(lowTimeGlows) and lowTimeTicker then
+        lowTimeTicker:Cancel()
+        lowTimeTicker = nil
+    end
+end
+
+local function applyLowTimeGlow(button, regions, config)
+    local settings = config.style.lowTimeGlow
+    if not button.SetDurationBar or not C_CurveUtil or not C_CurveUtil.EvaluateColorValueFromBoolean then return end
+    local host, animation = applyCustomGlow(button, regions, config, "lowTimeAura",
+        settings and settings.style, settings and settings.color)
+    if not host then
+        local previous = regions.glows and regions.glows.lowTimeAura
+        if previous then
+            lowTimeGlows[previous.host] = nil
+            previous.host:SetAlpha(0)
+        end
+        if regions.glowTimer then
+            button:ClearDurationBar()
+            regions.glowTimer = nil
+        end
+        return
+    end
+    local bar = regions.bar
+    if not bar then
+        if not regions.glowTimer then
+            regions.glowTimer = regions.hiddenGlowTimer or CreateFrame("StatusBar", nil, button)
+            regions.hiddenGlowTimer = regions.glowTimer
+            regions.glowTimer:SetAlpha(0)
+            button:SetDurationBar(regions.glowTimer, { direction = Enum.StatusBarTimerDirection.RemainingTime })
+        end
+        bar = regions.glowTimer
+    end
+
+    local key = "glow/" .. settings.threshold
+    local curve = timerCurves[key]
+    if not curve then
+        curve = C_CurveUtil.CreateColorCurve()
+        curve:SetType(Enum.LuaCurveType.Step)
+        curve:AddPoint(0, CreateColor(1, 1, 1, 0))
+        curve:AddPoint(0.001, CreateColor(1, 1, 1, 1))
+        curve:AddPoint(settings.threshold, CreateColor(1, 1, 1, 0))
+        timerCurves[key] = curve
+    end
+    if not lowTimeGlows[host] then host:SetAlpha(0) end
+    lowTimeGlows[host] = { bar = bar, curve = curve, parent = button:GetParent() }
+    if not lowTimeTicker then lowTimeTicker = C_Timer.NewTicker(0.1, tickLowTimeGlows) end
+    return animation
+end
+
 local function applyStyle(button, regions, config, restyle)
     local styleText = config.styleText
     local style = config.style
@@ -285,6 +362,7 @@ local function applyStyle(button, regions, config, restyle)
         bar:SetPoint("BOTTOMRIGHT", button)
         bar:SetStatusBarTexture(style.texture)
         bar:SetStatusBarColor(unpack(style.fill))
+        bar:SetReverseFill(style.reverseFill == true)
         regions.bg:SetColorTexture(unpack(style.background))
         regions.bg:SetShown(style.showBackground)
         styleText(regions.name, bar, style.name, "LEFT")
@@ -299,10 +377,12 @@ local function applyStyle(button, regions, config, restyle)
     regions.count:SetShown(style.showCount)
     local pandemicAnimation = applyPandemicStyle(button, regions, config)
     applyGainFlash(button, regions, config)
-    if restyle and (activeAnimation or pandemicAnimation) then
+    local lowTimeAnimation = applyLowTimeGlow(button, regions, config)
+    if restyle and (activeAnimation or pandemicAnimation or lowTimeAnimation) then
         -- Refresh Blizzard's visibility so an already assigned aura uses the new style.
         if activeAnimation then activeAnimation:Play() end
         if pandemicAnimation then pandemicAnimation:Play() end
+        if lowTimeAnimation then lowTimeAnimation:Play() end
         button:SetIcon(regions.icon)
     end
 end
@@ -370,8 +450,8 @@ end
 
 local function groupLayout(config)
     return {
-        elementWidth = config.width,
-        elementHeight = config.height,
+        elementWidth = config.layoutWidth or config.width,
+        elementHeight = config.layoutHeight or config.height,
         elementSpacing = config.spacing,
         groupSpacing = config.spacing,
     }
@@ -622,9 +702,155 @@ local function syncIconAlignment(config, units, key)
     return state.anchor
 end
 
-function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textStyle, activeSpellID)
+local function hideOrdered(kind)
+    for key, state in pairs(orderedDisplays) do
+        if not kind or kind == key then state.root:Hide() end
+    end
+end
+
+local function orderedRuns(config, units, reverse)
+    local entries = {}
+    for _, unit in ipairs({ "player", "target" }) do
+        for id in pairs(units[unit]) do
+            local rank = config.order[unit][id]
+            if rank then entries[#entries + 1] = { unit = unit, id = id, rank = rank } end
+        end
+    end
+    table.sort(entries, function(a, b)
+        if a.rank == b.rank then return a.unit == "player" and b.unit == "target" end
+        if reverse then return a.rank > b.rank end
+        return a.rank < b.rank
+    end)
+    local runs = {}
+    for _, entry in ipairs(entries) do
+        local run = runs[#runs]
+        if not run or run.unit ~= entry.unit then
+            run = { unit = entry.unit, ids = {} }
+            runs[#runs + 1] = run
+        end
+        run.ids[entry.id] = true
+    end
+    return runs
+end
+
+local function syncOrderedRail(state, runs, config, anchor, anchorPoint, backward, measure, offset)
+    local vertical = config.vertical
+    local axis, direction = AnchorUtil.FlowLayoutAxis, AnchorUtil.FlowDirection
+    local start, finish
+    if config.isBar then start, finish = "BOTTOMLEFT", "TOPLEFT"
+    elseif vertical then start, finish = "TOP", "BOTTOM"
+    else start, finish = "LEFT", "RIGHT" end
+    if backward then start, finish = finish, start end
+    local dx = not vertical and (backward and -1 or 1) or 0
+    local dy = vertical and ((config.isBar ~= backward) and 1 or -1) or 0
+    local styleKey = measure and "measure" or signature(config.style)
+    styleKey = styleKey .. "/" .. config.width .. "/" .. config.height .. "/" .. config.spacing
+        .. "/" .. tostring(vertical)
+    local slots, used = state.slots, { player = 0, target = 0 }
+
+    for _, run in ipairs(runs) do
+        local unit = run.unit
+        used[unit] = used[unit] + 1
+        local slot = slots[unit][used[unit]]
+        if not slot then
+            local frame = createContainer(state.root, unit)
+            frame:SetSize(1, 1)
+            if measure then frame:SetAlpha(0) end
+            slot = { frame = frame, auraGroups = {} }
+            slots[unit][used[unit]] = slot
+        end
+        local frame = slot.frame
+        local entry = {}
+        for key, value in pairs(config) do entry[key] = value end
+        entry.ids, entry.order, entry.overrides = run.ids, config.order[unit], config.overrides[unit]
+        entry.measure, entry.styleSignature = measure, styleKey
+        entry.reverseOrder = config.point == "RIGHT" or config.point == "BOTTOM"
+        entry.layoutWidth = config.width + (vertical and 0 or config.spacing)
+        entry.layoutHeight = config.height + (vertical and config.spacing or 0)
+        entry.spacing = 0
+
+        -- Keep one pixel of extent for an empty run, and cancel it at the next anchor.
+        frame:ClearAllPoints()
+        frame:SetPoint(start, anchor, anchorPoint, dx * offset, dy * offset)
+        frame:SetFlowLayoutAxis(vertical and axis.Vertical or axis.Horizontal)
+        frame:SetFlowLayoutAnchorPoint(start)
+        frame:SetFlowLayoutGrowthDirection(dx < 0 and direction.Left or direction.Right,
+            dy > 0 and direction.Up or direction.Down)
+        frame:SetFlowLayoutPadding(dx < 0 and 1 or 0, dx > 0 and 1 or 0,
+            dy > 0 and 1 or 0, dy < 0 and 1 or 0)
+        syncGroups(slot, unit, entry)
+        frame:Show()
+        frame:UpdateAllAuras()
+        anchor, anchorPoint, offset = frame, finish, -1
+    end
+    for unit, unitSlots in pairs(slots) do
+        for index = used[unit] + 1, #unitSlots do unitSlots[index].frame:Hide() end
+    end
+    return anchor, anchorPoint
+end
+
+local function syncOrdered(kind, config, units, key)
+    local state = orderedDisplays[kind]
+    if state and (state.key == key or state.key and TrackedAuras:IsRestricted()) then
+        state.root:Show()
+        return true
+    end
+    if state and state.failedKey == key then return false end
+    if not state then
+        local root = CreateFrame("Frame", nil, config.parent, "DisableUntrustedLayoutScriptsTemplate")
+        state = { root = root, slots = { player = {}, target = {} } }
+        orderedDisplays[kind] = state
+    end
+    local ok, err = pcall(function()
+        local root = state.root
+        root:SetAllPoints(config.parent)
+        local reverse = config.point == "RIGHT" or config.point == "BOTTOM"
+        local runs = orderedRuns(config, units, reverse)
+        assert(#runs > 0, "Missing tracked rank")
+        local anchor, point, offset = root, config.point, 0
+        if point == "CENTER" then
+            if not state.measure then
+                state.measure = { root = root, slots = { player = {}, target = {} } }
+                state.center = CreateFrame("Frame", nil, root, "DisableUntrustedLayoutScriptsTemplate")
+            end
+            -- Measure total occupied length in two containers. Anchors can consume
+            -- Blizzard's layout geometry without reading the active aura count.
+            local measureRuns = {}
+            for _, unit in ipairs({ "player", "target" }) do
+                if next(units[unit]) then measureRuns[#measureRuns + 1] = { unit = unit, ids = units[unit] } end
+            end
+            local edge, finish = syncOrderedRail(state.measure, measureRuns, config, root, "CENTER", true, true, 0)
+            local center = state.center
+            center:ClearAllPoints()
+            center:SetSize(1, 1)
+            local start = config.vertical and "TOP" or "LEFT"
+            local opposite = config.vertical and "BOTTOM" or "RIGHT"
+            center:SetPoint(opposite, root, "CENTER")
+            center:SetPoint(start, edge, finish, config.vertical and 0 or 1, config.vertical and -1 or 0)
+            anchor, point, offset = center, "CENTER", config.spacing / 2
+        elseif state.measure then
+            for _, unitSlots in pairs(state.measure.slots) do
+                for _, slot in ipairs(unitSlots) do slot.frame:Hide() end
+            end
+        end
+        syncOrderedRail(state, runs, config, anchor, point, reverse, false, offset)
+        root:Show()
+    end)
+    if not ok then
+        state.root:Hide()
+        state.key, state.failedKey = nil, key
+        if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] ordered %s: %s", kind, tostring(err)) end
+        return false
+    end
+    state.key, state.failedKey = key, nil
+    return true
+end
+
+function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, textStyle, activeSpellID)
+    local overlays = unit == "player" and cooldownBuffs or cooldownDebuffs
+    local failed = unit == "player" and cooldownBuffFailures or cooldownDebuffFailures
     local frame = icon.frame
-    local state = cooldownDebuffs[frame]
+    local state = overlays[frame]
     if not ids then
         if state then state.container:Hide() end
         return
@@ -640,7 +866,7 @@ function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textSty
     end
     local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe)
     local key = idSignature .. "/" .. styleSignature
-    local failure = cooldownDebuffFailures[frame]
+    local failure = failed[frame]
     if failure and failure.signature == key and (not failure.restricted or restricted) then return end
     if state and state.ids == idSignature and state.style == styleSignature then
         state.activeSpellID = activeSpellID
@@ -665,13 +891,13 @@ function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textSty
     end
     local ok, err = pcall(function()
         if not state then
-            local container = createContainer(frame, "target")
+            local container = createContainer(frame, unit)
             state = { container = container }
-            cooldownDebuffs[frame] = state
+            overlays[frame] = state
             container:SetAllPoints(frame)
             local cooldown = frame.cooldown or frame
-            container:SetFrameLevel(cooldown:GetFrameLevel() + 5)
-            container:AddAuraSlot("debuff", unitFilters.target, {
+            container:SetFrameLevel(cooldown:GetFrameLevel() + (unit == "player" and 9 or 5))
+            container:AddAuraSlot("aura", unitFilters[unit], {
                 candidateFilters = { includeSpellIDs = ids },
                 initializeFrame = function(button)
                     button:SetAllPoints(container)
@@ -690,7 +916,7 @@ function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textSty
             })
         else
             if state.ids ~= idSignature then
-                state.container:SetAuraSlotCandidateFilters("debuff", { includeSpellIDs = ids })
+                state.container:SetAuraSlotCandidateFilters("aura", { includeSpellIDs = ids })
             end
             style(state.visual)
         end
@@ -699,19 +925,22 @@ function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textSty
     end)
     if not ok then
         if state then pcall(state.container.Hide, state.container) end
-        cooldownDebuffs[frame] = nil
-        cooldownDebuffFailures[frame] = { signature = key, restricted = restricted }
-        if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] cooldown debuff: %s", tostring(err)) end
+        overlays[frame] = nil
+        failed[frame] = { signature = key, restricted = restricted }
+        if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] cooldown aura: %s", tostring(err)) end
     else
-        cooldownDebuffFailures[frame] = nil
+        failed[frame] = nil
     end
 end
 
-function TrackedAuras:ReleaseCooldownDebuff(icon)
+function TrackedAuras:ReleaseCooldownOverlays(icon)
     local frame = icon.frame
-    local state = cooldownDebuffs[frame]
-    cooldownDebuffs[frame], cooldownDebuffFailures[frame] = nil, nil
-    if state then pcall(state.container.Hide, state.container) end
+    for _, overlays in ipairs({ cooldownDebuffs, cooldownBuffs }) do
+        local state = overlays[frame]
+        overlays[frame] = nil
+        if state then pcall(state.container.Hide, state.container) end
+    end
+    cooldownDebuffFailures[frame], cooldownBuffFailures[frame] = nil, nil
 end
 
 function TrackedAuras:SetupPlayerAuraCount(icon, auraSpellID)
@@ -767,8 +996,20 @@ ns:RegisterEvent("PLAYER_TARGET_CHANGED", function()
         local state = groups[key]
         if state and state.ready then state.frame:UpdateAllAuras() end
     end
+    for _, state in pairs(orderedDisplays) do
+        if state.key and state.root:IsShown() then
+            for _, rail in ipairs({ state, state.measure }) do
+                for _, slot in ipairs(rail.slots.target) do
+                    if slot.frame:IsShown() then slot.frame:UpdateAllAuras() end
+                end
+            end
+        end
+    end
     local target = fixedBars and fixedBars.containers.target
     if target then target:UpdateAllAuras() end
+    for _, state in pairs(independentBars) do
+        if state.frame:IsShown() then state.containers.target:UpdateAllAuras() end
+    end
     for _, state in pairs(cooldownDebuffs) do
         if state.container:IsShown() then state.container:UpdateAllAuras() end
     end
@@ -845,8 +1086,12 @@ end
 
 function TrackedAuras:Hide(kind)
     hideGroups(kind)
+    hideOrdered(kind)
     if not kind or kind == "icons" then hideIconAlignment() end
-    if fixedBars and (not kind or kind == "bars") then fixedBars.frame:Hide() end
+    if not kind or kind == "bars" then
+        if fixedBars then fixedBars.frame:Hide() end
+        for _, state in pairs(independentBars) do state.frame:Hide() end
+    end
 end
 
 local function syncFixedBarPriority(row, entry, config)
@@ -902,12 +1147,23 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
     frame:SetPoint("BOTTOMLEFT", state.frame, "BOTTOMLEFT", 0, (index - 1) * (config.height + config.spacing))
     frame:SetSize(config.width, config.height)
     frame:Show()
-    applyStyle(frame, regions, config)
+    applyStyle(frame, regions, withStyle(config, entry.appearance))
+    regions.bar:SetShown(entry.showInactive ~= false)
+    if entry.showInactive == false then regions.icon:Hide() end
     regions.bar:SetMinMaxValues(0, 1)
     regions.bar:SetValue(0)
     regions.icon:SetTexture(entry.icon)
     regions.icon:SetDesaturated(true)
-    slotConfig = withStyle(slotConfig, entry.styleOverrides)
+    local styleOverrides = entry.styleOverrides or {}
+    slotConfig = withStyle(slotConfig, styleOverrides)
+    slotConfig.style.showName = entry.showInactive == false and slotConfig.showLabel
+    if entry.showInactive == false then
+        slotConfig.style.showBackground = config.style.showBackground
+        slotConfig.style.border = config.style.border
+    end
+    if styleOverrides.showName ~= nil then
+        slotConfig.style.showName = entry.showInactive == false and styleOverrides.showName
+    end
     local priority = syncFixedBarPriority(row, entry, config)
 
     for _, unit in ipairs({ "target", "player" }) do
@@ -925,7 +1181,7 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
                         row.slots[unit] = { button = button, regions = visual }
                         positionFixedBarSlot(button, frame, config, priorityFrame)
                         applyStyle(button, visual, slotConfig)
-                        bindRegions(button, visual, false, slotConfig.style)
+                        bindRegions(button, visual, true, slotConfig.style)
                     end,
                 })
             else
@@ -951,46 +1207,60 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
     config.styleText(row.label, regions.bar, config.style.name, "LEFT")
     row.label:SetText(entry.name)
     row.label:SetAlpha(0.7)
-    row.label:SetShown(slotConfig.showLabel)
+    local showName = styleOverrides.showName
+    if showName == nil then showName = slotConfig.showLabel end
+    row.label:SetShown(showName and entry.showInactive ~= false)
 end
 
-function TrackedAuras:SyncFixedBars(config, rows, configSignature)
-    if fixedBars and fixedBars.signature == configSignature then
-        if not fixedBars.frame:IsShown() then
-            fixedBars.frame:Show()
+function TrackedAuras:SyncFixedBars(config, rows, configSignature, independentKey)
+    local state = independentKey and independentBars[independentKey] or (not independentKey and fixedBars)
+    local failureKey = independentKey and ("independent/" .. independentKey) or "fixedBars"
+    if not config or #rows == 0 then
+        if state then state.frame:Hide() end
+        return true
+    end
+    if state and state.signature == configSignature then
+        if not state.frame:IsShown() then
+            state.frame:Show()
             if not self:IsRestricted() then
-                for _, container in pairs(fixedBars.containers) do container:UpdateAllAuras() end
+                for _, container in pairs(state.containers) do container:UpdateAllAuras() end
             end
         end
-        hideGroups("bars")
+        if not independentKey then hideGroups("bars") end
         return true
     end
     local restricted = self:IsRestricted()
-    if restricted and fixedBars then
-        if not fixedBars.ready then return false end
-        fixedBars.frame:Show()
-        hideGroups("bars")
+    if restricted and state then
+        if not state.ready then return false end
+        state.frame:Show()
+        if not independentKey then hideGroups("bars") end
         return true
     end
-    local failure = failures.fixedBars
+    local failure = failures[failureKey]
     if failure and failure.signature == configSignature and (not failure.restricted or restricted) then
         return false
     end
 
     local ok, err = pcall(function()
-        if not fixedBars then
+        if not state then
             local frame = CreateFrame("Frame", nil, config.parent)
-            frame:SetAllPoints(config.parent)
             local targetClip = CreateFrame("Frame", nil, frame)
             targetClip:SetClipsChildren(true)
-            fixedBars = { frame = frame, rows = {}, containers = {}, targetClip = targetClip }
+            state = { frame = frame, rows = {}, containers = {}, targetClip = targetClip }
             for i, unit in ipairs({ "target", "player" }) do
                 local parent = unit == "target" and targetClip or frame
                 local container = createContainer(parent, unit)
                 container:SetAllPoints(parent)
                 container:SetFrameLevel(frame:GetFrameLevel() + i * 3)
-                fixedBars.containers[unit] = container
+                state.containers[unit] = container
             end
+        end
+        state.frame:ClearAllPoints()
+        if independentKey then
+            state.frame:SetPoint("BOTTOMLEFT", config.parent, "BOTTOMLEFT", rows[1].x, rows[1].y)
+            state.frame:SetSize(config.width, config.height)
+        else
+            state.frame:SetAllPoints(config.parent)
         end
         local baseConfig, slotConfig = {}, {}
         for key, value in pairs(config) do baseConfig[key], slotConfig[key] = value, value end
@@ -1003,41 +1273,65 @@ function TrackedAuras:SyncFixedBars(config, rows, configSignature)
         slotConfig.showLabel = config.style.showName
         local margin = math.max(24, config.width * 0.25, config.height * 0.25)
         baseConfig.clipMargin = margin
-        fixedBars.targetClip:ClearAllPoints()
-        fixedBars.targetClip:SetPoint("BOTTOMLEFT", fixedBars.frame, "BOTTOMLEFT", -margin, -margin)
-        fixedBars.targetClip:SetSize(config.width + margin * 2, #rows * (config.height + config.spacing) + margin * 2)
-        for index, entry in ipairs(rows) do updateFixedBar(fixedBars, index, entry, baseConfig, slotConfig) end
-        for index = #rows + 1, #fixedBars.rows do
-            local row = fixedBars.rows[index]
+        state.targetClip:ClearAllPoints()
+        state.targetClip:SetPoint("BOTTOMLEFT", state.frame, "BOTTOMLEFT", -margin, -margin)
+        state.targetClip:SetSize(config.width + margin * 2, #rows * (config.height + config.spacing) + margin * 2)
+        for index, entry in ipairs(rows) do updateFixedBar(state, index, entry, baseConfig, slotConfig) end
+        for index = #rows + 1, #state.rows do
+            local row = state.rows[index]
             row.frame:Hide()
             for unit in pairs(row.slots) do
-                fixedBars.containers[unit]:SetAuraSlotEnabled(tostring(index), false)
+                state.containers[unit]:SetAuraSlotEnabled(tostring(index), false)
             end
         end
-        fixedBars.frame:Show()
-        fixedBars.count = #rows
-        for _, container in pairs(fixedBars.containers) do container:UpdateAllAuras() end
+        state.frame:Show()
+        state.count = #rows
+        for _, container in pairs(state.containers) do container:UpdateAllAuras() end
     end)
     if not ok then
-        if fixedBars then fixedBars.frame:Hide() end
-        fixedBars = nil
-        failures.fixedBars = { signature = configSignature, reason = tostring(err), restricted = restricted }
+        if state then state.frame:Hide() end
+        if independentKey then independentBars[independentKey] = nil else fixedBars = nil end
+        failures[failureKey] = { signature = configSignature, reason = tostring(err), restricted = restricted }
         if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] fixed bars: %s", tostring(err)) end
         return false
     end
-    fixedBars.signature = configSignature
-    fixedBars.ready = true
-    failures.fixedBars = nil
-    hideGroups("bars")
+    state.signature = configSignature
+    state.ready = true
+    failures[failureKey] = nil
+    if independentKey then
+        independentBars[independentKey] = state
+    else
+        fixedBars = state
+        hideGroups("bars")
+    end
     return true
 end
 
-function TrackedAuras:SetFixedBarOverrides(overrides)
-    if not (fixedBars and fixedBars.ready and fixedBars.frame:IsShown()) then return end
-    for index = 1, fixedBars.count or 0 do
-        local row = fixedBars.rows[index]
-        row.frame:SetShown(not overrides[row.key])
+function TrackedAuras:SyncIndependentBars(config, rows)
+    local ready = true
+    local active = {}
+    for _, row in ipairs(rows or {}) do
+        active[row.key] = true
+        local key = table.concat({ tostring(config.parent), config.width, config.height,
+            signature(config.style), signature(row) }, "/")
+        if not self:SyncFixedBars(config, { row }, key, row.key) then ready = false end
     end
+    for key, state in pairs(independentBars) do
+        if not active[key] then state.frame:Hide() end
+    end
+    return ready
+end
+
+function TrackedAuras:SetFixedBarOverrides(overrides)
+    local function apply(state)
+        if not (state and state.ready and state.frame:IsShown()) then return end
+        for index = 1, state.count or 0 do
+            local row = state.rows[index]
+            row.frame:SetShown(not overrides[row.key])
+        end
+    end
+    apply(fixedBars)
+    for _, state in pairs(independentBars) do apply(state) end
 end
 
 function TrackedAuras:GetSourceStatus()
@@ -1048,6 +1342,10 @@ function TrackedAuras:GetSourceStatus()
         status[#status + 1] = ("bars/fixed: %d rows installed"):format(fixedBars.count)
     end
     for _, kind in ipairs({ "icons", "bars" }) do
+        local ordered = orderedDisplays[kind]
+        if ordered and ordered.key and ordered.root:IsShown() then
+            status[#status + 1] = kind .. ": shared buff/debuff order installed"
+        end
         for _, unit in ipairs({ "player", "target" }) do
             local key = kind .. unit
             local failure = failures[key]
@@ -1080,6 +1378,7 @@ function TrackedAuras:SyncDisplay(kind, config, units, rows)
         tostring(config.vertical), tostring(splitIcons),
     }, "/")
     if rows then
+        hideOrdered(kind)
         if #rows == 0 then
             self:Hide("bars")
             if fixedBars then fixedBars.signature = nil end
@@ -1088,6 +1387,17 @@ function TrackedAuras:SyncDisplay(kind, config, units, rows)
         return self:SyncFixedBars(config, rows, layoutSignature .. "/" .. styleSignature .. "/" .. signature(rows))
     end
     if kind == "bars" and fixedBars then fixedBars.frame:Hide() end
+    local bothUnits = next(units.player) and next(units.target)
+    if config.order and bothUnits then
+        local key = layoutSignature .. "/" .. styleSignature .. "/" .. signature(units)
+            .. "/" .. signature(config.order) .. "/" .. signature(config.overrides)
+        if syncOrdered(kind, config, units, key) then
+            hideGroups(kind)
+            if kind == "icons" then hideIconAlignment() end
+            return true
+        end
+    end
+    hideOrdered(kind)
     local alignment
     if splitIcons then
         alignment = syncIconAlignment(config, units, layoutSignature .. "/" .. signature(units)

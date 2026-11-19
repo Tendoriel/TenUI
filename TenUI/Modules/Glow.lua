@@ -159,7 +159,7 @@ local function disableProcGlowMouse(frame)
     end
 end
 
-local function blizzardEnsure(f)
+local function blizzardEnsure(f, opts)
     if f._thudGlowProc then return f._thudGlowProc end
     local ok, glow = pcall(CreateFrame, "Frame", nil, f, "ActionButtonSpellAlertTemplate")
     if not ok or not glow then
@@ -168,7 +168,8 @@ local function blizzardEnsure(f)
         end
         return nil
     end
-    local w, h = f:GetSize()
+    local w, h = opts and opts.width, opts and opts.height
+    if not (w and h) then w, h = f:GetSize() end
     if w and h and w > 0 and h > 0 then
         glow:SetSize(w * 1.4, h * 1.4)
         glow:SetPoint("CENTER", f, "CENTER", 0, 0)
@@ -197,7 +198,8 @@ STYLES.blizzard = {
                 effect = { art = art, group = group }
                 f._tenuiAuraAlert = effect
             end
-            local w, h = f:GetSize()
+            local w, h = opts.width, opts.height
+            if not (w and h) then w, h = f:GetSize() end
             local art = effect.art
             art:ClearAllPoints()
             art:SetPoint("TOPLEFT", f, "TOPLEFT", -w * .2, h * .2)
@@ -212,7 +214,7 @@ STYLES.blizzard = {
             w:SetProcGlow(true)
             return
         end
-        local glow = blizzardEnsure(f)
+        local glow = blizzardEnsure(f, opts)
         if not glow then return end
         if f._thudGlowProcActive and glow:IsShown() then
             if glow:IsVisible()

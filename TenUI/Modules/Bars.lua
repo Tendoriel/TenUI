@@ -1626,7 +1626,7 @@ local function destroyIconList(list, retained)
         local icon = list[i]
         if icon and not (retained and retained[icon]) then
             if icon.frame and ns.TrackedAuras then
-                ns.TrackedAuras:ReleaseCooldownDebuff(icon)
+                ns.TrackedAuras:ReleaseCooldownOverlays(icon)
             end
             if ns.Glow and ns.Glow.ClearAll then
                 pcall(ns.Glow.ClearAll, ns.Glow, icon)
@@ -1694,11 +1694,31 @@ local function syncAbilityDebuff(icon, entry, timer)
                 for _, id in ipairs(info.linkedSpellIDs) do addID(id) end
             end
         end
-        ns.TrackedAuras:SyncCooldownDebuff(icon, ids, timer.showText, timer.showSwipe, timer.style, active or entry.id)
+        ns.TrackedAuras:SyncCooldownAura(icon, "target", ids, timer.showText, timer.showSwipe, timer.style, active or entry.id)
     else
-        ns.TrackedAuras:SyncCooldownDebuff(icon)
+        ns.TrackedAuras:SyncCooldownAura(icon, "target")
     end
 end
+
+local function syncAbilityBuff(icon)
+    if not ns.TrackedAuras then return end
+    local timer = icon._buffTimer
+    if timer and ns.Auras then
+        local ids = ns.Auras:GetCooldownBuffFilter(timer.key)
+        ns.TrackedAuras:SyncCooldownAura(icon, "player", ids,
+            timer.showText, timer.showSwipe, timer.style)
+    else
+        ns.TrackedAuras:SyncCooldownAura(icon, "player")
+    end
+end
+
+ns:RegisterMessage("AURA_LIST_UPDATED", function()
+    for _, row in pairs(Bars.rows) do
+        for _, icon in ipairs(row.icons) do
+            if icon._buffTimer then syncAbilityBuff(icon) end
+        end
+    end
+end)
 
 local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
     local options = entry.type == "spell" and abilityOptions(entry)
@@ -1718,6 +1738,9 @@ local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
     icon._debuffTimer = options and options.targetDebuffTimer
         and { showText = showText, showSwipe = showSwipe, style = style } or nil
     syncAbilityDebuff(icon, entry, icon._debuffTimer)
+    icon._buffTimer = options and options.replaceWithBuff
+        and { key = options.replaceWithBuff, showText = showText, showSwipe = showSwipe, style = style } or nil
+    syncAbilityBuff(icon)
 end
 
 local function buildIconsForList(container, displayedList, showText, rowName, available, retained)
@@ -2812,6 +2835,20 @@ function Bars:GetRow2Profile(rowName)
     local rp = getRowProfile(rowName)
     if not rp then return nil end
     return rp.rows2
+end
+
+function Bars:MovePreviewEntry(rowName, entry, fromRow, toRow, toIndex)
+    local profile = getRowProfile(rowName)
+    if not profile or InCombatLockdown() then return false end
+    if (fromRow == 2 or toRow == 2) and not profile.rows2.enabled then return false end
+    local from = fromRow == 2 and profile.rows2.displayed or profile.displayed
+    local to = toRow == 2 and profile.rows2.displayed or profile.displayed
+    local index = findEntry(from, entry)
+    if not index or (from ~= to and findEntry(to, entry)) then return false end
+    local moved = tremove(from, index)
+    tinsert(to, math.max(1, math.min(toIndex, #to + 1)), moved)
+    self:RebuildRow(rowName)
+    return true
 end
 
 function Bars:MoveEntryToRow2(rowName, entry)

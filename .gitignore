@@ -1,1 +1,71 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors / IDEs
+.vscode/
+.idea/
+
+# Logs / temp / backups
+*.log
+*.tmp
+*.bak
+*.swp
+luac.out
+
+# Lua compiled files
+*.luac
+
+# Build output / archives
+dist/
+releases/
+*.zip
+*.7z
+*.rar
+
+# Node
+node_modules/
+
+# WoW runtime folders / local state
+WTF/
+Cache/
+Errors/
+Logs/
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+.netrc
+
+# AI / tooling state
+.claude/
+
+# Local project notes / references / dev assets (NOT shipped, NOT public)
+_ref/
+_design/
+_tools/
+tools/
+/scripts/*
+!/scripts/build-release.py
+!/scripts/check-warlock.lua
+site/
+RULES.md
+*.jsx
+Ability_Creature_Cursed_03.png
+
+# Root SharedMedia staging (third-party media packs, never commit)
+/SharedMedia/
+
+# Stale root Media (superseded by TenUI/Media)
+/Media/
+
+# Docs: keep ONLY the addon's own per-module docs (docs/TenUI),
+# ignore the large reference clones and internal planning docs.
+docs/*
+!docs/TenUI/
+docs/wow-ui-source/
+docs/WoWAddonDevGuide/
+docs/wow-wiki/

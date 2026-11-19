@@ -74,8 +74,7 @@ end
 
 local _sc                  = nil
 local _candidateListFrame  = nil
-local _barLayoutListFrame  = nil
-local _barLayoutHeader     = nil
+local _updatePreview       = nil
 local _addSpellIDEditBox   = nil
 local _statusLabel         = nil
 local _addingToLabel       = nil
@@ -84,8 +83,6 @@ local _scanBtnRow          = nil
 local _scanCDMBtn          = nil
 local _scanSpellBookBtn    = nil
 local _scanTrinketsBtn     = nil
-local _SECTION_GAP         = 8
-local _HEADER_H            = 16
 
 local function _widthOr(frame, fallback)
     local w = frame and frame:GetWidth() or 0
@@ -210,46 +207,12 @@ local function selectTab(key)
 end
 
 local function relayoutBarSection()
-    if not (_candidateListFrame and _barLayoutListFrame) then return end
-
-    if _barLayoutHeader then
-        _barLayoutHeader:ClearAllPoints()
-        _barLayoutHeader:SetPoint("TOPLEFT", _candidateListFrame, "BOTTOMLEFT", 0, -_SECTION_GAP)
-        if _sc then
-            _barLayoutHeader:SetWidth(_widthOr(_sc, 340) - 16)
-        end
-        _barLayoutListFrame:ClearAllPoints()
-        _barLayoutListFrame:SetPoint("TOPLEFT", _barLayoutHeader, "BOTTOMLEFT", 0, -_SECTION_GAP)
-        if _sc then
-            _barLayoutListFrame:SetWidth(_widthOr(_sc, 340) - 16)
-        end
-    else
-        _barLayoutListFrame:ClearAllPoints()
-        _barLayoutListFrame:SetPoint("TOPLEFT", _candidateListFrame, "BOTTOMLEFT", 0, -_SECTION_GAP)
-        if _sc then
-            _barLayoutListFrame:SetWidth(_widthOr(_sc, 340) - 16)
-        end
-    end
-
-    if _sc then
-        local scTop = _sc:GetTop()
-        local barBottom = _barLayoutListFrame:GetBottom()
-        if scTop and barBottom then
-            local totalUsed = scTop - barBottom + _SECTION_GAP
-            _sc:SetHeight(math_max(totalUsed, 10))
-        else
-            local cH = _candidateListFrame:GetHeight() or 80
-            local hH = (_barLayoutHeader and (_barLayoutHeader:GetHeight() or _HEADER_H)) or 0
-            local bH = _barLayoutListFrame:GetHeight() or 60
-            local _, _, _, _, cY = _candidateListFrame:GetPoint(1)
-            local topOffset = math.abs(cY or 8)
-            local totalUsed = topOffset + cH + _SECTION_GAP + hH + _SECTION_GAP + bH + _SECTION_GAP
-            _sc:SetHeight(math_max(totalUsed, 10))
-        end
-    end
+    if not (_sc and _candidateListFrame) then return end
+    local _, _, _, _, offset = _candidateListFrame:GetPoint(1)
+    _sc:SetHeight(math.abs(offset or 0) + _candidateListFrame:GetHeight() + 12)
 end
 
-local rebuildBarLayoutList
+local refreshCooldownPreview
 
 local function rebuildCandidateGrid()
     if not (_candidateListFrame and ns.UI) then return end
@@ -339,7 +302,7 @@ local function rebuildCandidateGrid()
             if ns.Scanner and ns.Scanner.AddToBar then
                 local ok, err = ns.Scanner:AddToBar(rowKey, data.entryRef or data.spellID)
                 if ok then
-                    rebuildBarLayoutList()
+                    refreshCooldownPreview()
                     rebuildCandidateGrid()
                 else
                     if ns.Debug and ns.Debug.Log then
@@ -349,7 +312,7 @@ local function rebuildCandidateGrid()
             elseif ns.Bars and ns.Bars.AddEntry and data.entryRef then
                 local ok, err = ns.Bars:AddEntry(rowKey, data.entryRef)
                 if ok then
-                    rebuildBarLayoutList()
+                    refreshCooldownPreview()
                     rebuildCandidateGrid()
                 end
             end
@@ -374,403 +337,33 @@ local function rebuildCandidateGrid()
     relayoutBarSection()
 end
 
-local _dragState = nil
-
-local _dropIndicator = nil
-
-local function ensureDropIndicator(parent)
-    local C = ns.UI
-    if not (_dropIndicator and _dropIndicator.line) then
-        local ind = CreateFrame("Frame", nil, parent)
-        ind:SetHeight(2)
-        ind:SetFrameStrata("DIALOG")
-        local line = ind:CreateTexture(nil, "OVERLAY")
-        line:SetAllPoints(ind)
-        line:SetColorTexture(C.Theme.color.accent[1], C.Theme.color.accent[2], C.Theme.color.accent[3], 1)
-        ind.line = line
-        _dropIndicator = ind
-    else
-        _dropIndicator:SetParent(parent)
-    end
-    _dropIndicator:ClearAllPoints()
-    _dropIndicator:Hide()
-    return _dropIndicator
-end
-
-local function computeInsertPos(state, cursorY)
-    local rows = state.sectionRows
-    local n = #rows
-    if n == 0 then return 1 end
-    for i = 1, n do
-        local r = rows[i]
-        local top = r:GetTop()
-        local bottom = r:GetBottom()
-        if top and bottom then
-            local mid = (top + bottom) * 0.5
-            if cursorY >= mid then
-                return i
-            end
-        end
-    end
-    return n + 1
-end
-
-local function insertPosToTarget(insertPos, fromIdx)
-    local target = insertPos
-    if insertPos > fromIdx then
-        target = insertPos - 1
-    end
-    return target
-end
-
-local function moveDropIndicator(state, insertPos)
-    local ind = state.indicator
-    if not ind then return end
-    local rows = state.sectionRows
-    local n = #rows
-    if insertPos < 1 then insertPos = 1 end
-    if insertPos > n + 1 then insertPos = n + 1 end
-    ind:ClearAllPoints()
-    if insertPos <= n then
-        ind:SetPoint("TOPLEFT", rows[insertPos], "TOPLEFT", 0, 2)
-        ind:SetPoint("TOPRIGHT", rows[insertPos], "TOPRIGHT", 0, 2)
-    else
-        ind:SetPoint("BOTTOMLEFT", rows[n], "BOTTOMLEFT", 0, -2)
-        ind:SetPoint("BOTTOMRIGHT", rows[n], "BOTTOMRIGHT", 0, -2)
-    end
-    ind:Show()
-end
-
-local function buildBarLayoutEntryRow(parent, entry, idx, totalCount,
-                                      isRow2, totalH, capturedContainer, sectionRows)
-    local C = ns.UI
-    local Theme = C.Theme
-    local ROW_H = 26
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetPoint("TOPLEFT",  parent, "TOPLEFT",  0, -totalH)
-    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -4, -totalH)
-    row:SetHeight(ROW_H)
-    if sectionRows then
-        sectionRows[idx] = row
-    end
-    local rowBg = row:CreateTexture(nil, "BACKGROUND")
-    rowBg:SetAllPoints(row)
-    local baseAlpha = (idx % 2 == 0) and 0.05 or 0.02
-    if isRow2 then
-        rowBg:SetColorTexture(Theme.color.violet[1], Theme.color.violet[2], Theme.color.violet[3], baseAlpha + 0.03)
-    else
-        rowBg:SetColorTexture(1, 1, 1, baseAlpha)
-    end
-
-    local idxLabel = C.Text(row, C.Fonts.value, Theme.color.textDim, tostring(idx) .. ".")
-    idxLabel:SetPoint("LEFT", row, "LEFT", 4, 0)
-    idxLabel:SetWidth(20)
-    idxLabel:SetJustifyH("LEFT")
-
-    local ICON_W = 20
-    local iconTex = row:CreateTexture(nil, "ARTWORK")
-    iconTex:SetSize(ICON_W, ICON_W)
-    iconTex:SetPoint("LEFT", idxLabel, "RIGHT", 2, 0)
-    local entryIcon
-    if entry.type == "spell" then
-        entryIcon = getSpellIcon(entry.id)
-    elseif entry.type == "item" then
-        entryIcon = getItemIconTex(entry.id)
-    end
-    if entryIcon then
-        iconTex:SetTexture(entryIcon)
-        iconTex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    else
-        iconTex:SetColorTexture(0.18, 0.20, 0.28, 1)
-    end
-
-    local nameLabel = C.Text(row, C.Fonts.value, Theme.color.text)
-    nameLabel:SetPoint("LEFT", iconTex, "RIGHT", 4, 0)
-    if entry.type == "spell" then
-        nameLabel:SetText(getSpellLabel(entry.id) .. " (" .. tostring(entry.id) .. ")")
-    elseif entry.type == "item" then
-        nameLabel:SetText("item:" .. tostring(entry.id))
-    else
-        nameLabel:SetText("?")
-    end
-
-    local capturedEntry = entry
-    local capturedIdx   = idx
-    local capturedLen   = totalCount
-
-    local removeBtn = C.CreateGlyphButton(row, "x", function()
-        if isRow2 then
-            if ns.Bars and ns.Bars.RemoveEntryFromRow2 then
-                ns.Bars:RemoveEntryFromRow2(capturedContainer, capturedEntry)
-                rebuildBarLayoutList()
-            end
-        else
-            if ns.Bars and ns.Bars.RemoveEntry then
-                ns.Bars:RemoveEntry(capturedContainer, capturedEntry)
-                rebuildBarLayoutList()
-                rebuildCandidateGrid()
-            end
-        end
-    end)
-    removeBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-
-    local downBtn = C.CreateGlyphButton(row, "down", function()
-        if isRow2 then
-            if ns.Bars and ns.Bars.ReorderRow2 then
-                local ok = ns.Bars:ReorderRow2(capturedContainer, capturedIdx, capturedIdx + 1)
-                if ok then rebuildBarLayoutList() end
-            end
-        else
-            if ns.Scanner and ns.Scanner.ReorderBar then
-                local ok = ns.Scanner:ReorderBar(capturedContainer, capturedIdx, capturedIdx + 1)
-                if ok then rebuildBarLayoutList() end
-            end
-        end
-    end)
-    downBtn:SetPoint("RIGHT", removeBtn, "LEFT", -2, 0)
-    downBtn:SetEnabledVisual(capturedIdx < capturedLen)
-
-    local upBtn = C.CreateGlyphButton(row, "up", function()
-        if isRow2 then
-            if ns.Bars and ns.Bars.ReorderRow2 then
-                local ok = ns.Bars:ReorderRow2(capturedContainer, capturedIdx, capturedIdx - 1)
-                if ok then rebuildBarLayoutList() end
-            end
-        else
-            if ns.Scanner and ns.Scanner.ReorderBar then
-                local ok = ns.Scanner:ReorderBar(capturedContainer, capturedIdx, capturedIdx - 1)
-                if ok then rebuildBarLayoutList() end
-            end
-        end
-    end)
-    upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
-    upBtn:SetEnabledVisual(capturedIdx > 1)
-
-    local moveBtn = C.CreateCompactButton(row, isRow2 and "R1" or "R2", function()
-        if isRow2 then
-            if ns.Bars and ns.Bars.MoveEntryToRow1 then
-                ns.Bars:MoveEntryToRow1(capturedContainer, capturedEntry)
-                rebuildBarLayoutList()
-            end
-        else
-            if ns.Bars and ns.Bars.MoveEntryToRow2 then
-                ns.Bars:MoveEntryToRow2(capturedContainer, capturedEntry)
-                rebuildBarLayoutList()
-            end
-        end
-    end, 28)
-    moveBtn:SetHeight(16)
-    moveBtn:SetPoint("RIGHT", upBtn, "LEFT", -2, 0)
-    moveBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
-        GameTooltip:SetText(isRow2 and "Move to Row 1" or "Move to Row 2", 1, 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    moveBtn:HookScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-
-    row:EnableMouse(true)
-    row:SetScript("OnMouseDown", function(self, btn)
-        if btn == "RightButton" and entry.type == "spell" then
-            local ap = ns.AbilityPanel or (ns.Options and ns.Options.AbilityPanel)
-            if ap and ap.OpenForSpell then
-                ap:OpenForSpell(entry.id, { entry = capturedEntry, rowName = capturedContainer })
-            end
-        end
-    end)
-
-    if sectionRows then
-        row:RegisterForDrag("LeftButton")
-        row:SetScript("OnDragStart", function(self)
-            local indicator = ensureDropIndicator(parent)
-            _dragState = {
-                row          = self,
-                fromIdx      = idx,
-                isRow2       = isRow2,
-                container    = capturedContainer,
-                sectionRows  = sectionRows,
-                indicator    = indicator,
+refreshCooldownPreview = function()
+    if not _updatePreview then return end
+    local key = currentRowKey()
+    local row = key and (ns.Bars:GetCurrentRows() or {})[key]
+    local secondRow = row and row.rows2
+    local items = { {} }
+    if secondRow and secondRow.enabled then items[2] = {} end
+    for index, lane in ipairs(items) do
+        local entries = index == 2 and secondRow.displayed or row and row.displayed
+        for _, entry in ipairs(entries or {}) do
+            local spell = entry.type == "spell"
+            lane[#lane + 1] = {
+                spellID = spell and entry.id or nil,
+                texture = spell and getSpellIcon(entry.id) or (not spell and getItemIconTex(entry.id) or nil),
+                label = spell and getSpellLabel(entry.id) or ("Item " .. entry.id),
+                entry = entry,
+                rowName = key,
             }
-            self:SetAlpha(0.6)
-            rowBg:SetColorTexture(Theme.color.accent[1], Theme.color.accent[2], Theme.color.accent[3], 0.25)
-            self:SetScript("OnUpdate", function()
-                if not _dragState then return end
-                local _, cy = GetCursorPosition()
-                cy = cy / (self:GetEffectiveScale() or 1)
-                local insertPos = computeInsertPos(_dragState, cy)
-                moveDropIndicator(_dragState, insertPos)
-            end)
-        end)
-        row:SetScript("OnDragStop", function(self)
-            self:SetScript("OnUpdate", nil)
-            self:SetAlpha(1)
-            local state = _dragState
-            _dragState = nil
-            if state and state.indicator then state.indicator:Hide() end
-            if not state then return end
-            local _, cy = GetCursorPosition()
-            cy = cy / (self:GetEffectiveScale() or 1)
-            local insertPos = computeInsertPos(state, cy)
-            local n = #state.sectionRows
-            local target = insertPosToTarget(insertPos, state.fromIdx)
-            if target < 1 then target = 1 end
-            if target > n then target = n end
-            if target == state.fromIdx then
-                rebuildBarLayoutList()
-                return
-            end
-            if state.isRow2 then
-                if ns.Bars and ns.Bars.ReorderRow2 then
-                    ns.Bars:ReorderRow2(state.container, state.fromIdx, target)
-                end
-            else
-                if ns.Scanner and ns.Scanner.ReorderBar then
-                    ns.Scanner:ReorderBar(state.container, state.fromIdx, target)
-                end
-            end
-            rebuildBarLayoutList()
-        end)
-    end
-
-    return ROW_H
-end
-
-local function makeListCheck(C, parent, initial, onToggle)
-    local Theme = C.Theme
-    local btn = CreateFrame("Button", nil, parent)
-    btn:SetSize(16, 16)
-    local bg = C.Rect(btn, "BACKGROUND", Theme.color.input)
-    bg:SetAllPoints(btn)
-    local border = C.Border(btn, Theme.color.lineSoft)
-    local mark = btn:CreateTexture(nil, "ARTWORK")
-    mark:SetPoint("TOPLEFT", btn, "TOPLEFT", 4, -4)
-    mark:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -4, 4)
-    mark:SetColorTexture(unpack(Theme.color.violet))
-    local checked = initial and true or false
-    mark:SetShown(checked)
-    function btn.GetChecked(self) return checked end
-    function btn.SetChecked(self, v)
-        checked = v and true or false
-        mark:SetShown(checked)
-    end
-    btn:SetScript("OnClick", function(self)
-        checked = not checked
-        mark:SetShown(checked)
-        if type(onToggle) == "function" then pcall(onToggle, self) end
-    end)
-    btn:SetScript("OnEnter", function() border.SetColor(unpack(Theme.color.line)) end)
-    btn:SetScript("OnLeave", function() border.SetColor(unpack(Theme.color.lineSoft)) end)
-    return btn
-end
-
-rebuildBarLayoutList = function()
-    if not (_barLayoutListFrame and ns.UI) then return end
-    local C = ns.UI
-    local Theme = C.Theme
-    C.ClearChildren(_barLayoutListFrame)
-
-    local capturedContainer = currentRowKey()
-    if not capturedContainer then
-        _barLayoutListFrame:SetHeight(10)
-        relayoutBarSection()
-        return
-    end
-
-    local displayed1 = {}
-    local displayed2 = {}
-    local row2enabled = false
-    if ns.Bars and ns.Bars.GetCurrentRows then
-        local rows = ns.Bars:GetCurrentRows() or {}
-        local rowData = rows[capturedContainer]
-        if rowData then
-            displayed1 = rowData.displayed or {}
-            local rp2 = rowData.rows2
-            if rp2 then
-                row2enabled = rp2.enabled and true or false
-                displayed2 = rp2.displayed or {}
-            end
         end
     end
-
-    local cbFrame = makeListCheck(C, _barLayoutListFrame, row2enabled, function(self)
-        local newVal = self:GetChecked()
-        if ns.Bars and ns.Bars.rows then
-            local barRow = ns.Bars.rows[capturedContainer]
-            if barRow and barRow.SetRow2Enabled then
-                barRow:SetRow2Enabled(newVal)
-            end
-        end
-        rebuildBarLayoutList()
-    end)
-    cbFrame:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 2, -4)
-    local cbLabel = C.Text(_barLayoutListFrame, C.Fonts.value, Theme.color.text, "Enable 2nd Row")
-    cbLabel:SetPoint("LEFT", cbFrame, "RIGHT", 6, 0)
-
-    local CHECKBOX_H = 24
-    local GAP        = 4
-    local totalH     = CHECKBOX_H + GAP
-
-    if #displayed1 == 0 and not row2enabled then
-        local msg = C.Text(_barLayoutListFrame, C.Fonts.small, Theme.color.textDim,
-            "No spells in this bar. Add from the Candidates section above.")
-        msg:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 8, -totalH)
-        totalH = totalH + 20
-        _barLayoutListFrame:SetHeight(math_max(totalH, 30))
-        relayoutBarSection()
-        return
-    end
-
-    local hdr1 = C.Text(_barLayoutListFrame, C.Fonts.small, Theme.color.accent, "ROW 1")
-    hdr1:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 4, -totalH)
-    totalH = totalH + 14
-
-    if #displayed1 == 0 then
-        local emptyLabel = C.Text(_barLayoutListFrame, C.Fonts.small, Theme.color.textFaint,
-            "(empty — add from Candidates above)")
-        emptyLabel:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 12, -totalH)
-        totalH = totalH + 16
-    else
-        local sectionRows1 = {}
-        for idx, entry in ipairs(displayed1) do
-            local rowH = buildBarLayoutEntryRow(
-                _barLayoutListFrame, entry, idx, #displayed1,
-                false, totalH, capturedContainer, sectionRows1)
-            totalH = totalH + rowH + 2
-        end
-    end
-
-    if row2enabled then
-        totalH = totalH + 6
-
-        local hdr2 = C.Text(_barLayoutListFrame, C.Fonts.small, Theme.color.violet, "ROW 2")
-        hdr2:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 4, -totalH)
-        totalH = totalH + 14
-
-        if #displayed2 == 0 then
-            local emptyLabel2 = C.Text(_barLayoutListFrame, C.Fonts.small, Theme.color.textFaint,
-                "(empty — use R2 buttons in Row 1 to move entries here)")
-            emptyLabel2:SetPoint("TOPLEFT", _barLayoutListFrame, "TOPLEFT", 12, -totalH)
-            totalH = totalH + 16
-        else
-            local sectionRows2 = {}
-            for idx, entry in ipairs(displayed2) do
-                local rowH = buildBarLayoutEntryRow(
-                    _barLayoutListFrame, entry, idx, #displayed2,
-                    true, totalH, capturedContainer, sectionRows2)
-                totalH = totalH + rowH + 2
-            end
-        end
-    end
-
-    _barLayoutListFrame:SetHeight(math_max(totalH, 30))
-    relayoutBarSection()
+    _updatePreview(items)
 end
 
 ns:RegisterMessage("SCANNER_CANDIDATES_UPDATED", function(_, container)
     if container == _selectedContainer or container == "__spellbook" then
         rebuildCandidateGrid()
-        if rebuildBarLayoutList then rebuildBarLayoutList() end
+        if refreshCooldownPreview then refreshCooldownPreview() end
     end
 end)
 
@@ -1203,8 +796,55 @@ local function buildScannerPage(sc)
             end
         end
     end
+    if _selectedContainer == "Custom" and not _selectedCustomBarID and ui and ui.lastOptionsSub then
+        _selectedCustomBarID = tonumber(ui.lastOptionsSub.cdmbarsCustomBar)
+    end
 
-    children[#children + 1] = C.CreateSection(sc, "CDM Bars")
+    local canPreview = _selectedContainer ~= "Consumables"
+    local header = ns.Options:BuildCooldownHeader("cdmbars", "cdmbars", 55)
+    _updatePreview = canPreview and ns.Options:CreateCooldownStrip(header, -56, {
+        resize = function(height) ns.Options:GetPinnedHeader("cdmbars", height) end,
+        select = function(item) ns.AbilityPanel:OpenForSpell(item.spellID, item) end,
+        move = function(source, row, index)
+            ns.Bars:MovePreviewEntry(source.item.rowName, source.item.entry, source.row, row, index)
+            refreshCooldownPreview()
+            rebuildCandidateGrid()
+        end,
+        remove = function(item, row)
+            if InCombatLockdown() then return end
+            if row == 2 then
+                ns.Bars:RemoveEntryFromRow2(item.rowName, item.entry)
+            else
+                ns.Bars:RemoveEntry(item.rowName, item.entry)
+            end
+            refreshCooldownPreview()
+            rebuildCandidateGrid()
+        end,
+    }, "Add an entry from Candidates to preview it here.") or nil
+    refreshCooldownPreview()
+    if currentRowKey() and canPreview then
+        local layout = C.CreateCompactButton(header, "Group Layout", function()
+            ns.Options:OpenLayoutForAnchor(currentRowKey())
+        end, 110)
+        layout:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -3)
+    end
+
+    children[#children + 1] = C.CreateSection(sc, "Cooldown Display")
+
+    local rowKey = currentRowKey()
+    if canPreview and rowKey then
+        children[#children + 1] = C.CreateCheckBox(sc, "Enable 2nd Row",
+            function()
+                local row = ns.Bars:GetRow2Profile(rowKey)
+                return row and row.enabled == true
+            end,
+            function(value)
+                local row = ns.Bars:GetRow(rowKey)
+                if row then row:SetRow2Enabled(value) end
+                refreshCooldownPreview()
+            end
+        )
+    end
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show GCD Swipe",
         function()
@@ -1252,17 +892,13 @@ local function buildScannerPage(sc)
     _addingToLabel = addingLabel
     children[#children + 1] = addingLabel
 
-    local tabRow = CreateFrame("Frame", nil, sc)
-    tabRow:SetHeight(28)
-    children[#children + 1] = tabRow
-
     local prevTab
     for i, cont in ipairs(CONTAINERS) do
         local capturedKey = cont.key
-        local tb = C.CreateTabButton(tabRow, cont.label, function()
+        local tb = C.CreateTabButton(header, cont.label, function()
             selectTab(capturedKey)
             rebuildCandidateGrid()
-            rebuildBarLayoutList()
+            refreshCooldownPreview()
             if not InCombatLockdown() then
                 rebuildPageDeferred()
             end
@@ -1270,7 +906,7 @@ local function buildScannerPage(sc)
         if prevTab then
             tb:SetPoint("LEFT", prevTab, "RIGHT", 2, 0)
         else
-            tb:SetPoint("LEFT", tabRow, "LEFT", 0, 0)
+            tb:SetPoint("TOPLEFT", header, "TOPLEFT", 8, -28)
         end
         prevTab = tb
         tb:SetSelected(cont.key == _selectedContainer)
@@ -1280,9 +916,6 @@ local function buildScannerPage(sc)
     if _selectedContainer == "Custom" then
         children[#children + 1] = C.CreateSubSection(sc, "Custom Bars (cooldown tracking)")
 
-        if not _selectedCustomBarID and ui and ui.lastOptionsSub then
-            _selectedCustomBarID = tonumber(ui.lastOptionsSub.cdmbarsCustomBar)
-        end
         local defs = customBars()
         local selDef = selectedCustomDef()
 
@@ -1434,8 +1067,6 @@ local function buildScannerPage(sc)
     local hasEditableBar = (not isConsumables) and currentRowKey() ~= nil
     if not hasEditableBar then
         _candidateListFrame = nil
-        _barLayoutListFrame = nil
-        _barLayoutHeader    = nil
         _addSpellIDEditBox  = nil
     end
 
@@ -1516,7 +1147,7 @@ local function buildScannerPage(sc)
             if ns.Bars and ns.Bars.AddEntry then
                 local ok, err = ns.Bars:AddEntry(rowKey, entry)
                 if ok then
-                    rebuildBarLayoutList()
+                    refreshCooldownPreview()
                     rebuildCandidateGrid()
                     addEB:SetText("")
                 else
@@ -1539,14 +1170,6 @@ local function buildScannerPage(sc)
         _candidateListFrame = candidateContainer
         children[#children + 1] = candidateContainer
 
-        local barLayoutHeader = C.CreateSubSection(sc, "Bar Layout (R2 = move row, arrows = reorder, right-click = settings)")
-        _barLayoutHeader = barLayoutHeader
-        children[#children + 1] = barLayoutHeader
-
-        local barContainer = CreateFrame("Frame", nil, sc)
-        barContainer:SetHeight(60)
-        _barLayoutListFrame = barContainer
-        children[#children + 1] = barContainer
     end
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
@@ -1556,12 +1179,13 @@ local function buildScannerPage(sc)
 
     if hasEditableBar then
         rebuildCandidateGrid()
-        rebuildBarLayoutList()
+        refreshCooldownPreview()
     end
 end
 
 ns.Options:RegisterPage({
     key   = "cdmbars",
-    label = "CDM Bars",
+    label = "Cooldown Manager",
     build = buildScannerPage,
+    rebuildOnShow = true,
 })

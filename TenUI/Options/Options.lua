@@ -21,6 +21,11 @@ local SCROLL_PAD_TOP = 8
 local GRAB_MARGIN    = 80
 local PINNED_GAP     = 8
 local SCROLLBAR_GUTTER = 12
+local COOLDOWN_TABS = {
+    { key = "cdmbars", label = "Cooldowns" },
+    { key = "TrackedIcon", label = "Tracked Icons" },
+    { key = "TrackedBars", label = "Tracked Bars" },
+}
 
 local _frame       = nil
 local _currentPage = nil
@@ -267,7 +272,7 @@ function Options:_RebuildSidebar()
     for i = 1, #_pages do
         local def = _pages[i]
         local entry = _pageMap[def.key]
-        if entry and not entry.tabBtn then
+        if entry and not def.sidebarParent and not entry.tabBtn then
             local capturedKey = def.key
             local tab = UI.CreateSidebarItem(sidebar, def.label or def.key, function()
                 Options:SelectPage(capturedKey)
@@ -282,7 +287,8 @@ function Options:_RebuildSidebar()
             entry.tabBtn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, y)
             entry.tabBtn:SetWidth(SIDEBAR_W - 1)
             y = y - 26 - 1
-            entry.tabBtn:SetSelected(_currentPage == _pages[i].key)
+            local active = _pageMap[_currentPage]
+            entry.tabBtn:SetSelected(active and (active.def.sidebarParent or _currentPage) == _pages[i].key)
         end
     end
 end
@@ -351,6 +357,159 @@ function Options:GetPinnedHeader(key, height)
     return ph
 end
 
+function Options:BuildCooldownHeader(page, selected, height)
+    self:ClearPinnedHeader(page)
+    local header = self:GetPinnedHeader(page, height)
+    local prev
+    for _, tab in ipairs(COOLDOWN_TABS) do
+        local key = tab.key
+        local button = ns.UI.CreateTabButton(header, tab.label, function()
+            if key == "cdmbars" then
+                self:SelectPage(key)
+            else
+                ns.AuraPanel:OpenList(key)
+            end
+        end)
+        if prev then
+            button:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else
+            button:SetPoint("TOPLEFT", header, "TOPLEFT", 8, 0)
+        end
+        button:SetSelected(key == selected)
+        prev = button
+    end
+    return header
+end
+
+function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
+    local C = ns.UI
+    local iconSize, padding = 32, 4
+    local stride = iconSize + padding
+    local strip = CreateFrame("Frame", nil, header)
+    strip:SetPoint("TOPLEFT", header, "TOPLEFT", 8, offset)
+    strip:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, offset)
+    C.SkinPanel(strip)
+
+    local buttons, lanes = {}, {}
+    local columns, dragging, currentRows
+    local function dropAtCursor()
+        local left, top = strip:GetLeft(), strip:GetTop()
+        if not (left and top) then return end
+        local x, y = GetCursorPosition()
+        local scale = strip:GetEffectiveScale()
+        x, y = x / scale - left, top - y / scale
+        if x < 0 or x > strip:GetWidth() or y < 0 or y > strip:GetHeight() then return end
+        for row, lane in ipairs(lanes) do
+            if y < lane.bottom then
+                local column = math.max(1, math.min(columns, math.floor((x - padding) / stride) + 1))
+                local line = math.max(0, math.floor((y - lane.top - padding) / stride))
+                return row, math.min(#currentRows[row] + (dragging.row == row and 0 or 1), line * columns + column)
+            end
+        end
+    end
+
+    local marker = C.Rect(strip, "OVERLAY", C.Theme.color.accent)
+    marker:SetSize(2, iconSize)
+    marker:Hide()
+    local function showDrop()
+        local row, index = dropAtCursor()
+        if not row or index < 1 then marker:Hide() return end
+        local cell = index - 1
+        local side = row == dragging.row and index > dragging.index and stride or 0
+        marker:ClearAllPoints()
+        marker:SetPoint("TOPLEFT", strip, "TOPLEFT", padding / 2 + (cell % columns) * stride + side,
+            -lanes[row].top - padding - math.floor(cell / columns) * stride)
+        marker:Show()
+    end
+
+    return function(rows)
+        currentRows = rows
+        local width = strip:GetWidth()
+        columns = math.max(1, math.floor(((width > 0 and width or 700) - padding) / stride))
+        local used, top = 0, 0
+        for row, items in ipairs(rows) do
+            local lane = lanes[row]
+            if not lane then
+                lane = { caption = C.Text(strip, C.Fonts.small, C.Theme.color.textDim) }
+                lanes[row] = lane
+            end
+            lane.top = top
+            lane.bottom = top + math.max(1, math.ceil(#items / columns)) * stride + padding
+            lane.caption:ClearAllPoints()
+            lane.caption:SetPoint("TOPLEFT", strip, "TOPLEFT", 8, -top - 10)
+            lane.caption:SetText(row == 1 and emptyText or "Drag icons here for Row 2")
+            lane.caption:SetShown(#items == 0)
+            for index, item in ipairs(items) do
+                used = used + 1
+                local button = buttons[used]
+                if not button then
+                    button = C.CreateIconButton(strip, { isKnown = true, texture = 134400 }, {
+                        onEnter = function(self)
+                            GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
+                            GameTooltip:SetText(self.optionItem.label)
+                            GameTooltip:AddLine("Drag to reorder", 0.6, 0.8, 1)
+                            if self.optionItem.spellID then GameTooltip:AddLine("Right-click: settings", 0.6, 0.8, 1) end
+                            if callbacks.remove then GameTooltip:AddLine("Shift-right-click: remove", 0.6, 0.8, 1) end
+                            GameTooltip:Show()
+                        end,
+                    })
+                    button:SetSize(iconSize, iconSize)
+                    button:RegisterForDrag("LeftButton")
+                    button:SetScript("OnClick", function(self, mouse)
+                        if mouse ~= "RightButton" then return end
+                        GameTooltip:Hide()
+                        if callbacks.remove and IsShiftKeyDown() then
+                            callbacks.remove(self.optionItem, self.previewRow)
+                        elseif self.optionItem.spellID then
+                            callbacks.select(self.optionItem)
+                        end
+                    end)
+                    button:SetScript("OnDragStart", function(self)
+                        if InCombatLockdown() then return end
+                        GameTooltip:Hide()
+                        dragging = { row = self.previewRow, index = self.previewIndex, item = self.optionItem }
+                        self:SetAlpha(0.55)
+                        self:SetScript("OnUpdate", showDrop)
+                    end)
+                    local function finishDrag(self, apply)
+                        self:SetAlpha(1)
+                        self:SetScript("OnUpdate", nil)
+                        marker:Hide()
+                        if not dragging then return end
+                        local row, pos = dropAtCursor()
+                        local previous = dragging
+                        dragging = nil
+                        if apply and row and pos > 0 and not InCombatLockdown()
+                           and (row ~= previous.row or pos ~= previous.index) then
+                            callbacks.move(previous, row, pos, currentRows[row][pos])
+                        end
+                    end
+                    button:SetScript("OnDragStop", function(self) finishDrag(self, true) end)
+                    button:SetScript("OnHide", function(self)
+                        if self:GetScript("OnUpdate") then finishDrag(self, false) end
+                    end)
+                    buttons[used] = button
+                end
+                button.optionItem = item
+                button.previewRow, button.previewIndex = row, index
+                button.iconTex:SetTexture(item.texture or 134400)
+                button:ClearAllPoints()
+                button:SetPoint("TOPLEFT", strip, "TOPLEFT", padding + (index - 1) % columns * stride,
+                    -top - padding - math.floor((index - 1) / columns) * stride)
+                button:Show()
+            end
+            top = lane.bottom
+        end
+        for i = used + 1, #buttons do buttons[i]:Hide() end
+        for i = #lanes, #rows + 1, -1 do
+            lanes[i].caption:Hide()
+            lanes[i] = nil
+        end
+        strip:SetHeight(top)
+        callbacks.resize(top - offset + 1)
+    end
+end
+
 function Options:Build()
     if InCombatLockdown() then
         _pendingPage = _pendingPage or _currentPage
@@ -363,23 +522,25 @@ function Options:SelectPage(key, forceRebuild)
     if not key then return end
 
     local entry = _pageMap[key]
-    if not entry then return end
+    if not entry or not _frame then return end
 
     local ui = ns.GetUIState and ns:GetUIState()
     if ui then
-        ui.lastOptionsPage = key
+        ui.lastOptionsPage = entry.def.restorePage or key
     end
 
     if _currentPage and _pageMap[_currentPage] then
         local prev = _pageMap[_currentPage]
         if prev.container then prev.container:Hide() end
-        if prev.tabBtn then prev.tabBtn:SetSelected(false) end
+        local prevTab = _pageMap[prev.def.sidebarParent or _currentPage].tabBtn
+        if prevTab then prevTab:SetSelected(false) end
     end
 
     _currentPage = key
 
-    if entry.tabBtn then
-        entry.tabBtn:SetSelected(true)
+    local tab = _pageMap[entry.def.sidebarParent or key].tabBtn
+    if tab then
+        tab:SetSelected(true)
     end
 
     if forceRebuild and entry.built then
@@ -431,6 +592,7 @@ function Options:Open()
         if not savedPage or not _pageMap[savedPage] then
             savedPage = "general"
         end
+        savedPage = _pageMap[savedPage].def.restorePage or savedPage
         self:SelectPage(savedPage)
     end
 

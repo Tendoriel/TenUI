@@ -38,11 +38,12 @@ local function buildAbilityPage(sc)
         if ok and n then spellName = n .. " (" .. tostring(spellID) .. ")" end
     end
 
-    children[#children + 1] = C.CreateSection(sc, "CDM Settings: " .. spellName)
+    local header = ns.Options:BuildCooldownHeader("ability", "cdmbars", spellID and 88 or 27)
+    children[#children + 1] = C.CreateSection(sc, "Cooldown Settings: " .. spellName)
 
     if not spellID then
         children[#children + 1] = C.CreateHelpText(sc,
-            "Right-click an ability in CDM Bars to open its settings.")
+            "Select an ability in the Cooldowns preview to open its settings.")
         C.LayoutVertical(sc, children, 4, -8)
         sc:SetHeight(60)
         return
@@ -50,6 +51,22 @@ local function buildAbilityPage(sc)
 
     local function applyAbilityOptions()
         if ns.Bars and ns.Bars.ApplyAbilityOptions then ns.Bars:ApplyAbilityOptions(spellID) end
+    end
+
+    if ns.Auras then
+        local buffs, seen = ns.Auras:GetCooldownBuffChoices()
+        local current = getAbilityProfile(spellID).replaceWithBuff
+        table.insert(buffs, 1, { key = "none", label = "None" })
+        if current and not seen[current] then
+            buffs[#buffs + 1] = { key = current, label = "Unavailable buff" }
+        end
+        children[#children + 1] = C.CreateDropdownLikeList(sc, "Replace with active player buff", buffs,
+            function() return getAbilityProfile(spellID).replaceWithBuff or "none" end,
+            function(key)
+                getAbilityProfile(spellID).replaceWithBuff = key ~= "none" and key or nil
+                applyAbilityOptions()
+            end
+        )
     end
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show your debuff time on the current target",
@@ -60,10 +77,11 @@ local function buildAbilityPage(sc)
         end
     )
 
-    local previewRow = CreateFrame("Frame", nil, sc)
+    local previewRow = CreateFrame("Frame", nil, header)
     previewRow:SetHeight(60)
+    previewRow:SetPoint("TOPLEFT", header, "TOPLEFT", 8, -27)
+    previewRow:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -27)
     C.SkinPanel(previewRow)
-    children[#children + 1] = previewRow
 
     local previewHolder = CreateFrame("Frame", nil, previewRow)
     previewHolder:SetSize(40, 40)
@@ -83,7 +101,7 @@ local function buildAbilityPage(sc)
     previewCDText:SetTextColor(1, 1, 1, 1)
 
     local previewHint = C.Text(previewRow, C.Fonts.small, Theme.color.textDim,
-        "Live sample: updates as you change settings.")
+        spellName)
     previewHint:SetPoint("LEFT", previewHolder, "RIGHT", 12, 0)
 
     local function restylePreviewImpl()
@@ -157,7 +175,10 @@ local function buildAbilityPage(sc)
             end
         end
     end
-    restylePreview()
+    previewRow:SetScript("OnShow", restylePreview)
+    previewRow:SetScript("OnHide", function()
+        if ns.Glow and ns.Glow.ClearAll then ns.Glow:ClearAll(previewHolder) end
+    end)
 
     children[#children + 1] = C.CreateSubSection(sc, "Proc Glow")
 
@@ -555,13 +576,15 @@ function AbilityPanel:OpenForSpell(spellID, context)
         _currentRowName = nil
     end
     if ns.Options then
-        ns.Options:SelectPage("ability", true)
         ns.Options:Open()
+        ns.Options:SelectPage("ability", true)
     end
 end
 
 ns.Options:RegisterPage({
     key   = "ability",
     label = "CDM Settings",
+    sidebarParent = "cdmbars",
+    restorePage = "cdmbars",
     build = buildAbilityPage,
 })
