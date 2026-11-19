@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.7] - 2026-11-19
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Fixed
+
+- **Tracked Bars.** With `Show Inactive` enabled, Call Dreadstalkers and Summon Demonic Tyrant keep their configured rows when either or both summons are active and after their timers expire.
+- **Burning Rush.** The reminder appears while the buff is active, including in combat, and disappears when the buff is cancelled.
+
 ## [0.5.6] - 2026-11-17
 
 For WoW Retail 12.1.5 (Interface 120105).

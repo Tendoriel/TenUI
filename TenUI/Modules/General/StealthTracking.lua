@@ -8,7 +8,6 @@ local IsMounted         = IsMounted
 local IsInInstance      = IsInInstance
 local GetSpecialization = GetSpecialization
 local InCombatLockdown  = InCombatLockdown
-local issecretvalue     = issecretvalue
 local pcall             = pcall
 local type              = type
 
@@ -42,8 +41,7 @@ local StealthTracking = {
     frame      = nil,
     _testUntil = 0,
     _handlers  = nil,
-    _auraFrame = nil,
-    _rushActive = false,
+    _rushContainer = nil,
 }
 ns.StealthTracking = StealthTracking
 
@@ -73,16 +71,6 @@ local function spellIcon(spellID, fallback)
         end
     end
     return fallback
-end
-
-local function isBurningRushActive()
-    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then
-        return false
-    end
-    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, SPELL_BURNING_RUSH)
-    if not ok then return false end
-    if aura == nil then return false end
-    return true
 end
 
 local function stealthRelevant(o)
@@ -156,6 +144,7 @@ local function layout(showStealth, showRush)
     local f = StealthTracking.frame
     local o = getOpts()
     if not (f and o) then return end
+    if StealthTracking._rushContainer and InCombatLockdown() then return end
 
     local size    = o.iconSize or DEFAULTS.iconSize
     local spacing = 4
@@ -184,6 +173,39 @@ local function layout(showStealth, showRush)
 
     f.stealthSlot:SetShown(showStealth and true or false)
     f.rushSlot:SetShown(showRush and true or false)
+end
+
+local function ensureRushContainer()
+    if StealthTracking._rushContainer or InCombatLockdown() then return end
+    local container
+    local ok, err = pcall(function()
+        if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
+            C_AddOns.LoadAddOn("Blizzard_AuraContainer")
+        end
+        local parent = StealthTracking.frame.rushSlot
+        container = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
+        container:SetAllPoints(parent)
+        container:SetUnit("player")
+        -- Blizzard controls visibility even when Lua cannot inspect the aura.
+        container:AddAuraSlot("burningRush", "HELPFUL", {
+            candidateFilters = { includeSpellIDs = { [SPELL_BURNING_RUSH] = true } },
+            initializeFrame = function(button)
+                button:SetAllPoints(container)
+                button:SetMouseClickEnabled(false)
+                button:SetMouseMotionEnabled(false)
+                local icon = button:CreateTexture(nil, "ARTWORK")
+                icon:SetAllPoints(button)
+                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                button:SetIcon(icon)
+            end,
+        })
+    end)
+    if ok then
+        StealthTracking._rushContainer = container
+    else
+        if container then container:Hide() end
+        if ns.Debug then ns.Debug:Warn("[StealthTracking] Burning Rush: %s", tostring(err)) end
+    end
 end
 
 local function update()
@@ -225,7 +247,7 @@ local function update()
             showStealth = true
         end
         if playerClass() == "WARLOCK" and o.warlockBurningRush then
-            showRush = StealthTracking._rushActive
+            showRush = true
         end
     end
 
@@ -242,43 +264,14 @@ local function update()
     end
 
     layout(showStealth, showRush)
+    if showRush and not testing then ensureRushContainer() end
+    local rushContainer = StealthTracking._rushContainer
+    if rushContainer then
+        rushContainer:SetShown(showRush and not testing)
+    end
+    f.rushSlot.icon:SetShown(testing)
     f:SetAlpha(1)
     f:Show()
-end
-
-local function refreshRush()
-    local o = getOpts()
-    if o and playerClass() == "WARLOCK" and o.warlockBurningRush then
-        StealthTracking._rushActive = isBurningRushActive()
-    else
-        StealthTracking._rushActive = false
-    end
-end
-
-local function syncAuraRegistration()
-    local o = getOpts()
-    local want = o and o.enabled and o.warlockBurningRush
-        and playerClass() == "WARLOCK" or false
-
-    local af = StealthTracking._auraFrame
-    if want then
-        if not af then
-            af = CreateFrame("Frame")
-            af:SetScript("OnEvent", function()
-                refreshRush()
-                update()
-            end)
-            StealthTracking._auraFrame = af
-        end
-        if not af._registered then
-            af:RegisterUnitEvent("UNIT_AURA", "player")
-            af._registered = true
-        end
-    elseif af and af._registered then
-        af:UnregisterEvent("UNIT_AURA")
-        af._registered = false
-        StealthTracking._rushActive = false
-    end
 end
 
 function StealthTracking:Test(seconds)
@@ -302,8 +295,6 @@ end
 
 function StealthTracking:ApplyOptions()
     if not self.frame then return end
-    syncAuraRegistration()
-    refreshRush()
     update()
 end
 
@@ -351,13 +342,7 @@ local LIFECYCLE_EVENTS = {
     "TRAIT_CONFIG_UPDATED",
 }
 
-local function onLifecycleEvent(event)
-    if event == "PLAYER_ENTERING_WORLD"
-        or event == "PLAYER_SPECIALIZATION_CHANGED"
-        or event == "TRAIT_CONFIG_UPDATED" then
-        syncAuraRegistration()
-        refreshRush()
-    end
+local function onLifecycleEvent()
     update()
 end
 
@@ -382,8 +367,6 @@ function StealthTracking:OnEnable()
         }
     end
 
-    syncAuraRegistration()
-    refreshRush()
     update()
 
     dlog("enabled (indicator %s)", self:IsEnabled() and "ON" or "off")
@@ -396,10 +379,6 @@ function StealthTracking:OnDisable()
             ns:UnregisterEvent(h.event, h.fn)
         end
         self._handlers = nil
-    end
-    if self._auraFrame and self._auraFrame._registered then
-        self._auraFrame:UnregisterEvent("UNIT_AURA")
-        self._auraFrame._registered = false
     end
     if self.frame then
         self.frame:Hide()

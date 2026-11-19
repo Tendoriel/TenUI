@@ -1334,6 +1334,13 @@ function TrackedAuras:SetFixedBarOverrides(overrides)
     for _, state in pairs(independentBars) do apply(state) end
 end
 
+function TrackedAuras:GetFixedBarIndex(key)
+    if not (fixedBars and fixedBars.ready and fixedBars.frame:IsShown()) then return nil end
+    for index = 1, fixedBars.count or 0 do
+        if fixedBars.rows[index].key == key then return index end
+    end
+end
+
 function TrackedAuras:GetSourceStatus()
     local status = {}
     if failures.fixedBars then

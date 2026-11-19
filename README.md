@@ -2,6 +2,8 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
+TenUI 0.5.7 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
+
 [![Website](https://img.shields.io/badge/Website-tenuiaddon.com-08979c?style=flat)](https://tenuiaddon.com/) [![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.1.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
 ## Screenshots
@@ -14,29 +16,29 @@ Options window, Resources page:
 
 ![Options window showing the Resources configuration page](.github/media/options-resources.png)
 
-Options window, CDM Bars page with the per-spell list:
+Cooldown Manager settings in an earlier release:
 
 ![Options window showing the CDM Bars page and tracked spell list](.github/media/options-cdm-bars.png)
-
-<!-- GIF: rotation in combat showing cooldown swipes, glow procs and resource updates -->
 
 ## Features
 
 ### Cooldown Bars
 - Rows of square cooldown icons driven by the built-in Cooldown Manager, organized into Essential, Utility, Defensive, Trinkets, Consumables and Custom groups.
 - Per-ability settings: visibility, ordering and display behavior for each tracked spell.
+- Reorder cooldowns in the pinned preview, move them between rows and right-click an icon to open its settings. A cooldown can show a selected active buff and its remaining time.
 - Resource and usability color coding that mirrors the Cooldown Manager: ready, out of range, not enough resource and unusable are shown with distinct tints, and icons dim while on cooldown.
 - Consumables tracker for healthstones, potions and more, with an icon grid to choose what to track and the option to add items by ID.
 - Built-in scanner keeps tracked abilities in sync with your current spec and talents.
 
 ### Aura Tracking
-- Track buffs and debuffs as icon rows or timer bars, with stack counts and cooldown swipes.
-- Low-time coloring for timers so expiring effects stand out.
-- Tracked icons and bars follow the built-in Cooldown Manager closely and keep displaying through combat.
+- Track player buffs and your current target's debuffs as icons or timer bars, with stack counts and cooldown swipes. Set their order by dragging in the preview.
+- Customize individual bars, keep their rows visible while inactive or position them separately.
+- Choose timer colors, active and Pandemic glows, and a glow threshold in seconds for each aura.
 
 ### Cast Bar
 - Replacement player cast bar with support for casts, channels and empowered spells.
 - Configurable size, textures, fonts and position.
+- Optional tick marks for supported channels and elapsed / total cast time. Preview casts, channels and cancelled or interrupted casts in settings.
 
 ### Resources
 - Primary and secondary resource bars for every class and spec, including discrete pips for combo points, holy power, chi and similar resources.
@@ -53,8 +55,8 @@ Options window, CDM Bars page with the per-spell list:
 
 ### Quality of Life
 - Combat enter/leave text alerts.
-- Stealth and prowl indicator.
-- Class buff and talent build reminders.
+- Stealth, Prowl and Burning Rush indicators.
+- Class buff, form, pet and talent build reminders. Preview the icons for your current class and specialization.
 - Optional spell and item IDs in tooltips.
 
 ### Layout and Anchoring
@@ -66,7 +68,7 @@ Options window, CDM Bars page with the per-spell list:
 ### Profiles
 - Multiple profiles with rename and copy support, and an ordered profile list.
 - Automatic profile swapping per specialization.
-- Export any profile as a text string and import it on another character or share it with friends.
+- Export a full profile or share only its CDM, Auras or Layout settings. Import creates a separate profile.
 
 ### Interface
 - A unified, styled options window covering every module.
@@ -90,7 +92,7 @@ Run `python3 scripts/build-release.py` from the checkout to build the ZIP in `re
 
 ## Getting Started
 
-1. Type `/tenui` to open the version summary and command list, or use the addon compartment button on the minimap.
+1. Type `/tenui options` or click TenUI in the minimap addon compartment to open settings.
 2. Run `/tenui unlock` to unlock all anchors, drag elements where you want them, then `/tenui lock`.
 3. Open the options window to configure modules, abilities and auras.
 
@@ -98,7 +100,7 @@ Useful commands:
 
 | Command | Effect |
 |---|---|
-| `/tenui` | Show version and command list |
+| `/tenui` / `/tenui help` | Show the installed version or list commands |
 | `/tenui unlock` / `/tenui lock` | Unlock or lock anchors for dragging |
 | `/tenui reset anchors` | Reset all element positions to defaults |
 | `/tenui reset anchor <name>` | Reset a single element |
@@ -109,8 +111,8 @@ Useful commands:
 The options window is organized by module:
 
 - **Layout** — select any anchor and adjust position, scale and alpha with sliders and snap controls.
-- **CDM Bars** — manage Essential, Utility, Defensive, Trinkets, Consumables and Custom cooldown groups, with per-ability sub-pages.
-- **Auras** — configure tracked icons and tracked bars, including which buffs and debuffs to follow.
+- **Cooldown Manager** groups **Cooldowns**, **Tracked Icons** and **Tracked Bars**. Drag in the preview to reorder entries and right-click for **CDM Settings** or **Aura Settings**.
+- **Reminders** contains Class Reminders, Stealth and related alerts. Use **Test on HUD** to check reminder placement.
 - **Glow Effects** — choose glow styles per purpose and preview them live.
 - **Resources** — resource bar appearance and visibility.
 - **Cast Bar** — cast bar appearance and behavior.
@@ -130,7 +132,7 @@ No. Unlocking and dragging anchors is blocked during combat by the game. Leave c
 TenUI builds on top of it. The Cooldown Manager remains the source of truth for which abilities are tracked, and TenUI presents them with its own bars, icons and styling.
 
 **How do I share my setup with a friend?**
-Open Profiles in the options window, click Export Active Profile, and copy the text. Your friend pastes it into the Import box on their end. Existing profiles are never overwritten by an import.
+In **Profiles**, choose an **Export section**, click **Generate Export** and copy the text. Your friend pastes it under **Import** to create a new profile. A partial import uses defaults for the other sections.
 
 **My layout broke after an update. How do I recover?**
 Run `/tenui reset anchors` to restore default positions without touching the rest of your settings. As a last resort, `/tenui reset` wipes all saved settings after a confirmation prompt.

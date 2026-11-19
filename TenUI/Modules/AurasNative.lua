@@ -424,6 +424,7 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
                     local item = self._makeSummonBarItem(entry, duration)
                     if kind == "TrackedBars" then
                         item._fixedBarKey = entry.stableEntryID
+                        item._fixedBarIndex = ns.TrackedAuras:GetFixedBarIndex(entry.stableEntryID)
                     end
                     out[#out + 1] = item
                 end
