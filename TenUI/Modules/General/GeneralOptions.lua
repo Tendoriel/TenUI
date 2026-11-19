@@ -405,6 +405,11 @@ local function buildQoLPage(sc)
         function(v) getCR().shadowform = v applyCR() end
     )
 
+    children[#children + 1] = C.CreateCheckBox(sc, "Balance Druid: not in Moonkin Form",
+        function() return getCR().moonkinForm == true end,
+        function(v) getCR().moonkinForm = v applyCR() end
+    )
+
     children[#children + 1] = C.CreateCheckBox(sc, "Show active buffs and pets with a check mark",
         function() return getCR().showActive == true end,
         function(v) getCR().showActive = v applyCR() end

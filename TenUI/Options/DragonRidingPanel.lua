@@ -205,6 +205,14 @@ local function buildDragonRidingPage(sc)
         function() return getSub("whirlingSurgeText", "size", 12) end,
         function(v) setSub("whirlingSurgeText", "size", v) redraw() end)
 
+    children[#children + 1] = C.CreateSlider(sc, "Cooldown Text Offset X", -200, 200, 1,
+        function() return getSub("whirlingSurgeText", "offsetX", 0) end,
+        function(v) setSub("whirlingSurgeText", "offsetX", v) redraw() end)
+
+    children[#children + 1] = C.CreateSlider(sc, "Cooldown Text Offset Y", -200, 200, 1,
+        function() return getSub("whirlingSurgeText", "offsetY", 0) end,
+        function(v) setSub("whirlingSurgeText", "offsetY", v) redraw() end)
+
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math_max(totalH, 10))
 end

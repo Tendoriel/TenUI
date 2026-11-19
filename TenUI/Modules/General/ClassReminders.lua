@@ -39,6 +39,9 @@ local SHADOW_SPEC        = 258
 local SHADOWFORM         = 232698
 local SHADOWFORM_AURAS   = { 232698, 15473, 194249 }
 local SHADOWFORM_FORMS   = { [232698] = true, [15473] = true, [194249] = true, [185916] = true }
+local BALANCE_SPEC       = 102
+local MOONKIN_FORM       = 24858
+local MOONKIN_FORMS      = { [MOONKIN_FORM] = true }
 
 local DEMONOLOGY_SPEC    = 266
 local SUMMON_FELGUARD    = 30146
@@ -89,6 +92,7 @@ local DEFAULTS = {
     pets             = true,
     petPassive       = true,
     shadowform       = true,
+    moonkinForm      = true,
     roguePoisons     = true,
     raidBuffs        = true,
     instanceOnly     = false,
@@ -190,16 +194,23 @@ local function anyPlayerAuraPresent(list)
     return false
 end
 
-local function shadowformMissing()
+local function formState(forms)
+    local known
     if GetNumShapeshiftForms and GetShapeshiftFormInfo then
         for i = 1, GetNumShapeshiftForms() do
             local _, active, _, spellID = GetShapeshiftFormInfo(i)
             if not (issecretvalue and (issecretvalue(active) or issecretvalue(spellID)))
-                and active and SHADOWFORM_FORMS[spellID] then
-                return false
+                and type(active) == "boolean" and forms[spellID] then
+                if active then return true end
+                known = true
             end
         end
     end
+    if known then return false end
+end
+
+local function shadowformMissing()
+    if formState(SHADOWFORM_FORMS) then return false end
     if C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() then
         return nil
     end
@@ -444,6 +455,11 @@ local function evaluate(o)
         if missing ~= nil then
             push(spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform", not missing)
         end
+    end
+
+    if class == "DRUID" and o.moonkinForm and currentSpecID() == BALANCE_SPEC then
+        local active = formState(MOONKIN_FORMS)
+        if active ~= nil then push(spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active) end
     end
 
     if class == "ROGUE" and o.roguePoisons then

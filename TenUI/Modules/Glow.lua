@@ -182,6 +182,30 @@ end
 
 STYLES.blizzard = {
     apply = function(f, intent, opts)
+        if opts and opts.auraTrigger == "proc" then
+            local effect = f._tenuiAuraAlert
+            if not effect then
+                local art = f:CreateTexture(nil, "OVERLAY")
+                art:SetAtlas("UI-HUD-ActionBar-Proc-Loop-Flipbook")
+                art:SetBlendMode("ADD")
+                local group = art:CreateAnimationGroup()
+                local flip = group:CreateAnimation("FlipBook")
+                flip:SetDuration(0.77)
+                flip:SetFlipBookRows(6)
+                flip:SetFlipBookColumns(5)
+                flip:SetFlipBookFrames(30)
+                effect = { art = art, group = group }
+                f._tenuiAuraAlert = effect
+            end
+            local w, h = f:GetSize()
+            local art = effect.art
+            art:ClearAllPoints()
+            art:SetPoint("TOPLEFT", f, "TOPLEFT", -w * .2, h * .2)
+            art:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", w * .2, -h * .2)
+            art:SetVertexColor(_resolveColor(intent, opts))
+            art:Show()
+            return effect.group
+        end
         f._thudGlowBlizzardIntent = intent
         local w = _widgets[f]
         if intent == "proc" and w and w.SetProcGlow then
@@ -207,6 +231,7 @@ STYLES.blizzard = {
         end
     end,
     clear = function(f)
+        if f._tenuiAuraAlert then f._tenuiAuraAlert.art:Hide() end
         local owner = f._thudGlowBlizzardIntent
         f._thudGlowBlizzardIntent = nil
         local w = _widgets[f]
@@ -358,6 +383,10 @@ STYLES.pixel = {
             g.edges[i]:SetColorTexture(r, gr, b, a)
         end
         g:Show()
+        if opts and opts.auraTrigger then
+            g.animGroup:SetLooping(opts.auraTrigger == "proc" and "NONE" or "REPEAT")
+            return g.animGroup
+        end
         if g.animGroup and not g.animGroup:IsPlaying() then
             g.animGroup:Play()
         end

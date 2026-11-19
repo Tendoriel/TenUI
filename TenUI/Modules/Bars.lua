@@ -1621,10 +1621,10 @@ function Row:SetRow2Enabled(enabled)
     self:Rebuild()
 end
 
-local function destroyIconList(list)
+local function destroyIconList(list, retained)
     for i = 1, #list do
         local icon = list[i]
-        if icon then
+        if icon and not (retained and retained[icon]) then
             if icon.frame and ns.TrackedAuras then
                 ns.TrackedAuras:ReleaseCooldownDebuff(icon)
             end
@@ -1720,7 +1720,7 @@ local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
     syncAbilityDebuff(icon, entry, icon._debuffTimer)
 end
 
-local function buildIconsForList(container, displayedList, showText, rowName)
+local function buildIconsForList(container, displayedList, showText, rowName, available, retained)
     local out = {}
     local textStyle = rowName and getVisualProfileTextForRow(rowName) or nil
     local cdTextStyle = rowName and getVisualProfileCooldownTextForRow(rowName) or nil
@@ -1735,16 +1735,25 @@ local function buildIconsForList(container, displayedList, showText, rowName)
         elseif entry.type == "item" then
             tex = getItemTexture(entry.id)
         end
-        local icon = ns.Widgets.Icon:New(container, {
-            texture        = tex,
-            border         = borderOn,
-            borderColor    = borderColor,
-            cooldown       = true,
-            countdown      = showText,
-            cooldownSwipe  = drawSwipe,
-            stackText      = true,
-            zoomIcon       = true,
-        })
+        local reusable = available[entry]
+        local icon = reusable and tremove(reusable)
+        if icon then
+            retained[icon] = true
+            icon:SetTexture(tex)
+            icon:SetBorder(borderOn, borderColor)
+            icon:SetDrawSwipe(drawSwipe)
+        else
+            icon = ns.Widgets.Icon:New(container, {
+                texture        = tex,
+                border         = borderOn,
+                borderColor    = borderColor,
+                cooldown       = true,
+                countdown      = showText,
+                cooldownSwipe  = drawSwipe,
+                stackText      = true,
+                zoomIcon       = true,
+            })
+        end
         icon._entry = entry
         out[i] = icon
         local hideThis = hideSpellEntry(entry)
@@ -1787,17 +1796,28 @@ function Row:Rebuild()
     self._row2enabled = rows2.enabled and true or false
 
     local parent = Bars.profileRef or {}
-    self:DestroyIcons()
-
     if #displayed1 == 0 and #displayed2 == 0 then
+        self:DestroyIcons()
         self._hiddenSig = ""
         if self.container then self.container:SetAlpha(0) end
         return
     end
 
     local showText = parent.showCooldownText ~= false
-    self._iconsRow1 = buildIconsForList(self.container, displayed1, showText, self.name)
-    self._iconsRow2 = buildIconsForList(self.container, displayed2, showText, self.name)
+    local available, retained = {}, {}
+    for _, icon in ipairs(self.icons) do
+        local entry = icon._entry
+        if icon.frame and entry then
+            local bucket = available[entry] or {}
+            bucket[#bucket + 1] = icon
+            available[entry] = bucket
+        end
+    end
+    local first = buildIconsForList(self.container, displayed1, showText, self.name, available, retained)
+    local second = buildIconsForList(self.container, displayed2, showText, self.name, available, retained)
+    destroyIconList(self._iconsRow1, retained)
+    destroyIconList(self._iconsRow2, retained)
+    self._iconsRow1, self._iconsRow2 = first, second
     self._hiddenSig = hiddenUnknownSignature(displayed1) .. "|" .. hiddenUnknownSignature(displayed2)
 
     local flat = self.icons
@@ -1810,6 +1830,7 @@ function Row:Rebuild()
         n = n + 1
         flat[n] = self._iconsRow2[i]
     end
+    for i = n + 1, #flat do flat[i] = nil end
 
     local visible = countVisibleIcons(self._iconsRow1) + countVisibleIcons(self._iconsRow2)
     if self.container then self.container:SetAlpha(visible > 0 and 1 or 0) end

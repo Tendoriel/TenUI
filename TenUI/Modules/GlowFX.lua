@@ -140,10 +140,10 @@ local function _onSizeChanged(c)
     _layout(c)
 end
 
-local function _acquire()
-    local c = tremove(_pool)
+local function _acquire(nativeParent)
+    local c = not nativeParent and tremove(_pool)
     if c then return c end
-    c = CreateFrame("Frame", nil, _holder)
+    c = CreateFrame("Frame", nil, nativeParent or _holder)
     c:EnableMouse(false)
     c:Hide()
     for i = 1, #PIECES do
@@ -160,7 +160,11 @@ local function _acquire()
     for i = 1, #PIECES do
         local ok, fb = pcall(ag.CreateAnimation, ag, "FlipBook")
         if ok and fb and fb.SetFlipBookRows then
-            fb:SetChildKey(PIECES[i].key)
+            if nativeParent then
+                if not fb:SetTarget(c[PIECES[i].key]) then break end
+            else
+                fb:SetChildKey(PIECES[i].key)
+            end
             fb:SetOrder(1)
             fb:SetDuration(1)
             fb:SetFlipBookRows(SHEET_ROWS)
@@ -175,7 +179,7 @@ local function _acquire()
         c.animGroup = ag
         c.anims = anims
     end
-    c:SetScript("OnSizeChanged", _onSizeChanged)
+    if not nativeParent then c:SetScript("OnSizeChanged", _onSizeChanged) end
     return c
 end
 
@@ -215,12 +219,13 @@ function GlowFX:Start(target, styleName, opts)
     local g = opts and tonumber(opts.colorG) or 1
     local b = opts and tonumber(opts.colorB) or 1
     local fps = opts and tonumber(opts.fps) or style.fps or 12
+    local trigger = opts and opts.auraTrigger
 
     local c = _active[f]
     if c and c._style == styleName
        and c._owner == owner and c._offset == offset
        and c._extent == extent and c._fps == fps and c._alpha == alpha
-       and c._r == r and c._g == g and c._b == b then
+       and c._r == r and c._g == g and c._b == b and c._auraTrigger == trigger and not trigger then
         local playing = false
         if c.animGroup then
             playing = c.animGroup:IsPlaying() and true or false
@@ -234,17 +239,26 @@ function GlowFX:Start(target, styleName, opts)
     end
 
     if not c then
-        c = _acquire()
+        c = trigger and f._tenuiAuraFX or nil
+        c = c or _acquire(trigger and f or nil)
+        if trigger then f._tenuiAuraFX = c end
         _active[f] = c
     end
-    c:SetParent(f)
+    if not trigger then c:SetParent(f) end
     c:SetFrameLevel((f:GetFrameLevel() or 1) + 7)
     c:ClearAllPoints()
-    c:SetPoint("TOPLEFT", f, "TOPLEFT", -offset, offset)
-    c:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", offset, -offset)
+    if trigger then
+        local width, height = f:GetSize()
+        c:SetPoint("CENTER", f)
+        c:SetSize(width + 2 * offset, height + 2 * offset)
+    else
+        c:SetPoint("TOPLEFT", f, "TOPLEFT", -offset, offset)
+        c:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", offset, -offset)
+    end
     c._offset = offset
     c._extent = extent
     c._owner = owner
+    c._auraTrigger = trigger
     c._alpha = alpha
     c._r, c._g, c._b = r, g, b
     c:SetAlpha(alpha)
@@ -254,7 +268,11 @@ function GlowFX:Start(target, styleName, opts)
         local t = c[p.key]
         if changed then
             t:SetTexture(MEDIA .. styleName .. "_" .. p.file .. ".png")
-            _firstFrameTexCoord(t)
+            if (trigger or opts and opts.previewAura) and c.animGroup then
+                t:SetTexCoord(0, 1, 0, 1)
+            else
+                _firstFrameTexCoord(t)
+            end
         end
         t:SetVertexColor(r, g, b)
     end
@@ -262,15 +280,19 @@ function GlowFX:Start(target, styleName, opts)
     _layout(c)
     c._fps = fps
     if c.animGroup then
-        if c.animGroup:IsPlaying() then
+        if not trigger and c.animGroup:IsPlaying() then
             c.animGroup:Stop()
         end
-        local dur = SHEET_FRAMES / fps
+        local dur = trigger == "proc" and 0.77 or SHEET_FRAMES / fps
         for i = 1, #c.anims do
             c.anims[i]:SetDuration(dur)
         end
+        c.animGroup:SetLooping(trigger == "proc" and "NONE" or "REPEAT")
         c:Show()
+        if trigger then return true, c.animGroup end
         c.animGroup:Play()
+    elseif trigger then
+        c:Show()
     else
         c._elapsed = 0
         c._frameIdx = nil
@@ -288,7 +310,12 @@ function GlowFX:Stop(target, expectedStyle, expectedOwner)
     if expectedStyle and c._style ~= expectedStyle then return false end
     if expectedOwner and c._owner ~= expectedOwner then return false end
     _active[f] = nil
-    _release(c)
+    if c._auraTrigger then
+        if c.animGroup then c.animGroup:Stop() end
+        c:Hide()
+    else
+        _release(c)
+    end
     return true
 end
 
@@ -335,13 +362,20 @@ local function _registerIntentStyles()
         Glow:RegisterStyle("fx_" .. styleName, {
             apply = function(f, intent, opts)
                 local o = (type(opts) == "table") and opts or nil
-                GlowFX:Start(f, styleName, {
+                local tint = o and (o.auraTrigger or o.previewAura)
+                local _, animation = GlowFX:Start(f, styleName, {
                     owner    = "intent",
                     glowSize = o and o.glowSize,
                     offset   = o and o.offset,
                     fps      = o and o.fps,
                     alpha    = o and o.colorA,
+                    colorR   = tint and o.colorR,
+                    colorG   = tint and o.colorG,
+                    colorB   = tint and o.colorB,
+                    auraTrigger = o and o.auraTrigger,
+                    previewAura = o and o.previewAura,
                 })
+                return animation
             end,
             clear = function(f)
                 GlowFX:Stop(f, styleName, "intent")

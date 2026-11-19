@@ -212,19 +212,32 @@ end
 
 function ns:GetDefaultProfileKey()
     local selected = self.charDb and self.charDb.selectedProfile
-    if selected and self.db.profiles[selected] then return selected end
+    if selected and self.db.profiles[selected] then return selected, "character" end
     local shared = self.db.defaultProfile
-    if shared and self.db.profiles[shared] then return shared end
-    return "Default"
+    if shared and self.db.profiles[shared] then return shared, "shared" end
+    return "Default", "default"
+end
+
+local function selectProfile(self, assigned, specID)
+    local char = self.charDb
+    if specID and char and char.selectedSpec == specID and self.db.profiles[char.selectedProfile] then
+        return char.selectedProfile, "character"
+    end
+    if assigned and self.db.profiles[assigned] then return assigned, "spec" end
+    return self:GetDefaultProfileKey()
 end
 
 function ns:ResolveActiveProfile()
     local assigned, specID = self:ResolveSpecProfile()
-    local char = self.charDb
-    if specID and char and char.selectedSpec == specID and self.db.profiles[char.selectedProfile] then
-        return char.selectedProfile, specID
-    end
-    return assigned or self:GetDefaultProfileKey(), specID
+    local name = selectProfile(self, assigned, specID)
+    return name, specID
+end
+
+function ns:GetActiveProfileSource()
+    if not self.savedVarsReady or not self.db then return nil end
+    local specID = self:GetLiveSpecID()
+    local name, source = selectProfile(self, self:GetSpecProfile(specID), specID)
+    return name == self:GetProfileKey() and source or "pending"
 end
 
 function ns:RenameProfile(oldName, newName)
@@ -762,14 +775,36 @@ local function stripNonPortable(data)
     end
 end
 
-function ns:ExportProfileString()
+local EXPORT_SECTIONS = {
+    cdm = { module = "Bars", fields = { "abilities", "abilitiesDefaults" } },
+    auras = { module = "Auras", fields = { "auras", "aurasDefaults" } },
+    layout = { module = "Layout", fields = { "anchors", "_sharedSettingsSeeded" } },
+}
+
+function ns:ExportProfileString(section)
     if not self.savedVarsReady then return nil, "saved variables not ready" end
     local p = self:GetProfile()
     if type(p) ~= "table" then return nil, "no active profile" end
+    local selection = EXPORT_SECTIONS[section]
+    if section and section ~= "all" and not selection then return nil, "unknown export section" end
 
     local data = deepCopyProfileData(p)
     stripNonPortable(data)
     self:SeedSharedProfileSettings(data)
+
+    if selection then
+        local selected = { modules = { [selection.module] = data.modules[selection.module] } }
+        for _, field in ipairs(selection.fields) do selected[field] = data[field] end
+        if section == "layout" and type(data.specScopes) == "table" then
+            for key, scope in pairs(data.specScopes) do
+                if type(scope) == "table" and (scope.anchors or scope.layoutVisuals) then
+                    selected.specScopes = selected.specScopes or {}
+                    selected.specScopes[key] = { anchors = scope.anchors, layoutVisuals = scope.layoutVisuals }
+                end
+            end
+        end
+        data = selected
+    end
 
     local payload = serializeValue(data, 1, {})
     if type(payload) ~= "string" then

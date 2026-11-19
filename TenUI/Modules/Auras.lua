@@ -3237,9 +3237,7 @@ function Auras:IsEntryCDMTracked(entry)
     local cdID = tonumber(entry.cooldownID)
     if not cdID then return false, "static" end
     local reserved = viewerReservedCooldownIDSet(false)
-    if reserved and next(reserved) ~= nil then
-        return reserved[cdID] == true, "live"
-    end
+    if reserved[cdID] then return true, "live" end
     return true, "unknown"
 end
 
@@ -7460,6 +7458,18 @@ function Auras:OnEnable(_, profile)
     self.profileRef = profile
     self._enabled = true
 
+    local function scheduleScan()
+        if not self._enabled or self._cdmLayoutScanPending then return end
+        self._cdmLayoutScanPending = true
+        C_Timer.After(0, function()
+            self._cdmLayoutScanPending = nil
+            if self._enabled then
+                self:RefreshTrackedAuraCatalog()
+                self:RequestRefresh()
+            end
+        end)
+    end
+
     self._currentScopeKey = self:GetCurrentScopeKey()
     ensureScope(self._currentScopeKey)
 
@@ -7496,7 +7506,7 @@ function Auras:OnEnable(_, profile)
                 mod:RefreshTrackedAuraCatalog()
             end
             if event == "PLAYER_ENTERING_WORLD" then
-                mod:InvalidateViewerAuraMap()
+                scheduleScan()
             end
             if event == "TRAIT_CONFIG_UPDATED"
                or event == "SPELLS_CHANGED"
@@ -7508,6 +7518,7 @@ function Auras:OnEnable(_, profile)
             if event == "COOLDOWN_VIEWER_DATA_LOADED"
                or event == "PLAYER_SPECIALIZATION_CHANGED" then
                 mod:_ResyncScope()
+                scheduleScan()
                 if mod._enabled then pcall(mod.PrewarmDisplays, mod) end
                 return
             end
@@ -7570,17 +7581,6 @@ function Auras:OnEnable(_, profile)
 
     if not self._cdmLayoutHooked and EventRegistry and EventRegistry.RegisterCallback then
         self._cdmLayoutHooked = true
-        local function scheduleScan()
-            if not mod._enabled or mod._cdmLayoutScanPending then return end
-            mod._cdmLayoutScanPending = true
-            C_Timer.After(0, function()
-                mod._cdmLayoutScanPending = nil
-                if mod._enabled then
-                    mod:RefreshTrackedAuraCatalog()
-                    mod:RequestRefresh()
-                end
-            end)
-        end
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", scheduleScan, self)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnShow", scheduleScan, self)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnHide", scheduleScan, self)
@@ -8377,20 +8377,28 @@ function Auras:_NativeAuraStyle(entry, style)
     return next(override) and override or nil
 end
 
-function Auras:_NativeStyleOverrides(kind, config, units)
+function Auras:_NativeDisplayOptions(kind, config, units)
     local overrides = { player = {}, target = {} }
-    for _, entry in ipairs(_auraCatalog[kind]) do
+    local order = { player = {}, target = {} }
+    local ranks = (_liveRenderCat.rankByCategory or {})[cdmCategoryFor(kind)] or {}
+    local lastRank = 0
+    for _, rank in pairs(ranks) do lastRank = math.max(lastRank, rank) end
+    local catalog = _auraCatalog[kind]
+    for index, entry in ipairs(catalog) do
         if entryDisplayEnabled(entry) then
             local style = self:_NativeAuraStyle(entry, config.style)
-            if style then
-                for _, id in ipairs(entry.matchSpellIDs) do
-                    if units.player[id] then overrides.player[id] = overrides.player[id] or style end
-                    if not entry.selfAura and units.target[id] then overrides.target[id] = overrides.target[id] or style end
+            local rank = ranks[entry.cooldownID] or lastRank + index
+            for _, id in ipairs(entry.matchSpellIDs) do
+                if units.player[id] and (not order.player[id] or rank < order.player[id]) then
+                    order.player[id], overrides.player[id] = rank, style
+                end
+                if not entry.selfAura and units.target[id] and (not order.target[id] or rank < order.target[id]) then
+                    order.target[id], overrides.target[id] = rank, style
                 end
             end
         end
     end
-    return overrides
+    config.overrides, config.order = overrides, order
 end
 
 function Auras._NativeConfig(display, isBar)
@@ -8469,7 +8477,7 @@ function Auras:_SyncNativeDisplays(preview)
     end
     local iconConfig = showIcons and self._NativeConfig(self.IconDisplay, false)
     local barConfig = showBars and self._NativeConfig(self.BarDisplay, true)
-    if iconConfig then iconConfig.overrides = self:_NativeStyleOverrides("TrackedIcon", iconConfig, iconIDs) end
+    if iconConfig then self:_NativeDisplayOptions("TrackedIcon", iconConfig, iconIDs) end
     self._nativeIcons = native:SyncDisplay("icons", iconConfig, iconIDs)
     local fixedRows
     if barConfig and self:GetBarShowInactive() then
@@ -8502,7 +8510,7 @@ function Auras:_SyncNativeDisplays(preview)
             return a.key < b.key
         end)
     elseif barConfig then
-        barConfig.overrides = self:_NativeStyleOverrides("TrackedBars", barConfig, barIDs)
+        self:_NativeDisplayOptions("TrackedBars", barConfig, barIDs)
     end
     self._nativeBars = native:SyncDisplay("bars", barConfig, barIDs, fixedRows)
     if preview then

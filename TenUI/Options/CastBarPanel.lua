@@ -51,7 +51,7 @@ end
 
 local PREVIEW_REGION_H  = 40
 local PREVIEW_STRIP_H   = 12
-local PREVIEW_BLOCK_H   = 6 + 14 + PREVIEW_REGION_H + 4 + PREVIEW_STRIP_H + 8
+local PREVIEW_BLOCK_H   = 6 + 28 + PREVIEW_REGION_H + 4 + PREVIEW_STRIP_H + 8
 
 local PREVIEW_STAGE_FRACS    = { 0.22, 0.47, 0.72 }
 local PREVIEW_TINT_STEP      = 0.18
@@ -63,6 +63,7 @@ local PREVIEW_COLORS = {
     channel     = { 0.3, 0.7, 1.0, 1 },
     empower     = { 0.8, 0.3, 1.0, 1 },
     interrupted = { 1.0, 0.1, 0.1, 1 },
+    failed      = { 0.8, 0.2, 0.2, 1 },
     success     = { 0.2, 1.0, 0.2, 1 },
 }
 
@@ -72,11 +73,23 @@ local PREVIEW_PHASES = {
     { mode = "hold",    dur = 0.6, color = "success",     name = "",            fill = 1 },
     { mode = "drain",   dur = 3.0, color = "channel",     name = "Test Channel",
       spell = 15407,  fallback = [[Interface\Icons\Spell_Shadow_Twilight]] },
-    { mode = "hold",    dur = 0.6, color = "interrupted", name = "Interrupted", fill = 1 },
+    { mode = "hold",    dur = 0.6, color = "interrupted", name = "Interrupted", fill = 1,
+      spell = 15407, fallback = [[Interface\Icons\Spell_Shadow_Twilight]] },
     { mode = "fill",    dur = 3.0, color = "empower",     name = "Test Empower",
       spell = 382266, fallback = [[Interface\Icons\Ability_Evoker_Firebreath]], stages = true },
     { mode = "hold",    dur = 0.5, color = "success",     name = "",            fill = 1 },
     { mode = "instant", dur = 0.9 },
+    { mode = "hold", color = "failed", name = "Cancelled", fill = 0.5,
+      spell = 133, fallback = [[Interface\Icons\Spell_Fire_Fireball02]] },
+}
+
+local previewScenario = 0
+local automaticPhaseCount = #PREVIEW_PHASES - 1
+local PREVIEW_SCENARIOS = {
+    { key = 0, label = "Automatic" },
+    { key = 3, label = "Channel" },
+    { key = 4, label = "Interrupted" },
+    { key = 8, label = "Cancelled" },
 }
 
 local function previewSpellTexture(phase)
@@ -97,14 +110,10 @@ local function buildEmbeddedPreview(block)
     local UI = ns.UI
     UI.SkinPanel(block)
 
-    local caption = UI.Text(block, UI.Fonts.small, UI.Theme.color.textDim,
-        "Preview -- cycles cast / channel / empower, updates live")
-    caption:SetPoint("TOPLEFT", block, "TOPLEFT", 8, -6)
-
     local holder = CreateFrame("Frame", nil, block)
     holder:SetHeight(PREVIEW_REGION_H)
-    holder:SetPoint("TOPLEFT",  block, "TOPLEFT",  8, -20)
-    holder:SetPoint("TOPRIGHT", block, "TOPRIGHT", -8, -20)
+    holder:SetPoint("TOPLEFT",  block, "TOPLEFT",  8, -34)
+    holder:SetPoint("TOPRIGHT", block, "TOPRIGHT", -8, -34)
 
     local mock = CreateFrame("Frame", nil, holder)
     mock:SetPoint("CENTER", holder, "CENTER", 0, 0)
@@ -287,6 +296,9 @@ local function buildEmbeddedPreview(block)
         if phase.mode == "hold" then
             bar:SetValue(phase.fill or 1)
             bar:SetRightText("")
+        elseif previewScenario ~= 0 and phase.mode == "drain" then
+            bar:SetValue(0.5)
+            bar:SetRightText(showTimeFlag and ("%.1fs"):format(phase.dur / 2) or "")
         end
     end
 
@@ -295,7 +307,7 @@ local function buildEmbeddedPreview(block)
         if phase and phase.mode == "instant" then
             local cp = getCBResolved()
             if cp.instant and cp.instant.enabled == false then
-                idx = idx % #PREVIEW_PHASES + 1
+                idx = idx % automaticPhaseCount + 1
                 phase = PREVIEW_PHASES[idx]
             end
         end
@@ -309,7 +321,7 @@ local function buildEmbeddedPreview(block)
         applyPhaseVisual()
     end
 
-    holder:SetScript("OnUpdate", function(_, elapsed)
+    local function updatePreview(_, elapsed)
         if phaseIdx == 0 then
             enterPhase(1)
             return
@@ -317,7 +329,7 @@ local function buildEmbeddedPreview(block)
         phaseElapsed = phaseElapsed + elapsed
         local phase = PREVIEW_PHASES[phaseIdx]
         if not phase or phaseElapsed >= phase.dur then
-            enterPhase(phaseIdx % #PREVIEW_PHASES + 1)
+            enterPhase(phaseIdx % automaticPhaseCount + 1)
             return
         end
         if phase.mode ~= "fill" and phase.mode ~= "drain" then return end
@@ -352,10 +364,20 @@ local function buildEmbeddedPreview(block)
                 bar:SetColor(r, g, b, base[4] or 1)
             end
         end
-    end)
+    end
+
+    local function selectScenario(key)
+        previewScenario = key
+        holder:SetScript("OnUpdate", key == 0 and updatePreview or nil)
+        enterPhase(key == 0 and 1 or key)
+    end
+    local scenario = UI.CreateDropdownLikeList(block, "Preview scenario", PREVIEW_SCENARIOS,
+        function() return previewScenario end, selectScenario)
+    scenario:SetPoint("TOPLEFT", block, "TOPLEFT", 8, -6)
+    scenario:SetPoint("TOPRIGHT", block, "TOPRIGHT", -8, -6)
 
     holder:SetScript("OnShow", function()
-        phaseIdx = 0
+        selectScenario(previewScenario)
     end)
 
     local function restyle()
@@ -387,6 +409,7 @@ local function buildEmbeddedPreview(block)
     end
 
     block:SetHeight(PREVIEW_BLOCK_H)
+    selectScenario(previewScenario)
     restyle()
     _previewRefresh = restyle
 end

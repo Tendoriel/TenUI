@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.4] - 2026-11-17
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Added
+
+- Aura Settings previews the selected custom Pandemic, Active and Proc glows in the chosen color.
+- Profiles can export CDM, Auras or Layout separately, or export the full profile. Importing a partial export creates a new profile with defaults for the other sections.
+- Cast Bar can hold a channel, interrupted cast or cancelled cast in its settings preview. The automatic preview cycle is still available.
+- Class Reminders can warn Balance Druids when Moonkin Form is inactive.
+- Skyriding adds separate horizontal and vertical offsets for the Whirling Surge cooldown text.
+
+### Fixed
+
+- Aura Settings applies the selected custom proc, active and Pandemic effects in Tracked Icons and Tracked Bars. Pandemic follows Blizzard's refresh window, and effects render above icon swipes and bar fills. Refreshing an aura keeps its timer without replaying the proc flash.
+- Auras loads the configured CDM entries at startup without requiring the Blizzard Cooldown Manager settings to be opened first.
+- With `Show Inactive` enabled, a Tracked Bars entry shared by a player buff and a current-target debuff shows one timer. The player buff takes priority while active.
+
+### Improved
+
+- Selecting a proc style enables the effect for auras that have no explicit proc setting.
+- Tracked Icons and active-only Tracked Bars keep Blizzard's order within each unit. Tracked Icons stays centered when several spell IDs refer to the same tracked entry.
+- CDM row updates reuse icons for existing entries, including moves between the two rows.
+- Profiles shows why the current profile is active and indicates when a change is pending.
+
 ## [0.5.3] - 2026-11-16
 
 ### Fixed

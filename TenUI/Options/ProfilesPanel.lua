@@ -7,6 +7,14 @@ local tonumber = tonumber
 local pcall    = pcall
 local math_max = math.max
 
+local PROFILE_SOURCES = {
+    character = "Selected for this character",
+    spec = "Assigned to the current specialization",
+    shared = "Shared account profile",
+    default = "Default profile",
+    pending = "Profile change pending",
+}
+
 local function makeNameBox(C, parent, placeholderText)
     local Theme = C.Theme
     local box = CreateFrame("Frame", nil, parent)
@@ -101,6 +109,7 @@ local function buildProfilesPage(sc)
     local refreshCopyValues
     local rebuildSpecMatrix
     local profileDropdown
+    local refreshSelection
 
     children[#children + 1] = C.CreateSection(sc, "Profiles")
 
@@ -130,10 +139,21 @@ local function buildProfilesPage(sc)
                 end
                 return
             end
-            ns:SetActiveProfile(k)
+            if ns:SetActiveProfile(k) then refreshSelection() end
         end
     )
     children[#children + 1] = profileDropdown
+
+    local source = C.CreateHelpText(sc)
+    children[#children + 1] = source
+    refreshSelection = function()
+        profileDropdown.Refresh()
+        source.text:SetText(PROFILE_SOURCES[ns:GetActiveProfileSource()] or "")
+        source.AutoHeight()
+    end
+    sc._refreshProfileSelection = refreshSelection
+    sc:SetScript("OnShow", refreshSelection)
+    refreshSelection()
 
     local activeActionsRow = CreateFrame("Frame", nil, sc)
     activeActionsRow:SetHeight(24)
@@ -445,15 +465,23 @@ local function buildProfilesPage(sc)
     children[#children + 1] = C.CreateSubSection(sc, "Export")
 
     children[#children + 1] = C.CreateHelpText(sc,
-        "Exports the active profile as text. Click the box, then Ctrl+A / Ctrl+C to copy.")
+        "Copy the export text to share it. A partial export imports as a new profile with defaults for the other sections.")
+
+    local exportSection = "all"
+    children[#children + 1] = C.CreateDropdownLikeList(sc, "Export section", {
+        { key = "all", label = "Full Profile" },
+        { key = "cdm", label = "CDM" },
+        { key = "auras", label = "Auras" },
+        { key = "layout", label = "Layout" },
+    }, function() return exportSection end, function(key) exportSection = key end)
 
     local exportEBFrame, exportEB = makeTextArea(C, sc, 60)
     exportEB:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     exportEB:SetScript("OnChar", function(self) self:SetText(self._exportText or "") self:HighlightText() end)
     children[#children + 1] = exportEBFrame
 
-    children[#children + 1] = C.CreateButton(sc, "Export Active Profile", function()
-        local str, err = ns:ExportProfileString()
+    children[#children + 1] = C.CreateButton(sc, "Generate Export", function()
+        local str, err = ns:ExportProfileString(exportSection)
         exportEB._exportText = str or ""
         exportEB:SetText(str or ("Error: " .. tostring(err)))
         if str then
@@ -527,4 +555,13 @@ ns.Options:RegisterPage({
     key   = "profiles",
     label = "Profiles",
     build = buildProfilesPage,
+    refresh = function(sc)
+        if sc._refreshProfileSelection then sc._refreshProfileSelection() end
+    end,
 })
+
+local function refreshOpenProfiles()
+    if ns.Options:GetCurrentPage() == "profiles" then ns.Options:Refresh() end
+end
+ns:RegisterMessage("PROFILE_CHANGED", refreshOpenProfiles)
+ns:RegisterMessage("SPEC_PROFILE_ASSIGNMENT_CHANGED", refreshOpenProfiles)

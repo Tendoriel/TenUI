@@ -538,6 +538,7 @@ local function buildAuraSettingsPage(sc)
         return ns.Auras and ns.Auras:GetAuraGlowSettings(key, spellID, kind)
     end
 
+    local gainToggle
     local function setGlow(kind, setting, value)
         if not ns.Auras then return end
         local existing = getGlow(kind)
@@ -546,10 +547,12 @@ local function buildAuraSettingsPage(sc)
         if type(aura.glow) == "table" then ns._deepCopyMissing(allGlows, aura.glow) end
         if existing then ns._deepCopyMissing(glow, existing) end
         glow.mode = ns.Auras:GetAuraGlowMode(glow, kind)
+        if kind == "gain" and setting == "style" and glow.mode == "inherit" then glow.mode = "on" end
         glow[setting] = value
         allGlows[kind] = glow
         aura.glow = allGlows
         ns.Auras:RequestRefresh()
+        if gainToggle and kind == "gain" then gainToggle.Refresh() end
     end
 
     local glowModes = {
@@ -580,14 +583,15 @@ local function buildAuraSettingsPage(sc)
             function(v) setGlow(kind, "style", v) end
         )
     end
+    local glowColors = {}
     local function addGlowColor(label, kind, default)
-        children[#children + 1] = C.CreateColorSwatch(sc, label,
-            function()
-                local glow = getGlow(kind)
-                local color = glow and type(glow.color) == "table" and glow.color
-                    or (type(default) == "function" and default() or default)
-                return unpack(color)
-            end,
+        glowColors[kind] = function()
+            local glow = getGlow(kind)
+            local color = glow and type(glow.color) == "table" and glow.color
+                or (type(default) == "function" and default() or default)
+            return unpack(color)
+        end
+        children[#children + 1] = C.CreateColorSwatch(sc, label, glowColors[kind],
             function(r, g, b, a) setGlow(kind, "color", { r, g, b, a }) end
         )
     end
@@ -607,16 +611,68 @@ local function buildAuraSettingsPage(sc)
     addGlowStyle("Active aura glow style", "activeAura", { { key = "default", label = "Default outline" } })
     addGlowColor("Active aura highlight color", "activeAura", { 0.4, 0.8, 1, 1 })
     children[#children + 1] = C.CreateSubSection(sc, "Aura Proc")
-    children[#children + 1] = C.CreateCheckBox(sc, "Glow when aura appears",
+    gainToggle = C.CreateCheckBox(sc, "Glow when aura appears",
         function() return ns.Auras and ns.Auras:GetAuraGlowMode(getGlow("gain"), "gain") == "on" end,
         function(v) setGlow("gain", "mode", v and "on" or "off") end
     )
+    children[#children + 1] = gainToggle
     addGlowStyle("Proc glow style", "gain", { { key = "flash", label = "Flash (default)" } })
     addGlowColor("Proc glow color", "gain", { 0.4, 0.8, 1, 0.8 })
 
+    local preview = CreateFrame("Frame", nil, sc)
+    preview:SetHeight(54)
+    C.SkinPanel(preview)
+    children[#children + 1] = preview
+
+    local icon = CreateFrame("Frame", nil, preview)
+    icon:SetSize(30, 30)
+    icon:SetPoint("LEFT", preview, "LEFT", 10, 0)
+    local texture = icon:CreateTexture(nil, "ARTWORK")
+    texture:SetAllPoints(icon)
+    texture:SetTexture(C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID) or 134400)
+    texture:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    preview:HookScript("OnHide", function() ns.Glow:ClearAll(icon) end)
+
+    local message = C.Text(preview, C.Fonts.small, C.Theme.color.textDim, "Preview the selected custom glow")
+    message:SetPoint("TOPLEFT", icon, "TOPRIGHT", 12, 3)
+    local previous
+    for _, effect in ipairs({
+        { kind = "pandemic", label = "Pandemic" },
+        { kind = "activeAura", label = "Active" },
+        { kind = "gain", label = "Proc" },
+    }) do
+        local button = C.CreateCompactButton(preview, effect.label, function()
+            local glow = ns.Glow
+            glow:ClearAll(icon)
+            local settings = getGlow(effect.kind)
+            local style = settings and settings.style
+            if not glow:GetStyleRenderer(style) then
+                message:SetText("Select a custom glow style to preview it")
+                return
+            end
+            if not glow:IsGloballyEnabled() then
+                message:SetText("Enable Glow Effects to preview this style")
+                return
+            end
+            local r, g, b, a = glowColors[effect.kind]()
+            local intent = effect.kind == "gain" and "proc" or effect.kind
+            message:SetText(glow:GetStyleLabel(style))
+            glow:Preview(icon, intent, {
+                style = style, colorR = r, colorG = g, colorB = b, colorA = a,
+                previewAura = true,
+            }, intent == "proc" and 0.77 or 2)
+        end, 68)
+        if previous then
+            button:SetPoint("LEFT", previous, "RIGHT", 4, 0)
+        else
+            button:SetPoint("TOPLEFT", message, "BOTTOMLEFT", 0, -2)
+        end
+        previous = button
+    end
+
     children[#children + 1] = C.CreateSubSection(sc, "Low Time")
     addGlowMode("Color expiring aura timer", "lowTime")
-    children[#children + 1] = C.CreateSlider(sc, "Low time (seconds)", 1, 60, 1,
+    children[#children + 1] = C.CreateSlider(sc, "Timer color threshold (seconds)", 1, 60, 1,
         function()
             local glow = getGlow("lowTime")
             local _, threshold = ns.Auras:GetLowTimeTextConfig()

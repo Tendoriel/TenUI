@@ -79,7 +79,11 @@ local function makeRegions(button, isBar)
         regions.timer = textParent:CreateFontString(nil, "OVERLAY")
     end
     regions.count = textParent:CreateFontString(nil, "OVERLAY")
-    regions.pandemic = button:CreateTexture(nil, "OVERLAY")
+    regions.effects = CreateFrame("Frame", nil, button)
+    regions.effects:SetAllPoints(button)
+    regions.effects:SetFrameLevel((regions.bar or textParent):GetFrameLevel() + 2)
+    regions.effects:EnableMouse(false)
+    regions.pandemic = regions.effects:CreateTexture(nil, "OVERLAY")
     if isBar then
         regions.pandemic:SetAllPoints(button)
     else
@@ -91,48 +95,71 @@ local function makeRegions(button, isBar)
     return regions
 end
 
+local auraAnimations = {
+    activeAura = { "AddAuraShownAnimation", "RemoveAuraShownAnimation" },
+    pandemic = { "AddAuraShownAnimation", "RemoveAuraShownAnimation" },
+    proc = { "AddAuraAssignedAnimation", "RemoveAuraAssignedAnimation" },
+}
+
 local function applyCustomGlow(button, regions, config, intent, name, color)
     local renderer = name and ns.Glow:GetStyleRenderer(name)
     local state = regions.glows and regions.glows[intent]
     if not state then
         if not renderer then return nil end
-        local host = CreateFrame("Frame", nil, button)
+        local host = CreateFrame("Frame", nil, regions.effects)
         host:SetPoint("CENTER", button)
-        host:SetFrameLevel(button:GetFrameLevel() + 2)
+        host:SetFrameLevel(regions.effects:GetFrameLevel() + 1)
         host:EnableMouse(false)
         state = { host = host }
         regions.glows = regions.glows or {}
         regions.glows[intent] = state
     end
     local host = state.host
+    local key = signature(color) .. "/" .. config.width .. "/" .. config.height
+    if state.renderer == renderer and state.signature == key then return host end
+    local methods = auraAnimations[intent]
+    if state.animation then
+        button[methods[2]](button, state.animation)
+        state.animation:Stop()
+        state.animation = nil
+    end
     if state.renderer and state.renderer ~= renderer then
         pcall(state.renderer.clear, host)
         state.renderer, state.signature = nil, nil
     end
     if not renderer then return nil end
 
-    local key = signature(color) .. "/" .. config.width .. "/" .. config.height
-    if state.signature ~= key then
-        host:SetSize(config.width, config.height)
-        color = color or { 1, 1, 1, 1 }
-        local ok, err = pcall(renderer.apply, host, intent, {
-            colorR = color[1], colorG = color[2], colorB = color[3], colorA = color[4],
-        })
-        if not ok then
+    host:SetSize(config.width, config.height)
+    color = color or { 1, 1, 1, 1 }
+    local ok, animation = pcall(renderer.apply, host, intent, {
+        colorR = color[1], colorG = color[2], colorB = color[3], colorA = color[4],
+        auraTrigger = button[methods[1]] and intent or nil,
+    })
+    if not ok then
+        pcall(renderer.clear, host)
+        state.renderer, state.signature = nil, nil
+        if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] %s glow: %s", name, tostring(animation)) end
+        return nil
+    end
+    if animation then
+        local bound, err = pcall(button[methods[1]], button, animation)
+        if not bound then
             pcall(renderer.clear, host)
-            if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] %s glow: %s", name, tostring(err)) end
+            state.renderer, state.signature = nil, nil
+            if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] %s animation: %s", name, tostring(err)) end
             return nil
         end
-        state.renderer, state.signature = renderer, key
+        state.animation = animation
     end
-    return host
+    state.renderer, state.signature = renderer, key
+    return host, animation
 end
 
 local function applyPandemicStyle(button, regions, config)
     local style = config.style
     local texture = regions.pandemic
     local enabled = style.pandemic == true
-    local custom = applyCustomGlow(button, regions, config, "pandemic",
+    local custom, customAnimation = applyCustomGlow(button, regions, config, "pandemic",
         enabled and style.pandemicGlowStyle, style.pandemicColor)
     local region = enabled and (custom or texture) or nil
     if region == texture then
@@ -148,7 +175,19 @@ local function applyPandemicStyle(button, regions, config)
             button:RemovePandemicRegion(regions.pandemicRegion)
             regions.pandemicRegion:Hide()
         end
-        if region then button:AddPandemicRegion(region) end
+        if region then
+            local ok = pcall(button.AddPandemicRegion, button, region)
+            if not ok and custom then
+                applyCustomGlow(button, regions, config, "pandemic")
+                customAnimation = nil
+                region = texture
+                local color = style.pandemicColor or { 1, 1, 1, 1 }
+                texture:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
+                button:AddPandemicRegion(texture)
+            elseif not ok then
+                region = nil
+            end
+        end
         regions.pandemicRegion = region
     end
 
@@ -169,16 +208,17 @@ local function applyPandemicStyle(button, regions, config)
         regions.pandemicPulse = nil
         texture:SetAlpha(1)
     end
+    return customAnimation
 end
 
 local function applyGainFlash(button, regions, config)
-    if not button.AddAuraShownAnimation then return end
+    if not button.AddAuraAssignedAnimation then return end
     local style = config.style
     local color = style.gainColor
     local target = applyCustomGlow(button, regions, config, "proc", color and style.gainGlowStyle, color)
     if color and not target then
         if not regions.gainFlash then
-            local flash = button:CreateTexture(nil, "OVERLAY", nil, 2)
+            local flash = regions.effects:CreateTexture(nil, "OVERLAY", nil, 2)
             flash:SetAllPoints(button)
             flash:SetColorTexture(1, 1, 1, 1)
             flash:SetBlendMode("ADD")
@@ -190,7 +230,7 @@ local function applyGainFlash(button, regions, config)
     if target == regions.gainTarget then return end
     if regions.gainTarget then
         local previous = regions.gainAnimations[regions.gainTarget]
-        button:RemoveAuraShownAnimation(previous)
+        button:RemoveAuraAssignedAnimation(previous)
         previous:Stop()
         regions.gainTarget:SetAlpha(0)
     end
@@ -214,13 +254,13 @@ local function applyGainFlash(button, regions, config)
         fadeOut:SetOrder(2)
         regions.gainAnimations[target] = animation
     end
-    button:AddAuraShownAnimation(animation)
+    button:AddAuraAssignedAnimation(animation)
 end
 
-local function applyStyle(button, regions, config)
+local function applyStyle(button, regions, config, restyle)
     local styleText = config.styleText
     local style = config.style
-    local custom = applyCustomGlow(button, regions, config, "activeAura",
+    local custom, activeAnimation = applyCustomGlow(button, regions, config, "activeAura",
         style.activeBorder and style.activeGlowStyle, style.activeBorder)
     regions.border = applyBorder(button, regions.border, (not custom and style.activeBorder) or style.border)
     local bar = regions.bar
@@ -250,8 +290,14 @@ local function applyStyle(button, regions, config)
     styleText(regions.count, button, style.count, "BOTTOMRIGHT")
     regions.timer:SetShown(style.showTimer)
     regions.count:SetShown(style.showCount)
-    applyPandemicStyle(button, regions, config)
+    local pandemicAnimation = applyPandemicStyle(button, regions, config)
     applyGainFlash(button, regions, config)
+    if restyle and (activeAnimation or pandemicAnimation) then
+        -- Refresh Blizzard's visibility so an already assigned aura uses the new style.
+        if activeAnimation then activeAnimation:Play() end
+        if pandemicAnimation then pandemicAnimation:Play() end
+        button:SetIcon(regions.icon)
+    end
 end
 
 local function createContainer(parent, unit)
@@ -320,6 +366,7 @@ local function groupLayout(config)
         elementWidth = config.width,
         elementHeight = config.height,
         elementSpacing = config.spacing,
+        groupSpacing = config.spacing,
     }
 end
 
@@ -336,13 +383,17 @@ end
 local function createGroup(frame, key, unit, group)
     local config = group.config
     frame:AddAuraGroup(key, unitFilters[unit], {
-        maxFrameCount = maxTrackedIcons,
+        maxFrameCount = group.limit,
         candidateFilters = { includeSpellIDs = group.ids },
         layout = groupLayout(config),
         initializeFrame = function(button)
             local current = group.config
-            -- Flow layout measures and positions group entries but leaves their size untouched.
             button:SetSize(current.width, current.height)
+            if current.measure then
+                button:SetMouseClickEnabled(false)
+                button:SetMouseMotionEnabled(false)
+                return
+            end
             local regions = makeRegions(button, config.isBar)
             group.buttons[button] = regions
             applyStyle(button, regions, current)
@@ -351,41 +402,45 @@ local function createGroup(frame, key, unit, group)
     })
 end
 
-local function syncGroups(state, unit, config)
-    local definitions = { { ids = config.ids } }
-    if config.overrides and next(config.overrides) then
-        local base = { ids = {} }
-        local byStyle, keys = {}, {}
-        for id in pairs(config.ids) do
-            local override = config.overrides[id]
-            local definition = base
-            if override then
-                local key = signature(override)
-                definition = byStyle[key]
-                if not definition then
-                    definition = { ids = {}, override = override }
-                    byStyle[key] = definition
-                    keys[#keys + 1] = key
-                end
-            end
-            definition.ids[id] = true
+local function getGroupDefinitions(config)
+    local definitions, byKey = {}, {}
+    local flip = config.reverseOrder
+    for id in pairs(config.ids) do
+        local rank = config.order and config.order[id]
+        local override = config.overrides and config.overrides[id]
+        local key = rank or signature(override)
+        local group = byKey[key]
+        if not group then
+            group = { ids = {}, rank = rank, styleKey = signature(override), override = override,
+                limit = rank and 1 or config.maxFrames or maxTrackedIcons }
+            byKey[key] = group
+            definitions[#definitions + 1] = group
         end
-        if next(keys) then
-            definitions = next(base.ids) and { base } or {}
-            table.sort(keys)
-            for _, key in ipairs(keys) do definitions[#definitions + 1] = byStyle[key] end
-        end
+        group.ids[id] = true
     end
+    table.sort(definitions, function(a, b)
+        if a.rank and b.rank then
+            if flip then return a.rank > b.rank end
+            return a.rank < b.rank
+        end
+        if a.rank or b.rank then return a.rank ~= nil end
+        return a.styleKey < b.styleKey
+    end)
+    return definitions
+end
 
+local function syncGroups(state, unit, config)
+    local definitions = getGroupDefinitions(config)
     local frame = state.frame
     for index, definition in ipairs(definitions) do
         local key = index == 1 and groupKey or groupKey .. index
-        local styled = withStyle(config, definition.override)
+        local styled = config.measure and config or withStyle(config, definition.override)
         local group = state.auraGroups[index]
-        local styleKey = config.styleSignature .. signature(definition.override)
+        local styleKey = config.styleSignature .. (config.measure and "" or definition.styleKey)
         local idKey = signature(definition.ids)
         if not group then
-            group = { key = key, config = styled, ids = definition.ids, buttons = {}, enabled = true }
+            group = { key = key, config = styled, ids = definition.ids, buttons = {}, enabled = true,
+                limit = definition.limit }
             state.auraGroups[index] = group
             createGroup(frame, key, unit, group)
         else
@@ -393,11 +448,15 @@ local function syncGroups(state, unit, config)
             if group.idKey ~= idKey then
                 frame:SetAuraGroupCandidateFilters(key, { includeSpellIDs = group.ids })
             end
+            if group.limit ~= definition.limit then
+                frame:SetAuraGroupMaxFrameCount(key, definition.limit)
+                group.limit = definition.limit
+            end
             if group.styleKey ~= styleKey then
                 frame:SetAuraGroupLayout(key, groupLayout(styled))
                 for button, regions in pairs(group.buttons) do
                     button:SetSize(config.width, config.height)
-                    applyStyle(button, regions, styled)
+                    applyStyle(button, regions, styled, true)
                     bindDurationText(button, regions, styled.style)
                 end
             end
@@ -497,6 +556,7 @@ local function syncIconAlignment(config, units, key)
             state = {
                 anchor = CreateFrame("Frame", nil, config.parent, "DisableUntrustedLayoutScriptsTemplate"),
                 measures = {},
+                measureGroups = {},
             }
             iconAlignment = state
         end
@@ -504,30 +564,20 @@ local function syncIconAlignment(config, units, key)
         local axis, direction = AnchorUtil.FlowLayoutAxis, AnchorUtil.FlowDirection
         for _, unit in ipairs({ "player", "target" }) do
             local measure = state.measures[unit]
-            local filters = { includeSpellIDs = units[unit] }
-            local layout = {
-                elementWidth = vertical and 1 or config.width + config.spacing,
-                elementHeight = vertical and config.height + config.spacing or 1,
-                elementSpacing = 0,
-            }
             if not measure then
                 measure = createContainer(config.parent, unit)
                 state.measures[unit] = measure
                 measure:SetAlpha(0)
                 measure:SetSize(1, 1)
-                measure:AddAuraGroup(groupKey, unitFilters[unit], {
-                    candidateFilters = filters,
-                    maxFrameCount = maxTrackedIcons,
-                    layout = layout,
-                    initializeFrame = function(button)
-                        button:SetMouseClickEnabled(false)
-                        button:SetMouseMotionEnabled(false)
-                    end,
-                })
-            else
-                measure:SetAuraGroupCandidateFilters(groupKey, filters)
-                measure:SetAuraGroupLayout(groupKey, layout)
+                state.measureGroups[unit] = { frame = measure, auraGroups = {} }
             end
+            local width = vertical and 1 or config.width + config.spacing
+            local height = vertical and config.height + config.spacing or 1
+            syncGroups(state.measureGroups[unit], unit, {
+                ids = units[unit], order = config.order and config.order[unit],
+                overrides = config.overrides and config.overrides[unit], measure = true,
+                width = width, height = height, spacing = 0, styleSignature = width .. "/" .. height,
+            })
             local player = unit == "player"
             local point = splitGroupPoint(player and "target" or "player", vertical)
             measure:ClearAllPoints()
@@ -792,6 +842,45 @@ function TrackedAuras:Hide(kind)
     if fixedBars and (not kind or kind == "bars") then fixedBars.frame:Hide() end
 end
 
+local function syncFixedBarPriority(row, entry, config)
+    local measure = row.priority
+    if not (next(entry.player) and next(entry.target)) then
+        if measure then measure.frame:Hide() end
+        return
+    end
+    if not measure then
+        local frame = createContainer(row.frame, "player")
+        frame:SetPoint("BOTTOMLEFT", row.frame)
+        frame:SetAlpha(0)
+        frame:SetSize(1, 1)
+        frame:SetFlowLayoutAxis(AnchorUtil.FlowLayoutAxis.Horizontal)
+        frame:SetFlowLayoutAnchorPoint("LEFT")
+        frame:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Right, AnchorUtil.FlowDirection.Down)
+        frame:SetFlowLayoutPadding(0, 1, 0, 0)
+        measure = { frame = frame, auraGroups = {} }
+        row.priority = measure
+    end
+    local width = config.width + config.clipMargin * 2
+    syncGroups(measure, "player", {
+        ids = entry.player, measure = true, width = width, height = 1, spacing = 0, maxFrames = 1,
+        styleSignature = tostring(width),
+    })
+    measure.frame:Show()
+    measure.frame:UpdateAllAuras()
+    return measure.frame
+end
+
+local function positionFixedBarSlot(button, row, config, priority)
+    button:ClearAllPoints()
+    if priority then
+        -- The native layout moves the lower-priority slot outside the clipped container while the buff is active.
+        button:SetPoint("BOTTOMLEFT", priority, "BOTTOMRIGHT", -1, 0)
+        button:SetSize(config.width, config.height)
+    else
+        button:SetAllPoints(row)
+    end
+end
+
 local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
     local config = baseConfig
     local row = state.rows[index]
@@ -812,12 +901,14 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
     regions.icon:SetTexture(entry.icon)
     regions.icon:SetDesaturated(true)
     slotConfig = withStyle(slotConfig, entry.styleOverrides)
+    local priority = syncFixedBarPriority(row, entry, config)
 
     for _, unit in ipairs({ "target", "player" }) do
         local ids = entry[unit]
         local container = state.containers[unit]
         local key = tostring(index)
         local slot = row.slots[unit]
+        local priorityFrame = unit == "target" and priority or nil
         if next(ids) then
             if not slot then
                 container:AddAuraSlot(key, unitFilters[unit], {
@@ -825,7 +916,7 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
                     initializeFrame = function(button)
                         local visual = makeRegions(button, true)
                         row.slots[unit] = { button = button, regions = visual }
-                        button:SetAllPoints(frame)
+                        positionFixedBarSlot(button, frame, config, priorityFrame)
                         applyStyle(button, visual, slotConfig)
                         bindRegions(button, visual, false, slotConfig.style)
                     end,
@@ -833,7 +924,8 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
             else
                 container:SetAuraSlotCandidateFilters(key, { includeSpellIDs = ids })
                 container:SetAuraSlotEnabled(key, true)
-                applyStyle(slot.button, slot.regions, slotConfig)
+                positionFixedBarSlot(slot.button, frame, config, priorityFrame)
+                applyStyle(slot.button, slot.regions, slotConfig, true)
                 bindDurationText(slot.button, slot.regions, slotConfig.style)
             end
         elseif slot then
@@ -882,10 +974,13 @@ function TrackedAuras:SyncFixedBars(config, rows, configSignature)
         if not fixedBars then
             local frame = CreateFrame("Frame", nil, config.parent)
             frame:SetAllPoints(config.parent)
-            fixedBars = { frame = frame, rows = {}, containers = {} }
+            local targetClip = CreateFrame("Frame", nil, frame)
+            targetClip:SetClipsChildren(true)
+            fixedBars = { frame = frame, rows = {}, containers = {}, targetClip = targetClip }
             for i, unit in ipairs({ "target", "player" }) do
-                local container = createContainer(frame, unit)
-                container:SetAllPoints(frame)
+                local parent = unit == "target" and targetClip or frame
+                local container = createContainer(parent, unit)
+                container:SetAllPoints(parent)
                 container:SetFrameLevel(frame:GetFrameLevel() + i * 3)
                 fixedBars.containers[unit] = container
             end
@@ -899,6 +994,11 @@ function TrackedAuras:SyncFixedBars(config, rows, configSignature)
         baseConfig.style.gainColor = nil
         slotConfig.style.showBackground, slotConfig.style.showName, slotConfig.style.border = false, false, nil
         slotConfig.showLabel = config.style.showName
+        local margin = math.max(24, config.width * 0.25, config.height * 0.25)
+        baseConfig.clipMargin = margin
+        fixedBars.targetClip:ClearAllPoints()
+        fixedBars.targetClip:SetPoint("BOTTOMLEFT", fixedBars.frame, "BOTTOMLEFT", -margin, -margin)
+        fixedBars.targetClip:SetSize(config.width + margin * 2, #rows * (config.height + config.spacing) + margin * 2)
         for index, entry in ipairs(rows) do updateFixedBar(fixedBars, index, entry, baseConfig, slotConfig) end
         for index = #rows + 1, #fixedBars.rows do
             local row = fixedBars.rows[index]
@@ -983,7 +1083,8 @@ function TrackedAuras:SyncDisplay(kind, config, units, rows)
     if kind == "bars" and fixedBars then fixedBars.frame:Hide() end
     local alignment
     if splitIcons then
-        alignment = syncIconAlignment(config, units, layoutSignature .. "/" .. signature(units))
+        alignment = syncIconAlignment(config, units, layoutSignature .. "/" .. signature(units)
+            .. "/" .. signature(config.order) .. "/" .. signature(config.overrides))
     elseif kind == "icons" then
         hideIconAlignment()
     end
@@ -995,10 +1096,13 @@ function TrackedAuras:SyncDisplay(kind, config, units, rows)
         entry.alignment = alignment
         entry.ids = units[unit]
         entry.overrides = config.overrides and config.overrides[unit]
+        entry.order = config.order and config.order[unit]
+        entry.reverseOrder = kind == "icons" and (splitIcons and unit == "player"
+            or not splitIcons and (config.point == "RIGHT" or config.point == "BOTTOM"))
         entry.idSignature = signature(entry.ids)
         entry.styleSignature = styleSignature
         entry.signature = layoutSignature .. "/" .. styleSignature .. "/" .. entry.idSignature
-            .. "/" .. signature(entry.overrides) .. "/" .. tostring(alignment)
+            .. "/" .. signature(entry.overrides) .. "/" .. signature(entry.order) .. "/" .. tostring(alignment)
         if kind == "bars" and config.vertical and unit == "target" and next(units.player) then
             local player = groups.barsplayer
             entry.playerBars = player and player.ready and player.frame or nil
