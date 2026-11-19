@@ -8305,8 +8305,22 @@ function Auras:GetAuraGlowSettings(key, spellID, kind, baseSpellID)
         if type(settings) == "table" then return settings end
     end
     local saved = settingsFor(key)
-    if saved and (saved.mode or self:GetAuraGlowMode(saved, kind) ~= "inherit") then return saved end
-    return settingsFor(spellID) or settingsFor(baseSpellID) or saved
+    if not saved or not (saved.mode or self:GetAuraGlowMode(saved, kind) ~= "inherit") then
+        saved = settingsFor(spellID) or settingsFor(baseSpellID) or saved
+    end
+    if kind == "activeAura" and saved and saved.mode == "inherit" and not saved.useGroup
+        and saved.style ~= "border" and ns.Glow and ns.Glow:GetStyleRenderer(saved.style) then
+        -- Older choices left the mode inherited and could save full opacity as zero.
+        local restored = {}
+        for field, value in pairs(saved) do restored[field] = value end
+        restored.mode = "on"
+        local color = restored.color
+        if type(color) == "table" and color[4] == 0 then
+            restored.color = { color[1], color[2], color[3], 1 }
+        end
+        return restored
+    end
+    return saved
 end
 
 function Auras:GetAuraGlowMode(settings, kind)
@@ -8410,7 +8424,8 @@ function Auras._NativeConfig(display, isBar)
     local width, height, spacing
     local point, vertical
     local glowEnabled = not ns.Glow or not ns.Glow.IsGloballyEnabled or ns.Glow:IsGloballyEnabled()
-    local style = { pandemic = glowEnabled and Auras:IsPandemicEnabled(), glowsEnabled = glowEnabled }
+    local style = { pandemic = glowEnabled and Auras:IsPandemicEnabled(), glowsEnabled = glowEnabled,
+        tooltipMode = Auras.profileRef and Auras.profileRef.tooltipMode }
     local colorTimers, threshold, nr, ng, nb, na, lr, lg, lb, la = Auras:GetLowTimeTextConfig()
     if colorTimers then
         style.timerColors = { threshold = threshold, normal = { nr, ng, nb, na }, low = { lr, lg, lb, la } }

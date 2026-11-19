@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.5] - 2026-11-17
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Fixed
+
+- Choosing an Active Aura glow style enables it for that aura when the setting was inherited. Explicit Off remains available.
+- Restored custom Active Aura styles that older profiles left inherited, including the Power Infusion selection saved at zero opacity.
+- Color pickers now use Blizzard's opacity scale directly. Cancelling restores the original color and opacity.
+
+### Added
+
+- Auras has a tooltip setting for Tracked Icons and Tracked Bars with Always, Out of combat and Off modes.
+
 ## [0.5.4] - 2026-11-17
 
 For WoW Retail 12.1.5 (Interface 120105).

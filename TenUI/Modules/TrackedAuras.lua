@@ -260,6 +260,13 @@ end
 local function applyStyle(button, regions, config, restyle)
     local styleText = config.styleText
     local style = config.style
+    local tooltipMode = style.tooltipMode
+    if button.SetHideTooltipInCombat and regions.tooltipMode ~= tooltipMode then
+        button:SetHideTooltipInCombat(tooltipMode == "outOfCombat")
+        button:SetMouseMotionEnabled(tooltipMode ~= "off")
+        button:SetMouseClickEnabled(false)
+        regions.tooltipMode = tooltipMode
+    end
     local custom, activeAnimation = applyCustomGlow(button, regions, config, "activeAura",
         style.activeBorder and style.activeGlowStyle, style.activeBorder)
     regions.border = applyBorder(button, regions.border, (not custom and style.activeBorder) or style.border)

@@ -425,6 +425,21 @@ local function buildAuraPage(sc)
         end
     )
 
+    children[#children + 1] = C.CreateDropdownLikeList(sc, "Tracked aura tooltips", {
+        { key = "always", label = "Always" },
+        { key = "outOfCombat", label = "Out of combat" },
+        { key = "off", label = "Off" },
+    }, function()
+        local profile = ns.Auras and ns.Auras.profileRef
+        return profile and profile.tooltipMode or "always"
+    end, function(value)
+        local auras = ns.Auras
+        if auras and auras.profileRef then
+            auras.profileRef.tooltipMode = value ~= "always" and value or nil
+            auras:RequestRefresh()
+        end
+    end)
+
     children[#children + 1] = C.CreateCheckBox(sc, "Show Blizzard's Pandemic warning",
         function() return ns.Auras and ns.Auras:IsPandemicEnabled() or false end,
         function(v) if ns.Auras then ns.Auras:SetPandemicEnabled(v) end end
@@ -539,6 +554,7 @@ local function buildAuraSettingsPage(sc)
     end
 
     local gainToggle
+    local activeModeControl
     local function setGlow(kind, setting, value)
         if not ns.Auras then return end
         local existing = getGlow(kind)
@@ -547,12 +563,17 @@ local function buildAuraSettingsPage(sc)
         if type(aura.glow) == "table" then ns._deepCopyMissing(allGlows, aura.glow) end
         if existing then ns._deepCopyMissing(glow, existing) end
         glow.mode = ns.Auras:GetAuraGlowMode(glow, kind)
-        if kind == "gain" and setting == "style" and glow.mode == "inherit" then glow.mode = "on" end
+        if setting == "style" and glow.mode == "inherit"
+            and (kind == "gain" or (kind == "activeAura" and ns.Glow:GetStyleRenderer(value))) then
+            glow.mode = "on"
+        end
         glow[setting] = value
+        if kind == "activeAura" then glow.useGroup = glow.mode == "inherit" or nil end
         allGlows[kind] = glow
         aura.glow = allGlows
         ns.Auras:RequestRefresh()
         if gainToggle and kind == "gain" then gainToggle.Refresh() end
+        if activeModeControl and kind == "activeAura" then activeModeControl.Refresh() end
     end
 
     local glowModes = {
@@ -561,10 +582,12 @@ local function buildAuraSettingsPage(sc)
         { key = "off", label = "Off" },
     }
     local function addGlowMode(label, kind)
-        children[#children + 1] = C.CreateDropdownLikeList(sc, label, glowModes,
+        local control = C.CreateDropdownLikeList(sc, label, glowModes,
             function() return ns.Auras and ns.Auras:GetAuraGlowMode(getGlow(kind), kind) or "inherit" end,
             function(v) setGlow(kind, "mode", v) end
         )
+        children[#children + 1] = control
+        return control
     end
     local function addGlowStyle(label, kind, choices)
         local default = choices[1].key
@@ -607,7 +630,7 @@ local function buildAuraSettingsPage(sc)
         "The warning follows Blizzard's refresh window for this aura.")
 
     children[#children + 1] = C.CreateSubSection(sc, "Active Aura")
-    addGlowMode("Active aura highlight", "activeAura")
+    activeModeControl = addGlowMode("Active aura highlight", "activeAura")
     addGlowStyle("Active aura glow style", "activeAura", { { key = "default", label = "Default outline" } })
     addGlowColor("Active aura highlight color", "activeAura", { 0.4, 0.8, 1, 1 })
     children[#children + 1] = C.CreateSubSection(sc, "Aura Proc")

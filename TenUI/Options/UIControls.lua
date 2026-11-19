@@ -661,29 +661,26 @@ function UI.CreateColorSwatch(parent, labelText, getRGBA, setRGBA)
         if InCombatLockdown and InCombatLockdown() then return end
         local r, g, b, a = readColor()
         if ColorPickerFrame and ColorPickerFrame.SetupColorPickerAndShow then
+            local ready = false
+            local function apply()
+                if not ready then return end
+                local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+                if type(setRGBA) == "function" then
+                    pcall(setRGBA, nr, ng, nb, ColorPickerFrame:GetColorAlpha())
+                end
+                refresh()
+            end
             ColorPickerFrame:SetupColorPickerAndShow({
-                r = r, g = g, b = b, opacity = 1 - (a or 1),
+                r = r, g = g, b = b, opacity = a,
                 hasOpacity = true,
-                previousValues = { r = r, g = g, b = b, opacity = 1 - (a or 1) },
-                swatchFunc = function()
-                    local nr, ng, nb = ColorPickerFrame:GetColorRGB()
-                    local na = 1 - (ColorPickerFrame:GetColorAlpha() or 0)
-                    if type(setRGBA) == "function" then pcall(setRGBA, nr, ng, nb, na) end
-                    refresh()
-                end,
-                opacityFunc = function()
-                    local nr, ng, nb = ColorPickerFrame:GetColorRGB()
-                    local na = 1 - (ColorPickerFrame:GetColorAlpha() or 0)
-                    if type(setRGBA) == "function" then pcall(setRGBA, nr, ng, nb, na) end
-                    refresh()
-                end,
-                cancelFunc = function(prev)
-                    if type(setRGBA) == "function" then
-                        pcall(setRGBA, prev.r, prev.g, prev.b, 1 - (prev.opacity or 0))
-                    end
+                swatchFunc = apply,
+                opacityFunc = apply,
+                cancelFunc = function()
+                    if type(setRGBA) == "function" then pcall(setRGBA, r, g, b, a) end
                     refresh()
                 end,
             })
+            ready = true
         end
     end)
 
