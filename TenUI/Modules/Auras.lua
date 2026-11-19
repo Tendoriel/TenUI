@@ -33,7 +33,6 @@ local MIRROR_INTERVAL_SEC = 0.1
 local DEFAULTS = {
     enabled = true,
     crossViewerPrefer = "bar",
-    forceViewerPopulated = true,
     respectCDMHidden = false,
     lowTimeText = {
         enabled   = false,
@@ -3268,20 +3267,14 @@ end
 
 function Auras:IsEntryCDMTracked(entry)
     if type(entry) ~= "table" then return false, "static" end
+    if entry.blizzardTracked ~= nil then return entry.blizzardTracked, "layout" end
     local cdID = tonumber(entry.cooldownID)
     if not cdID then return false, "static" end
     local reserved = viewerReservedCooldownIDSet(false)
     if reserved and next(reserved) ~= nil then
         return reserved[cdID] == true, "live"
     end
-    local info
-    local ok = pcall(function()
-        info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-    end)
-    if ok and type(info) == "table" then
-        return (not cdmHiddenByDefault(info)), "static"
-    end
-    return true, "static"
+    return true, "unknown"
 end
 
 local DISPLAYTYPE_VIEWER_NAME = {
@@ -3995,11 +3988,11 @@ function IconDisplay:DestroyIcons()
     end
 end
 
-function IconDisplay:BuildActive()
+function IconDisplay:BuildActive(preview)
     if not self:Enabled() then return {} end
     local viewer = getViewer(ICON_VIEWER_NAME)
 
-    local preview = cdmPreviewOpen()
+    if preview == nil then preview = cdmPreviewOpen() end
     local active = buildActiveFromCatalog("TrackedIcon", preview) or {}
 
     local viewerShown = false
@@ -4603,11 +4596,11 @@ function BarDisplay:DestroyBars()
     end
 end
 
-function BarDisplay:BuildActive()
+function BarDisplay:BuildActive(preview)
     if not self:Enabled() then return {} end
     local viewer = getViewer(BAR_VIEWER_NAME)
 
-    local preview = cdmPreviewOpen()
+    if preview == nil then preview = cdmPreviewOpen() end
     local active = buildActiveFromCatalog("TrackedBars", preview) or {}
 
     if #active == 0 and _lowTimeStats.pvEnabled() then
@@ -4685,7 +4678,8 @@ function BarDisplay:_RenderActiveImpl(active, suppressSet)
             local f = slot.frame
             f:ClearAllPoints()
             f:SetHeight(barH)
-            local y = (i - 1) * (barH + spacing)
+            local y = ((item._fixedBarIndex and item._fixedBarIndex - 1)
+                or (self.mod._nativeBars and -i or i - 1)) * (barH + spacing)
             f:SetWidth(barW)
             f:SetPoint("BOTTOMLEFT", anchor.frame, "BOTTOMLEFT", 0, y)
 
@@ -5081,9 +5075,13 @@ end
 
 function Auras:Refresh()
     if not self._enabled then return end
+    local preview = cdmPreviewOpen() or (ns.EditMode and ns.EditMode:IsActive())
+    local nativeIcons, nativeBars = self:_SyncNativeDisplays(preview)
     local iconActive, barActive = {}, {}
-    if self.IconDisplay and self.IconDisplay.BuildActive then
-        local ok, res = pcall(self.IconDisplay.BuildActive, self.IconDisplay)
+    if nativeIcons then
+        iconActive = self:_BuildNativeSummonEntries("TrackedIcon")
+    elseif self.IconDisplay and self.IconDisplay.BuildActive then
+        local ok, res = pcall(self.IconDisplay.BuildActive, self.IconDisplay, preview)
         if ok then
             iconActive = res or {}
         else
@@ -5091,8 +5089,10 @@ function Auras:Refresh()
                 tostring(res), tostring(InCombatLockdown and InCombatLockdown() or false))
         end
     end
-    if self.BarDisplay and self.BarDisplay.BuildActive then
-        local ok, res = pcall(self.BarDisplay.BuildActive, self.BarDisplay)
+    if nativeBars then
+        barActive = self:_BuildNativeSummonEntries("TrackedBars")
+    elseif self.BarDisplay and self.BarDisplay.BuildActive then
+        local ok, res = pcall(self.BarDisplay.BuildActive, self.BarDisplay, preview)
         if ok then
             barActive = res or {}
         else
@@ -5117,6 +5117,14 @@ function Auras:Refresh()
         iconActive     = iconActive,
         barActive      = barActive,
     }
+
+    if nativeBars and self._fixedBarIndices then
+        local overrides = {}
+        for i, item in ipairs(barActive) do
+            if not barSuppress[i] and item._fixedBarIndex then overrides[item._fixedBarIndex] = true end
+        end
+        ns.TrackedAuras:SetFixedBarOverrides(overrides)
+    end
 
     if self.IconDisplay and self.IconDisplay.RenderActive then
         self.IconDisplay:RenderActive(iconActive, iconSuppress)
@@ -5259,6 +5267,7 @@ function Auras:SetIconDurationSwipe(flag)
             end
         end
     end
+    self:RequestRefresh()
     return true
 end
 
@@ -5295,23 +5304,6 @@ end
 function Auras:OnAuraEnabledChanged(entryKey, enabled)
     self:RequestRefresh()
     return true
-end
-
-function Auras:GetForceViewerPopulated()
-    local p = self.profileRef
-    return p and p.forceViewerPopulated == true
-end
-
-function Auras:SetForceViewerPopulated(flag)
-    local p = self.profileRef
-    if not p then return false, "profile not ready" end
-    local want = flag and true or false
-    local changed = (p.forceViewerPopulated == true) ~= want
-    p.forceViewerPopulated = want
-    if self._enabled and self.ApplyViewerVisibilityMode then
-        pcall(self.ApplyViewerVisibilityMode, self)
-    end
-    return true, changed
 end
 
 function Auras:GetRespectCDMHidden()
@@ -6251,7 +6243,7 @@ function Auras:DumpViewerState()
                     local ok, v = pcall(viewer.IsAnchoringSecret, viewer)
                     if ok then anchorSecret = v and "YES" or "no" end
                 end
-                push("    TAINT: HasSecretValues=%s HasAnySecretAspect=%s IsAnchoringSecret=%s  (if any YES -> viewer tainted -> RefreshData faults on SPELL_UPDATE_COOLDOWN -> :382/:454 flood. Source: C_EditMode.SaveLayouts reapply. /reload to clear.)",
+                push("    HasSecretValues=%s HasAnySecretAspect=%s IsAnchoringSecret=%s",
                     hasSecret, anyAspect, anchorSecret)
             end
             if #active == 0 then
@@ -6543,16 +6535,13 @@ function Auras:DumpPipeline()
     end
 
     local inCombat = InCombatLockdown and InCombatLockdown()
-    local forcePop = self.IsForceViewerPopulated and self:IsForceViewerPopulated()
     push("=== /tenui aura pipeline -- non-invasive display-chain diagnostic ===")
     push("  context: %s   target=%s",
         inCombat and "IN COMBAT" or "out of combat",
         (UnitExists and UnitExists("target")) and "yes" or "no")
-    push("  forceViewerPopulated: %s  (%s)",
-        forcePop and "ON" or "OFF (default)",
-        forcePop
-            and "viewerChild used as a presence source WHEN Blizzard shows the viewer (we never SetShown/Show the Blizzard viewer -- that would taint its refresh); primary presence is _liveAuraByEntry from UNIT_AURA deltas"
-            or "engine spellID-family ticker query is the SOLE presence source")
+    push("  Blizzard AuraContainer: icons=%s bars=%s",
+        self._nativeIcons and "ready" or "fallback", self._nativeBars and "ready" or "fallback")
+    if self._nativeIcons and self._nativeBars then return lines end
     if self.GetLowTimeTextConfig then
         local ltEn, ltThr = self:GetLowTimeTextConfig()
         push("  lowTimeText (numbers): %s  thr=%gs  (timer-TEXT recolor on icons AND bars; /tenui aura lowtime)",
@@ -6852,8 +6841,8 @@ function Auras:DumpPipeline()
             anyTexStr = (v.anySecretTexture == true) and "true(secret)" or "true"
         end
         local cfg = tonumber(v.configured) or 0
-        push("  %s: configured=%d  activeNow=%d (idle=%d)  forceViewerPopulated=%s engineStore=%d  viewerChildren=%d  crossViewer=%d  widgets=%d  anyTexture=%s  containerVisible=%s alpha=%s size=%s",
-            displayType, cfg, catActive, idle, forcePop and "ON" or "OFF", eng, vc, cv, wid,
+        push("  %s: configured=%d  activeNow=%d (idle=%d)  engineStore=%d  viewerChildren=%d  crossViewer=%d  widgets=%d  anyTexture=%s  containerVisible=%s alpha=%s size=%s",
+            displayType, cfg, catActive, idle, eng, vc, cv, wid,
             anyTexStr,
             tostring(v.containerVisible == true),
             tostring(v.containerAlpha), tostring(v.containerSize))
@@ -6869,38 +6858,13 @@ function Auras:DumpPipeline()
                or v.containerAlpha == "0.00" or v.containerSize == "0x0") then
             push("    -> BREAKPOINT: display frame visibility/anchor problem")
         elseif eng == 0 and catActive > 0 then
-            if forcePop then
-                if vc > 0 or cv > 0 then
-                    push("    -> chain OK (ON mode): %d active sourced from the populated viewer", catActive)
-                    push("       child (viewerChildren=%d, crossViewer=%d) -- engine query had none;", vc, cv)
-                    push("       this is the opt-in in-combat viewer-child path working as designed.")
-                else
-                    push("    -> NOTE: %d active with engineStore=0 AND no populated viewer child", catActive)
-                    push("       (viewerChildren=0, crossViewer=0) -- presence came from neither")
-                    push("       documented source; check buildActiveFromCatalog emission paths.")
-                end
-            else
-                push("    -> NOTE: catalog produced %d active with engineStore=0 in OFF mode.", catActive)
-                push("       (unexpected -- secondary viewer path is gated OFF; check source)")
-            end
+            push("    -> Legacy fallback produced %d active entries from secondary sources.", catActive)
         elseif catActive == 0 and eng == 0 and idle > 0 then
             push("    -> chain OK: %d IDLE row(s) (Show When Inactive ON), nothing active", idle)
             push("       right now out of combat -- correct + expected.")
         elseif cat == 0 and eng == 0 then
             if inCombat then
-                if forcePop then
-                    push("    -> SOURCE produced 0 IN COMBAT with forceViewerPopulated ON.")
-                    push("       Primary presence is _liveAuraByEntry (UNIT_AURA deltas); the")
-                    push("       viewerChild fallback only works while BLIZZARD shows the viewer")
-                    push("       (section A IsShown()==true). We never force-show it (taint). If")
-                    push("       IsShown==false, set the spell's CDM visibility to Always/InCombat.")
-                else
-                    push("    -> SOURCE produced 0 IN COMBAT. If auras are actually up, the")
-                    push("       engine by-spellID query is combat-blinded; presence then")
-                    push("       depends on held UNIT_AURA removed-instance deltas. Confirm")
-                    push("       the 0.1s ticker poll + combat-blind clear-guard are active.")
-                    push("       (Consider /tenui aura forceviewer on for target debuffs.)")
-                end
+                push("    -> Legacy fallback has no readable active entries in this combat context.")
             else
                 if cfg > 0 then
                     push("    -> %d entr%s CONFIGURED but 0 ACTIVE right now -- CORRECT + expected:",
@@ -7460,9 +7424,6 @@ local function migrateSchema(p)
     if type(p) ~= "table" then return end
 
     if not p._fvpDefaultMigrated then
-        if p.forceViewerPopulated == nil then
-            p.forceViewerPopulated = true
-        end
         p._fvpDefaultMigrated = true
     end
 
@@ -7513,292 +7474,13 @@ local function migrateSchema(p)
     p._migratedSplit = true
 end
 
-if type(_G.StaticPopupDialogs) == "table" and not _G.StaticPopupDialogs["TENUI_CDM_EDITMODE_RELOAD"] then
-    _G.StaticPopupDialogs["TENUI_CDM_EDITMODE_RELOAD"] = {
-        text = "TenUI updated your Cooldown Manager Edit Mode settings so cooldown/aura tracking works in combat.\n\nA UI reload is REQUIRED now. Until you reload, cooldown/aura tracking will be broken in combat.",
-        button1 = _G.RELOADUI or "Reload UI",
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = false,
-        noCancelOnReuse = true,
-        preferredIndex = 3,
-        showAlert = true,
-        OnAccept = function() if _G.ReloadUI then _G.ReloadUI() end end,
-    }
-end
-
-function Auras:EnforceCDMViewerAlwaysVisible()
-    if self._editModePolicyApplied then return false end
-    if InCombatLockdown and InCombatLockdown() then return false end
-    if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts
-            and Enum and Enum.EditModeSystem and Enum.EditModeSystem.CooldownViewer
-            and Enum.EditModeCooldownViewerSetting and Enum.CooldownViewerVisibleSetting
-            and Enum.EditModeCooldownViewerSetting.VisibleSetting ~= nil
-            and Enum.CooldownViewerVisibleSetting.Always ~= nil) then
-        return false
-    end
-
-    local okLayout, layoutInfo = pcall(C_EditMode.GetLayouts)
-    if not okLayout or type(layoutInfo) ~= "table" or type(layoutInfo.layouts) ~= "table" then
-        return false
-    end
-
-    local numPresets = 0
-    if _G.EditModePresetLayoutManager
-       and type(_G.EditModePresetLayoutManager.GetCopyOfPresetLayouts) == "function"
-       and type(_G.tAppendAll) == "function" then
-        local okP, presets = pcall(_G.EditModePresetLayoutManager.GetCopyOfPresetLayouts, _G.EditModePresetLayoutManager)
-        if okP and type(presets) == "table" then
-            numPresets = #presets
-            _G.tAppendAll(presets, layoutInfo.layouts)
-            layoutInfo.layouts = presets
-        end
-    end
-
-    local activeIdx = layoutInfo.activeLayout
-    local activeLayout = type(activeIdx) == "number" and layoutInfo.layouts[activeIdx]
-    if type(activeLayout) ~= "table" or type(activeLayout.systems) ~= "table" then
-        return false
-    end
-
-    if numPresets > 0 and type(activeIdx) == "number" and activeIdx <= numPresets then
-        self._editModePolicyApplied = true
-        return false
-    end
-
-    local cooldownSystem = Enum.EditModeSystem.CooldownViewer
-    local visSetting     = Enum.EditModeCooldownViewerSetting.VisibleSetting
-    local visAlways      = Enum.CooldownViewerVisibleSetting.Always
-    local changed = false
-
-    for _, sysInfo in ipairs(activeLayout.systems) do
-        if sysInfo.system == cooldownSystem and type(sysInfo.settings) == "table" then
-            for _, s in ipairs(sysInfo.settings) do
-                if s.setting == visSetting then
-                    if s.value ~= visAlways then
-                        s.value = visAlways
-                        changed = true
-                    end
-                    break
-                end
-            end
-        end
-    end
-
-    self._editModePolicyApplied = true
-    dinfo("EnforceCDMViewerAlwaysVisible: latched changed=%s presets=%d",
-        tostring(changed), numPresets)
-    if not changed then return false end
-
-    dwarn("EnforceCDMViewerAlwaysVisible: calling C_EditMode.SaveLayouts -- this triggers EDIT_MODE_LAYOUTS_UPDATED -> UpdateSystems in TenUI's tainted context, which TAINTS the CooldownViewer system frames until /reload. Forcing a reload now. (one-shot per session)")
-    local okSave = pcall(C_EditMode.SaveLayouts, layoutInfo)
-    if not okSave then
-        dwarn("EnforceCDMViewerAlwaysVisible: SaveLayouts failed")
-        return false
-    end
-
-    if _G.StaticPopup_Show then
-        pcall(_G.StaticPopup_Show, "TENUI_CDM_EDITMODE_RELOAD")
-    end
-    return true
-end
-
-function Auras:EnsureCDMViewerEditModePolicy()
-    if self._editModePolicyApplied then return end
-    if not (InCombatLockdown and InCombatLockdown()) then
-        self:EnforceCDMViewerAlwaysVisible()
-        return
-    end
-    if self._editModePolicyDeferred then return end
-    self._editModePolicyDeferred = true
-    local f = CreateFrame("Frame")
-    self._editModePolicyDeferFrame = f
-    f:RegisterEvent("PLAYER_REGEN_ENABLED")
-    f:SetScript("OnEvent", function(frame)
-        frame:UnregisterAllEvents()
-        frame:SetScript("OnEvent", nil)
-        Auras._editModePolicyDeferred = nil
-        Auras._editModePolicyDeferFrame = nil
-        Auras:EnforceCDMViewerAlwaysVisible()
-    end)
-end
-
-local SUPPRESSED_VIEWER_NAMES = { ICON_VIEWER_NAME, BAR_VIEWER_NAME }
-
-local _lastLoggedAlpha = {}
-
-local function setViewerAlpha(name, alpha)
-    if InCombatLockdown and InCombatLockdown() then return false end
-    local v = _G[name]
-    if type(v) ~= "table" or type(v.SetAlpha) ~= "function" then
-        if _lastLoggedAlpha[name] ~= "missing" then
-            dtrace("setViewerAlpha " .. tostring(name) .. " -> " .. tostring(alpha)
-                .. " SKIPPED (viewer not ready)")
-            _lastLoggedAlpha[name] = "missing"
-        end
-        return false
-    end
-    local liveAlpha
-    if type(v.GetAlpha) == "function" then
-        local okG, a = pcall(v.GetAlpha, v)
-        if okG then liveAlpha = a end
-    end
-    local changed = (_lastLoggedAlpha[name] ~= alpha) or (liveAlpha ~= nil and liveAlpha ~= alpha)
-    if changed then
-        dtrace("setViewerAlpha " .. tostring(name) .. " -> " .. tostring(alpha)
-            .. " (was live=" .. tostring(liveAlpha) .. ")")
-    end
-    _lastLoggedAlpha[name] = alpha
-    local ok, err = pcall(v.SetAlpha, v, alpha)
-    if not ok then
-        dwarn("SetAlpha(%s, %s) failed: %s", tostring(name), tostring(alpha), tostring(err))
-        return false
-    end
-    return true
-end
-
-local _lastForceShownLog = {}
-local function forceShownViewer(name)
-    local v = _G[name]
-    if type(v) ~= "table" then return false end
-    local isShown
-    if type(v.IsShown) == "function" then
-        local okS, s = pcall(v.IsShown, v)
-        if okS then isShown = s end
-    end
-    if isShown == false then
-        if _lastForceShownLog[name] ~= true then
-            dtrace("forceShownViewer " .. tostring(name)
-                .. " -> Blizzard hides this viewer (CDM visibility); NOT force-shown (would taint Blizzard refresh)")
-            _lastForceShownLog[name] = true
-        end
-    else
-        _lastForceShownLog[name] = nil
-    end
-    return isShown == true
-end
-
-function Auras:IsForceViewerPopulated()
-    local p = self.profileRef
-    return p and p.forceViewerPopulated == true
-end
-
-function Auras:_ViewerFrameTainted(name)
-    local v = _G[name]
-    if type(v) ~= "table" then return false end
-    if type(v.HasSecretValues) == "function" then
-        local ok, s = pcall(v.HasSecretValues, v)
-        if ok and s == true then return true end
-    end
-    if type(v.HasAnySecretAspect) == "function" then
-        local ok, s = pcall(v.HasAnySecretAspect, v)
-        if ok and s == true then return true end
-    end
-    if type(v.IsAnchoringSecret) == "function" then
-        local ok, s = pcall(v.IsAnchoringSecret, v)
-        if ok and s == true then return true end
-    end
-    return false
-end
-
-function Auras:_CheckViewerTaintAndPromptReload()
-    if not (self:_ViewerFrameTainted(BAR_VIEWER_NAME)
-            or self:_ViewerFrameTainted(ICON_VIEWER_NAME)
-            or self:_ViewerFrameTainted("EssentialCooldownViewer")
-            or self:_ViewerFrameTainted("UtilityCooldownViewer")) then
-        self._viewerTaintPrompted = nil
-        return
-    end
-    if self._viewerTaintPrompted then return end
-    self._viewerTaintPrompted = true
-    dwarn("CooldownViewer frame is TAINTED (secret aspect present) -- Blizzard RefreshData will fault on SPELL_UPDATE_COOLDOWN (:382/:454 flood) and tracked bars will not populate. A /reload clears it. Source: an addon (this session) called C_EditMode.SaveLayouts, whose reapply taints the viewers.")
-    if _G.StaticPopup_Show and not (InCombatLockdown and InCombatLockdown()) then
-        pcall(_G.StaticPopup_Show, "TENUI_CDM_EDITMODE_RELOAD")
-    end
-end
-
-local _lastSuppressLog = 0
-function Auras:SuppressNativeViewers()
-    if ns.Debug and ns.Debug.IsTrace and ns.Debug:IsTrace(AURAS_MODULE) then
-        local now = GetTime and GetTime() or 0
-        if now - _lastSuppressLog >= 1.0 then
-            _lastSuppressLog = now
-            dtrace("SuppressNativeViewers called, viewers: "
-                .. "BuffIcon=" .. tostring(_G.BuffIconCooldownViewer ~= nil)
-                .. " BuffBar=" .. tostring(_G.BuffBarCooldownViewer ~= nil))
-        end
-    end
-    pcall(self._CheckViewerTaintAndPromptReload, self)
-    local forcePop = self:IsForceViewerPopulated()
-    for i = 1, #SUPPRESSED_VIEWER_NAMES do
-        local name = SUPPRESSED_VIEWER_NAMES[i]
-        if forcePop then
-            forceShownViewer(name)
-        end
-        if not (InCombatLockdown and InCombatLockdown()) then
-            setViewerAlpha(name, 0)
-            if name == BAR_VIEWER_NAME then
-                local v = _G[name]
-                if type(v) == "table" and type(v.SetPoint) == "function"
-                   and type(v.ClearAllPoints) == "function" then
-                    if not self._buffBarOrigPoints and type(v.GetNumPoints) == "function" then
-                        local saved = {}
-                        local okN, n = pcall(v.GetNumPoints, v)
-                        if okN and type(n) == "number" and n > 0 then
-                            for pi = 1, n do
-                                local okP, point, rel, relPoint, x, y = pcall(v.GetPoint, v, pi)
-                                if okP and point ~= nil then
-                                    saved[#saved + 1] = { point, rel, relPoint, x, y }
-                                end
-                            end
-                        end
-                        self._buffBarOrigPoints = saved
-                    end
-                    pcall(v.ClearAllPoints, v)
-                    pcall(v.SetPoint, v, "TOPLEFT", UIParent, "TOPLEFT", -10000, 10000)
-                end
-            end
-        end
-    end
-end
-
-function Auras:ApplyViewerVisibilityMode()
-    if not self._enabled then return end
-    if not self:IsForceViewerPopulated() then
-        self:UnsuppressNativeViewers()
-    end
-    self:SuppressNativeViewers()
-    if self.RequestRefresh then pcall(self.RequestRefresh, self) end
-end
-
-function Auras:UnsuppressNativeViewers()
-    dinfo("UnsuppressNativeViewers called")
-    for i = 1, #SUPPRESSED_VIEWER_NAMES do
-        local name = SUPPRESSED_VIEWER_NAMES[i]
-        local ok = setViewerAlpha(name, 1)
-        dlog("unsuppress native viewer %s -> %s", name, tostring(ok))
-        _lastForceShownLog[name] = nil
-        if name == BAR_VIEWER_NAME and self._buffBarOrigPoints
-           and not (InCombatLockdown and InCombatLockdown()) then
-            local v = _G[name]
-            if type(v) == "table" and type(v.SetPoint) == "function"
-               and type(v.ClearAllPoints) == "function" then
-                pcall(v.ClearAllPoints, v)
-                local pts = self._buffBarOrigPoints
-                for pi = 1, #pts do
-                    local p = pts[pi]
-                    pcall(v.SetPoint, v, p[1], p[2], p[3], p[4], p[5])
-                end
-            end
-            self._buffBarOrigPoints = nil
-        end
-    end
-end
-
 local MIRROR_EVENTS = {
     "PLAYER_ENTERING_WORLD",
     "PLAYER_SPECIALIZATION_CHANGED",
+    "PLAYER_REGEN_ENABLED",
+    "PLAYER_REGEN_DISABLED",
     "PLAYER_TARGET_CHANGED",
+    "PLAYER_TOTEM_UPDATE",
     "SPELL_UPDATE_COOLDOWN",
 }
 
@@ -7813,12 +7495,10 @@ function Auras:OnEnable(_, profile)
     self._currentScopeKey = self:GetCurrentScopeKey()
     ensureScope(self._currentScopeKey)
 
-    self.IconDisplay = IconDisplay.New(self)
-    self.BarDisplay  = BarDisplay.New(self)
+    self.IconDisplay = self.IconDisplay or IconDisplay.New(self)
+    self.BarDisplay = self.BarDisplay or BarDisplay.New(self)
     self.IconDisplay:EnsureContainer()
     self.BarDisplay:EnsureContainer()
-
-    pcall(self.EnsureCDMViewerEditModePolicy, self)
 
     ensureAuraCacheFrame()
     Auras._refreshSummonSpecGate()
@@ -7839,14 +7519,15 @@ function Auras:OnEnable(_, profile)
         local ef = self._mirrorFrame
         local mod = self
         ef:SetScript("OnEvent", function(_, event, ...)
+            if event == "PLAYER_REGEN_ENABLED" then
+                mod:RefreshTrackedAuraCatalog()
+            end
             if event == "PLAYER_ENTERING_WORLD" then
-                if mod._enabled then
-                    mod:SuppressNativeViewers()
-                end
                 mod:InvalidateViewerAuraMap()
             end
             if event == "TRAIT_CONFIG_UPDATED"
                or event == "SPELLS_CHANGED"
+               or event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED"
                or event == "PLAYER_SPECIALIZATION_CHANGED"
                or event == "COOLDOWN_VIEWER_DATA_LOADED" then
                 mod:InvalidateViewerAuraMap()
@@ -7854,14 +7535,12 @@ function Auras:OnEnable(_, profile)
             if event == "COOLDOWN_VIEWER_DATA_LOADED"
                or event == "PLAYER_SPECIALIZATION_CHANGED" then
                 mod:_ResyncScope()
-                if event == "COOLDOWN_VIEWER_DATA_LOADED" and mod._enabled then
-                    mod:SuppressNativeViewers()
-                end
                 if mod._enabled then pcall(mod.PrewarmDisplays, mod) end
                 return
             end
-            if event == "TRAIT_CONFIG_UPDATED" or event == "SPELLS_CHANGED" then
-                return
+            if event == "TRAIT_CONFIG_UPDATED" or event == "SPELLS_CHANGED"
+                or event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" then
+                mod:RefreshTrackedAuraCatalog()
             end
             mod:RequestRefresh()
         end)
@@ -7869,6 +7548,7 @@ function Auras:OnEnable(_, profile)
             ef:RegisterEvent(ev)
         end
         pcall(ef.RegisterEvent, ef, "COOLDOWN_VIEWER_DATA_LOADED")
+        pcall(ef.RegisterEvent, ef, "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
         pcall(ef.RegisterEvent, ef, "TRAIT_CONFIG_UPDATED")
         pcall(ef.RegisterEvent, ef, "SPELLS_CHANGED")
         if ef.RegisterUnitEvent then
@@ -7891,8 +7571,10 @@ function Auras:OnEnable(_, profile)
     self._resizeCB = ns:RegisterMessage("ANCHOR_RESIZED", function(_, anchorName)
         if anchorName == ICON_ANCHOR_NAME then
             if mod.IconDisplay then mod.IconDisplay:Layout(mod.IconDisplay.activeCount or 0) end
+            mod:RequestRefresh()
         elseif anchorName == BAR_ANCHOR_NAME then
             if mod.BarDisplay then mod.BarDisplay:Layout(mod.BarDisplay.activeCount or 0) end
+            mod:RequestRefresh()
         end
     end)
 
@@ -7904,47 +7586,38 @@ function Auras:OnEnable(_, profile)
                 pcall(hooksecurefunc, v, "RefreshLayout", function(self_)
                     mod:InvalidateViewerAuraMap()
                     if C_Timer and C_Timer.After then
-                        C_Timer.After(0, function()
-                            mod:Refresh()
-                            pcall(installPandemicHooks)
-                        end)
+                        mod:RequestRefresh()
                     else
                         mod:Refresh()
-                        pcall(installPandemicHooks)
                     end
                 end)
             end
         end
     end
 
-    if not self._suppressFrame then
-        self._suppressFrame = CreateFrame("Frame", "TenUIAurasSuppressFrame")
-    end
-    do
-        local ef = self._suppressFrame
-        ef:UnregisterAllEvents()
-        ef:SetScript("OnEvent", function(_, event)
-            if not Auras._enabled then return end
-            pcall(Auras.SuppressNativeViewers, Auras)
-            if event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_ENTERING_WORLD" then
-                pcall(Auras.PrebuildPandemicCurves, Auras)
-            end
-            if event == "PLAYER_REGEN_ENABLED"
-               or event == "PLAYER_ENTERING_WORLD"
-               or event == "COOLDOWN_VIEWER_DATA_LOADED" then
-                pcall(Auras.PrewarmDisplays, Auras)
-            end
-        end)
-        ef:RegisterEvent("PLAYER_REGEN_DISABLED")
-        ef:RegisterEvent("PLAYER_REGEN_ENABLED")
-        ef:RegisterEvent("PLAYER_TARGET_CHANGED")
-        ef:RegisterEvent("PLAYER_ENTERING_WORLD")
-        pcall(ef.RegisterEvent, ef, "COOLDOWN_VIEWER_DATA_LOADED")
+    if not self._cdmLayoutHooked and EventRegistry and EventRegistry.RegisterCallback then
+        self._cdmLayoutHooked = true
+        local function scheduleScan()
+            if not mod._enabled or mod._cdmLayoutScanPending then return end
+            mod._cdmLayoutScanPending = true
+            C_Timer.After(0, function()
+                mod._cdmLayoutScanPending = nil
+                if mod._enabled then
+                    mod:RefreshTrackedAuraCatalog()
+                    mod:RequestRefresh()
+                end
+            end)
+        end
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", scheduleScan, self)
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnHide", scheduleScan, self)
     end
 
     if not self._ticker and C_Timer and C_Timer.NewTicker then
         self._ticker = C_Timer.NewTicker(MIRROR_INTERVAL_SEC, function()
-            if mod._enabled and Auras._liveAura and Auras._liveAura.rescanUnitAuras then
+            local native = mod._nativeIcons and mod._nativeBars
+            if native and not next(mod._summonActiveUntil) then return end
+            if mod._enabled and not native and not ns.TrackedAuras:IsRestricted()
+                and Auras._liveAura and Auras._liveAura.rescanUnitAuras then
                 pcall(Auras._liveAura.rescanUnitAuras, "player", true)
                 if UnitExists and UnitExists("target") then
                     pcall(Auras._liveAura.rescanUnitAuras, "target", true)
@@ -7952,14 +7625,6 @@ function Auras:OnEnable(_, profile)
             end
             mod:Refresh()
         end)
-    end
-
-    if C_Timer and C_Timer.After then
-        C_Timer.After(0, function()
-            if Auras._enabled then Auras:SuppressNativeViewers() end
-        end)
-    else
-        self:SuppressNativeViewers()
     end
 
     if C_Timer and C_Timer.After then
@@ -7989,6 +7654,7 @@ function Auras:OnEnable(_, profile)
         end)
     end
 
+    self:RefreshTrackedAuraCatalog()
     self:Refresh()
     dlog("enabled scope=%s icons=%s bars=%s", tostring(self._currentScopeKey),
         tostring(self:IsDisplayEnabled("icons")), tostring(self:IsDisplayEnabled("bars")))
@@ -8010,10 +7676,6 @@ function Auras:OnDisable()
         self._scopeEventFrame:UnregisterAllEvents()
         self._scopeEventFrame:SetScript("OnEvent", nil)
     end
-    if self._suppressFrame then
-        self._suppressFrame:UnregisterAllEvents()
-        self._suppressFrame:SetScript("OnEvent", nil)
-    end
     if self._resizeCB then
         ns:UnregisterMessage("ANCHOR_RESIZED", self._resizeCB)
         self._resizeCB = nil
@@ -8023,12 +7685,15 @@ function Auras:OnDisable()
     resetPandemicState()
 
     if self._auraCacheFrame then
-        pcall(self._auraCacheFrame.UnregisterEvent, self._auraCacheFrame, "UNIT_SPELLCAST_SUCCEEDED")
+        self._auraCacheFrame:UnregisterAllEvents()
+        self._auraCacheFrame:SetScript("OnEvent", nil)
+        self._auraCacheFrame = nil
+        self._registeredAuraCache = false
     end
     wipe(Auras._summonActiveUntil)
     Auras._summonSpecGateOK = false
 
-    self:UnsuppressNativeViewers()
+    ns.TrackedAuras:Hide()
 end
 
 function cdmCategoryFor(displayType)
@@ -8079,7 +7744,7 @@ function orderedConfiguredIDs(category)
     local provider = cdmSettingsDataProvider()
     if provider then
         local okO, ids = pcall(provider.GetOrderedCooldownIDsForCategory, provider, category, true)
-        if okO and type(ids) == "table" and #ids > 0 then
+        if okO and type(ids) == "table" then
             return ids, "ordered"
         end
     end
@@ -8138,6 +7803,21 @@ function Auras:_invalidateLiveRenderCategoryMap()
     _liveRenderCat.map = nil
     _liveRenderCat.source = nil
     _liveRenderCat.rankByCategory = nil
+end
+
+function Auras._ReadCDMLayoutInfo(provider, cooldownID)
+    if not (provider and provider.GetCooldownInfoForID) then return nil end
+    local ok, info = pcall(provider.GetCooldownInfoForID, provider, cooldownID)
+    if ok and type(info) == "table" and not isSecret(info) then return info end
+end
+
+function Auras._IsCDMLayoutHidden(info)
+    if not info then return false end
+    local category = info.category
+    if isSecret(category) then return false end
+    local enum = Enum and Enum.CooldownViewerCategory
+    return category == ((enum and enum.HiddenActive) or -1)
+        or category == ((enum and enum.HiddenPassive) or -2)
 end
 
 local function resolveRenderDisplayType(cdID, staticDisplayType)
@@ -8494,6 +8174,7 @@ local function buildCatalogEntry(cdID, info, source, normCategory)
         activeAuraSource       = nil,
         source                 = source,
         isKnown                = isKnown,
+        selfAura               = info.selfAura == true,
     }
 
     entry.matchSpellIDs = BuildMatchSpellIDs(entry)
@@ -8550,6 +8231,9 @@ function buildAuraCatalog(displayType)
             { cat = (enum and enum.TrackedBuff) or CATEGORY_TRACKED_BUFF, displayType = "TrackedIcon" },
             { cat = (enum and enum.TrackedBar)  or CATEGORY_TRACKED_BAR,  displayType = "TrackedBars" },
         }
+        if enum and enum.SpecAgnosticTracked then
+            defs[#defs + 1] = { cat = enum.SpecAgnosticTracked, displayType = "TrackedIcon" }
+        end
         local order = {}
         local seen = {}
         for _, def in ipairs(defs) do
@@ -8583,6 +8267,7 @@ function buildAuraCatalog(displayType)
     if #candidates == 0 then return out end
 
     local respectHidden = respectCDMHiddenEnabled()
+    local provider = cdmSettingsDataProvider()
 
     for ci = 1, #candidates do
         local cand = candidates[ci]
@@ -8594,9 +8279,18 @@ function buildAuraCatalog(displayType)
         local ok2 = pcall(function()
             info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
         end)
-        if ok2 and type(info) == "table"
-           and not (respectHidden and cdmHiddenByDefault(info)) then
+        local merged = Auras._ReadCDMLayoutInfo(provider, cdID)
+        local hidden = Auras._IsCDMLayoutHidden(merged)
+        if ok2 and type(info) == "table" and not info.isInvisible
+           and not (respectHidden and hidden) then
             local entry = buildCatalogEntry(cdID, info, source, normCategory)
+            if merged and not isSecret(merged.category) then
+                local category = merged.category
+                local enum = Enum and Enum.CooldownViewerCategory
+                entry.blizzardTracked = not hidden and
+                    (category == CATEGORY_TRACKED_BUFF or category == CATEGORY_TRACKED_BAR
+                        or (enum and enum.SpecAgnosticTracked ~= nil and category == enum.SpecAgnosticTracked)) or false
+            end
             local okA, active = pcall(cdmActiveForInfo, {
                 cooldownID             = entry.cooldownID,
                 spellID                = entry.spellID,
@@ -8638,6 +8332,170 @@ local _auraCatalog = {
     TrackedBars = {},
 }
 local _lastCatalogCounts = { TrackedIcon = 0, TrackedBars = 0 }
+
+function Auras._NativeIncludeSets(kind, enabled)
+    local units = { player = {}, target = {} }
+    if not enabled then return units end
+    for _, entry in ipairs(_auraCatalog[kind]) do
+        if entryDisplayEnabled(entry) and not Auras._summonSpellForEntry(entry) then
+            for _, id in ipairs(entry.matchSpellIDs) do
+                units.player[id] = true
+                if not entry.selfAura then units.target[id] = true end
+            end
+        end
+    end
+    return units
+end
+
+function Auras._NativeConfig(display, isBar)
+    local anchor = ns:GetAnchor(display.anchorName)
+    if not (anchor and anchor.frame) then return nil end
+    local parent = anchor.frame
+    local opts = display:Opts()
+    local visuals = (isBar and getTrackedBarsVisuals() or getTrackedIconVisuals()) or {}
+    local width, height, spacing
+    local point, vertical
+    local style = { pandemic = Auras:IsPandemicEnabled() }
+    if isBar then
+        width, height, spacing = resolveTrackedBarsGeometry(opts.barHeight, opts.spacing)
+        point, vertical = "BOTTOMLEFT", true
+        style.name, style.timer = getTrackedBarsTextStyles()
+        style.showName = opts.showName ~= false
+        style.showTimer = opts.showTimer ~= false
+        style.showIcon = opts.showIcon ~= false
+        style.showCount = opts.showStackText ~= false
+        style.count = { anchor = "LEFT", x = 2 }
+        style.texture = ns.Widgets.resolveMedia("statusbar", visuals.texture, ns.Widgets.DEFAULT_STATUSBAR)
+            or [[Interface\TargetingFrame\UI-StatusBar]]
+        style.fill = visuals.fillColor or { 1, 1, 1, 1 }
+        style.background = visuals.bgColor or { 0, 0, 0, 0.5 }
+        style.showBackground = visuals.showBackground ~= false
+    else
+        width, height, spacing = resolveTrackedIconSize(parent:GetHeight(), opts.spacing)
+        vertical = visuals.orientation == "V"
+        point = opts.align == "LEFT" and "LEFT" or opts.align == "RIGHT" and "RIGHT" or "CENTER"
+        if vertical then point = opts.align == "RIGHT" and "BOTTOM" or "TOP" end
+        style.showSwipe = opts.showDurationSwipe ~= false
+        style.showTimer = true
+        style.showCount = opts.showStackText ~= false
+        style.timer = getTrackedIconCooldownTextStyle()
+        style.count = getTrackedIconTextStyle()
+    end
+    if visuals.showBorder == true or (not isBar and visuals.showBorder ~= false) then
+        style.border = visuals.borderColor or { 0, 0, 0, 1 }
+    end
+    local glow = opts.activeGlow
+    if glow and glow.enabled then
+        style.border = glow.color or { glow.colorR or 1, glow.colorG or 0.85,
+            glow.colorB or 0.3, glow.colorA or 0.85 }
+    end
+    return {
+        parent = parent,
+        width = width,
+        height = height,
+        spacing = spacing,
+        point = point,
+        vertical = vertical,
+        isBar = isBar,
+        style = style,
+        styleText = applyBarTextStyle,
+    }
+end
+
+function Auras:_SyncNativeDisplays(preview)
+    local native = ns.TrackedAuras
+    self._fixedBarIndices = nil
+    if preview then
+        native:Hide()
+        self._nativeIcons, self._nativeBars = false, false
+        return false, false
+    end
+    local showIcons = self.IconDisplay and self.IconDisplay:Enabled()
+    local showBars = self.BarDisplay and self.BarDisplay:Enabled()
+    local iconIDs = self._NativeIncludeSets("TrackedIcon", showIcons)
+    local barIDs = self._NativeIncludeSets("TrackedBars", showBars)
+    local preferIcon = self:GetCrossViewerPrefer() == "icon"
+    for _, unit in ipairs({ "player", "target" }) do
+        local keep, suppress = barIDs[unit], iconIDs[unit]
+        if preferIcon then keep, suppress = suppress, keep end
+        for id in pairs(keep) do suppress[id] = nil end
+    end
+    local iconConfig = showIcons and self._NativeConfig(self.IconDisplay, false)
+    local barConfig = showBars and self._NativeConfig(self.BarDisplay, true)
+    self._nativeIcons = native:SyncDisplay("icons", iconConfig, iconIDs)
+    local fixedRows
+    if barConfig and self:GetBarShowInactive() then
+        fixedRows = {}
+        local rank = (_liveRenderCat.rankByCategory or {})[cdmCategoryFor("TrackedBars")] or {}
+        for _, entry in ipairs(_auraCatalog.TrackedBars) do
+            if entryDisplayEnabled(entry) then
+                local name = self._catalogDisplayName(entry) or entry.label
+                local icon = self._catalogDisplayTexture(entry)
+                local row = {
+                    key = entry.stableEntryID,
+                    name = not isSecret(name) and name or nil,
+                    icon = not isSecret(icon) and icon or nil,
+                    rank = rank[entry.cooldownID] or math.huge,
+                    player = {},
+                    target = {},
+                }
+                for _, id in ipairs(entry.matchSpellIDs) do
+                    if barIDs.player[id] then row.player[id] = true end
+                    if not entry.selfAura and barIDs.target[id] then row.target[id] = true end
+                end
+                if next(row.player) or next(row.target) or self._summonSpellForEntry(entry) then
+                    fixedRows[#fixedRows + 1] = row
+                end
+            end
+        end
+        table.sort(fixedRows, function(a, b)
+            if a.rank ~= b.rank then return a.rank < b.rank end
+            return a.key < b.key
+        end)
+        self._fixedBarIndices = {}
+        for index, row in ipairs(fixedRows) do self._fixedBarIndices[row.key] = index end
+    end
+    self._nativeBars = native:SyncDisplay("bars", barConfig, barIDs, fixedRows)
+    if not self._nativeBars then self._fixedBarIndices = nil end
+    return self._nativeIcons, self._nativeBars
+end
+
+function Auras:_BuildNativeSummonEntries(kind)
+    local out = {}
+    local totems = {}
+    if GetNumTotemSlots and GetTotemInfo and GetTotemDuration then
+        for slot = 1, GetNumTotemSlots() do
+            local haveTotem, _, _, _, _, _, id = GetTotemInfo(slot)
+            if not isSecret(haveTotem) and haveTotem and not isSecret(id) and type(id) == "number" then
+                totems[id] = slot
+            end
+        end
+    end
+    if not self._summonSpecGateOK and not next(totems) then return out end
+    for _, entry in ipairs(_auraCatalog[kind]) do
+        if entryDisplayEnabled(entry) then
+            local duration
+            for _, id in ipairs(entry.matchSpellIDs) do
+                if totems[id] then
+                    duration = GetTotemDuration(totems[id])
+                    break
+                end
+            end
+            if not duration and self._summonSpecGateOK and self._summonSpellForEntry(entry) then
+                local active, summonDuration = self._resolveSummonBarPresence(entry, true)
+                if active then duration = summonDuration end
+            end
+            if ns._auraPresentTruthy(duration) then
+                local item = self._makeSummonBarItem(entry, duration)
+                if kind == "TrackedBars" and self._fixedBarIndices then
+                    item._fixedBarIndex = self._fixedBarIndices[entry.stableEntryID]
+                end
+                out[#out + 1] = item
+            end
+        end
+    end
+    return out
+end
 
 local _aurasMigratedKeys = false
 local function migrateAuraSettingsKeys()
@@ -9670,7 +9528,6 @@ buildActiveFromCatalog = function(displayType, preview)
         return out
     end
 
-    local forcePop = Auras.IsForceViewerPopulated and Auras:IsForceViewerPopulated()
     local _previewPlaceholderIndex = 0
     local showInactiveBars = false
     if displayType == "TrackedBars" and not preview then
@@ -9723,21 +9580,6 @@ buildActiveFromCatalog = function(displayType, preview)
                 elseif not viewerStateEmitted then
                     local emitted = false
 
-                    if not preview and forcePop and Auras._useViewerChildEmit then
-                        local child = findLiveViewerChildByCooldownID(e.cooldownID, displayType)
-                        if child then
-                            local ok, item = pcall(makeSyntheticItemFromViewerChild, e, child)
-                            if ok and item then
-                                out[#out + 1] = item
-                                emitted = true
-                                logEmitTransition(displayType, e,
-                                    "viewerChild cdID=" .. tostring(e.cooldownID))
-                            else
-                                dlogItemErrorOnce(e, "makeSyntheticItemFromViewerChild", item)
-                            end
-                        end
-                    end
-
                     if not emitted and not preview and displayType == "TrackedBars" then
                         local okC, child = pcall(findLiveViewerChildByCooldownID, e.cooldownID, "TrackedBars")
                         if okC and type(child) == "table" then
@@ -9775,7 +9617,7 @@ buildActiveFromCatalog = function(displayType, preview)
                        and displayType == "TrackedBars"
                        and Auras._summonSpecGateOK
                        and Auras._summonSpellForEntry(e) then
-                        local okP, active, durObj, srcTag = pcall(Auras._resolveSummonBarPresence, e, forcePop)
+                        local okP, active, durObj, srcTag = pcall(Auras._resolveSummonBarPresence, e, true)
                         if okP and active then
                             local okI, item = pcall(Auras._makeSummonBarItem, e, durObj)
                             if okI and item then
@@ -9947,8 +9789,9 @@ function rebuildPlayerAuraCache()
 end
 
 function ensureAuraCacheFrame()
-    if _auraCacheFrame then return end
-    _auraCacheFrame = CreateFrame("Frame", "TenUIPlayerAuraCacheFrame")
+    if Auras._registeredAuraCache then return end
+    _auraCacheFrame = _auraCacheFrame or CreateFrame("Frame", "TenUIPlayerAuraCacheFrame")
+    Auras._registeredAuraCache = true
     Auras._auraCacheFrame = _auraCacheFrame
     _auraCacheFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         if event == "UNIT_SPELLCAST_SUCCEEDED" then
@@ -9957,6 +9800,7 @@ function ensureAuraCacheFrame()
             end
             return
         elseif event == "UNIT_AURA" then
+            if (Auras._nativeIcons and Auras._nativeBars) or ns.TrackedAuras:IsRestricted() then return end
             local unit, updateInfo = arg1, arg2
             if Auras._liveAura and Auras._liveAura.handleUnitAura then
                 pcall(Auras._liveAura.handleUnitAura, unit, updateInfo)
@@ -10185,6 +10029,8 @@ function Auras:GetTrackedAuraDiagnostics(selectedTab)
     else
         lines[#lines + 1] = "BarDisplay: nil"
     end
+    lines[#lines + 1] = "Blizzard AuraContainer icons: " .. (self._nativeIcons and "ready" or "fallback")
+    lines[#lines + 1] = "Blizzard AuraContainer bars: " .. (self._nativeBars and "ready" or "fallback")
     return lines
 end
 
@@ -10193,3 +10039,16 @@ ns:RegisterModule("Auras", {
     OnEnable = function(mod, profile) Auras:OnEnable(mod, profile) end,
     OnDisable = function(mod) Auras:OnDisable() end,
 })
+
+ns:RegisterMessage("PROFILE_CHANGED", function()
+    if not Auras._enabled then return end
+    local profile = ns:GetProfile().modules.Auras
+    migrateSchema(profile)
+    Auras.profileRef = profile
+    _aurasMigratedKeys = false
+    Auras:_ResyncScope()
+    Auras:RefreshTrackedAuraCatalog()
+    if Auras.IconDisplay then Auras.IconDisplay:ApplyVisualOptions() end
+    if Auras.BarDisplay then Auras.BarDisplay:ApplyVisualOptions() end
+    Auras:RequestRefresh()
+end)

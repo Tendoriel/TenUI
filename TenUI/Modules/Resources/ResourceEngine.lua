@@ -213,6 +213,10 @@ local function readAuraStacks(key, spellId)
         return (c or 0), false
     end
     if aura == nil then
+        if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret and C_Secrets.ShouldSpellAuraBeSecret(spellId) then
+            local cached = pseudoCacheGet(key)
+            return cached or 0, false
+        end
         pseudoCacheSet(key, 0, nil)
         return 0, true
     end

@@ -1926,6 +1926,8 @@ local function secondary_ShardsIsDestruction()
     return okId and specId == SPEC_WARLOCK_DESTRUCTION
 end
 
+local shardFillCurves = {}
+
 local function secondary_RefreshShards()
     local desc = Secondary.desc
     if not desc then return end
@@ -1938,19 +1940,23 @@ local function secondary_RefreshShards()
 
     local modCur = UnitPower("player", pt)
     if isSecret(modCur) then
-        local pct = 0
-        local scaleTo100 = getScaleTo100()
-        if UnitPowerPercent and scaleTo100 then
-            local ok, p = pcall(UnitPowerPercent, "player", pt, false, scaleTo100)
-            if ok and not isSecret(p) and type(p) == "number" then
-                pct = p
+        if not (UnitPowerPercent and C_CurveUtil and C_CurveUtil.CreateCurve) then return end
+        local count = #Secondary.pips
+        local curves = shardFillCurves[count]
+        if not curves then
+            curves = {}
+            for i = 1, count do
+                local curve = C_CurveUtil.CreateCurve()
+                curve:SetType(Enum.LuaCurveType.Linear)
+                curve:AddPoint((i - 1) / count, 0)
+                curve:AddPoint(i / count, 1)
+                curves[i] = curve
             end
+            shardFillCurves[count] = curves
         end
-        local frac = pct / 100
-        if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
-        for i = 1, #Secondary.pips do
-            local p = Secondary.pips[i]
-            if p then p:SetValue(frac) end
+        for i, pip in ipairs(Secondary.pips) do
+            local ok, fill = pcall(UnitPowerPercent, "player", pt, true, curves[i])
+            if ok then pip:SetValue(fill) end
         end
         return
     end

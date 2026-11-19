@@ -1,6 +1,6 @@
 local addonName, ns = ...
 
-ns.SCHEMA_VERSION = 7
+ns.SCHEMA_VERSION = 8
 
 ns.dbDefaults = {
     schema = ns.SCHEMA_VERSION,
@@ -135,14 +135,14 @@ end
 
 local function migrateSpecProfilesFromLegacy(db)
     if type(db.specProfiles) ~= "table" then db.specProfiles = {} end
-    local classToken
-    if UnitClass then
-        local ok, _, token = pcall(UnitClass, "player")
-        if ok then classToken = token end
+    if not (GetNumClasses and C_CreatureInfo and C_CreatureInfo.GetClassInfo and GetSpecializationInfoForClassID) then return end
+    local classIDs = {}
+    for classID = 1, GetNumClasses() do
+        local info = C_CreatureInfo.GetClassInfo(classID)
+        if info and info.classFile then classIDs[info.classFile] = classID end
     end
-    if type(classToken) ~= "string" or classToken == "" then return end
-    if not (GetSpecializationInfo and GetSpecialization) then return end
-    for _, profile in pairs(db.profiles) do
+    for _, name in ipairs(db.profileOrder) do
+        local profile = db.profiles[name]
         if type(profile) == "table"
            and type(profile.modules) == "table"
            and type(profile.modules.Profiles) == "table"
@@ -152,10 +152,10 @@ local function migrateSpecProfilesFromLegacy(db)
                 if type(key) == "string" and type(profileName) == "string"
                    and db.profiles[profileName] then
                     local token, idxStr = key:match("^(.+)_(%d+)$")
-                    if token == classToken then
+                    if classIDs[token] then
                         local idx = tonumber(idxStr)
                         if idx and idx > 0 then
-                            local ok, specID = pcall(GetSpecializationInfo, idx)
+                            local ok, specID = pcall(GetSpecializationInfoForClassID, classIDs[token], idx)
                             if ok and type(specID) == "number" and specID > 0
                                and db.specProfiles[specID] == nil then
                                 db.specProfiles[specID] = profileName
@@ -172,13 +172,6 @@ local function migrate(db)
     if (db.schema or 0) < 5 then
         migrateConsumablesRow(db)
     end
-    if (db.schema or 0) < 6 then
-        if not db._specProfilesMigrated then
-            db.specProfiles = db.specProfiles or {}
-            migrateSpecProfilesFromLegacy(db)
-            db._specProfilesMigrated = true
-        end
-    end
     if (db.schema or 0) < 7 then
         if type(db.profiles) == "table" then
             for _, profile in pairs(db.profiles) do
@@ -190,6 +183,10 @@ local function migrate(db)
         end
     end
     migrateProfileOrder(db)
+    if (db.schema or 0) < 8 then
+        migrateSpecProfilesFromLegacy(db)
+        db.defaultProfile = db.profiles[db.activeProfile] and db.activeProfile or "Default"
+    end
     db.schema = ns.SCHEMA_VERSION
 end
 
@@ -316,8 +313,8 @@ function ns:InitializeSavedVars()
     if _G.TenUIDB == nil then
         _G.TenUIDB = deepCopy(self.dbDefaults)
     else
-        self._deepCopyMissing(_G.TenUIDB, self.dbDefaults)
         migrate(_G.TenUIDB)
+        self._deepCopyMissing(_G.TenUIDB, self.dbDefaults)
     end
 
     if _G.TenUICharDB == nil then
@@ -330,7 +327,13 @@ function ns:InitializeSavedVars()
     self.charDb = _G.TenUICharDB
     self.savedVarsReady = true
 
-    local profile = self:GetProfile()
+    self.db.activeProfile = self:ResolveActiveProfile()
+    self:PrepareProfile(self:GetProfile())
+end
+
+function ns:PrepareProfile(profile)
+    self:SeedSharedProfileSettings(profile)
+    self._deepCopyMissing(profile, self.dbDefaults.profiles.Default)
     profile.modules   = profile.modules   or {}
     profile.abilities = profile.abilities or {}
     profile.auras     = profile.auras     or {}

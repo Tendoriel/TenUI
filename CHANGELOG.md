@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0] - 2026-11-15
+
+### Changed
+
+- Targeted WoW Retail 12.1.5 (Interface 120105).
+- Tracked Icons and Tracked Bars use Blizzard's aura containers for player buffs and the player's debuffs on the current target. The client drives aura icons, stack counts, timers, and the Pandemic indicator. Target auras use a separate row or column.
+- Removed automatic changes to Blizzard Cooldown Manager visibility and Edit Mode layouts.
+- New specializations inherit the profile layout and initialize their ability rows from compatible entries or the current CDM configuration. New characters inherit the shared profile. Existing layouts and configured rows remain available in their original specialization.
+
+### Fixed
+
+- Tracked Icons and Tracked Bars render at their configured size in and out of combat. Inactive bars keep their native timers when the aura becomes active.
+- The hidden cooldown filter follows the active Blizzard Cooldown Manager layout and refreshes when that layout changes.
+- Elements with visibility set to Never stay hidden in TenUI Edit Mode.
+- Profile changes reapply the layout, aura settings, cast bar, resources, consumables, trinkets, and reminder settings. Profile imports keep the legacy v1 format and carry a layout for characters without an existing specialization override.
+- Essential and Utility timers use duration objects with the configured GCD behavior. The scanner includes specialization-independent cooldowns and eligible equipment slots.
+- Class Reminders recognizes active Shadowform and Voidform through the shapeshift state, including when the aura lookup has restricted visibility.
+- Cast Bar uses the player's cast bar ID when available and clears short casts after the grace period. Skyriding follows the selected Whirling Surge override and refreshes charges when the HUD appears.
+
 ## [0.3.1] - 2026-06-28
 
 ### Fixed

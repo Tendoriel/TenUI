@@ -73,9 +73,9 @@ function Visibility:OptionsHide(opt)
         end
     end
     if opt.hideMounted then
-        if IsMounted and IsMounted() then
-            return true
-        end
+        if IsMounted and IsMounted() then return true end
+        local skyriding = ns.DragonRiding
+        if skyriding and skyriding:IsOnSkyridingMount() then return true end
     end
     return false
 end
@@ -123,28 +123,35 @@ function Visibility:HasEntry(name)
     return entries[name] ~= nil
 end
 
+function Visibility:IsNever(name)
+    local entry = entries[name]
+    local cfg = entry and entry.getCfg()
+    return type(cfg) == "table" and self:NormalizeState(cfg.state) == "never"
+end
+
 local function isEditModeActive()
     return ns.EditMode and ns.EditMode.IsActive and ns.EditMode:IsActive() == true
 end
 
 local function updateEntry(entry)
     local cfg = entry.getCfg()
-    local show = Visibility:ShouldShow(cfg)
+    local show
+    local editing = isEditModeActive()
+    if editing then
+        show = type(cfg) ~= "table" or Visibility:NormalizeState(cfg.state) ~= "never"
+    else
+        show = Visibility:ShouldShow(cfg)
+    end
     if ns.Anchors and ns.Anchors.SetAnchorVisible then
         ns.Anchors:SetAnchorVisible(entry.name, show)
+    end
+    if editing and ns.EditMode.RefreshAnchorVisibility then
+        ns.EditMode:RefreshAnchorVisibility(entry.name)
     end
 end
 
 function Visibility:RequestUpdate()
     if not ns.savedVarsReady then return end
-    if isEditModeActive() then
-        if ns.Anchors and ns.Anchors.SetAnchorVisible then
-            for name in pairs(entries) do
-                ns.Anchors:SetAnchorVisible(name, true)
-            end
-        end
-        return
-    end
     for _, entry in pairs(entries) do
         local ok, err = pcall(updateEntry, entry)
         if not ok and ns.Debug and ns.Debug.Log then
@@ -157,12 +164,6 @@ function Visibility:UpdateOne(name)
     if not ns.savedVarsReady then return end
     local entry = entries[name]
     if not entry then return end
-    if isEditModeActive() then
-        if ns.Anchors and ns.Anchors.SetAnchorVisible then
-            ns.Anchors:SetAnchorVisible(name, true)
-        end
-        return
-    end
     local ok, err = pcall(updateEntry, entry)
     if not ok and ns.Debug and ns.Debug.Log then
         ns.Debug:Log("Visibility update error for %s: %s", tostring(name), tostring(err))
@@ -186,6 +187,7 @@ visFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 visFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 visFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 visFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+visFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
 visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 visFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")

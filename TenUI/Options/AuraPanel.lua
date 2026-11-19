@@ -237,26 +237,16 @@ local function rebuildAuraList()
         cdmBtn:HookScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine("Open Blizzard Cooldown Manager")
-            GameTooltip:AddLine(
-                "This aura is enabled here but not tracked in Blizzard's",
-                0.8, 0.8, 0.8, true)
-            GameTooltip:AddLine(
-                "Cooldown Manager, so it only shows out of combat.",
-                0.8, 0.8, 0.8, true)
-            GameTooltip:AddLine(
-                "Move it into a Tracked list there to show it in combat.",
-                0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Configure this aura in Blizzard's tracked lists.", 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
         cdmBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
         local function refreshStateLabel()
             local displayOn = getEnabled()
-            local liveOn = (aura.active == true)
-            local liveTxt = liveOn and "active" or "idle"
-            local oocOnly = displayOn and (aura.cdmTracked == false)
-            if oocOnly then
-                cdmMarker:SetText("|cffe6a23cOOC only|r")
+            local notPinned = displayOn and (aura.cdmTracked == false)
+            if notPinned then
+                cdmMarker:SetText("|cffe6a23cNot pinned|r")
                 cdmMarker:Show()
                 cdmBtn:Show()
                 stateLabel:Hide()
@@ -265,8 +255,7 @@ local function rebuildAuraList()
                 cdmBtn:Hide()
                 stateLabel:Show()
                 if displayOn then
-                    stateLabel:SetText("|cff5fcf5fshown|r |cff6a6a78·|r |cff8a8a98"
-                        .. liveTxt .. "|r")
+                    stateLabel:SetText("|cff5fcf5fenabled|r")
                 else
                     stateLabel:SetText("|cffb05555hidden|r")
                 end
@@ -354,7 +343,7 @@ local function buildAuraPage(sc)
     children[#children + 1] = C.CreateSection(sc, "Blizzard CDM Tracked Auras")
 
     local depNote = C.CreateHelpText and C.CreateHelpText(sc,
-        "Rows marked |cffe6a23cOOC only|r only show out of combat because Blizzard's Cooldown Manager does not track them. Click |cffe6a23cCDM|r on the row to fix that there.")
+        "TenUI uses Blizzard aura containers to display enabled buffs and your target debuffs.")
     if depNote then children[#children + 1] = depNote end
 
     local tabRow = CreateFrame("Frame", nil, sc)
@@ -420,21 +409,6 @@ local function buildAuraPage(sc)
         function(v)
             if ns.Auras and ns.Auras.SetCrossViewerPrefer then
                 ns.Auras:SetCrossViewerPrefer(v)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc,
-        "Force Blizzard Cooldown Manager populated (in-combat target debuffs)",
-        function()
-            if ns.Auras and ns.Auras.GetForceViewerPopulated then
-                return ns.Auras:GetForceViewerPopulated()
-            end
-            return false
-        end,
-        function(v)
-            if ns.Auras and ns.Auras.SetForceViewerPopulated then
-                ns.Auras:SetForceViewerPopulated(v)
             end
         end
     )

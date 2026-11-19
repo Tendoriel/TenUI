@@ -241,26 +241,15 @@ end
 
 function Anchors:GetEditableEntry(name)
     if not ns.savedVarsReady then return {} end
-    local overlay = getOverlayAnchors(true)
-    if not overlay then return {} end
-    if overlay[name] == nil then
-        local base = getProfileAnchors()[name]
-        local seed = {}
-        if type(base) == "table" then
-            seed.point  = base.point
-            seed.x      = base.x
-            seed.y      = base.y
-            seed.width  = base.width
-            seed.height = base.height
-        end
-        overlay[name] = seed
-    end
-    return overlay[name]
+    local overlay = getOverlayAnchors(false)
+    local entries = overlay and overlay[name] ~= nil and overlay or getProfileAnchors()
+    entries[name] = entries[name] or {}
+    return entries[name]
 end
 
 local function writeOverlayEntry(name, entry)
-    local overlay = getOverlayAnchors(true)
-    if overlay then
+    local overlay = getOverlayAnchors(false)
+    if overlay and overlay[name] ~= nil then
         overlay[name] = entry
     else
         getProfileAnchors()[name] = entry

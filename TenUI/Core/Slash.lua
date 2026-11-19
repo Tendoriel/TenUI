@@ -87,7 +87,6 @@ local function showHelp()
     out("  |cffffd200/tenui auras barpreview on|off|r [count]    -- spawn deterministic DRAINING demo bars (test Bar Width w/o a live aura)")
     out("  |cffffd200/tenui auras glow dump|r [N]                -- diagnostic: per-slot glow state (default N=12)")
     out("  |cffffd200/tenui auras prefer icon|bar|r            -- cross-viewer dedup precedence (default: bar)")
-    out("  |cffffd200/tenui aura forceviewer on|off|toggle|r   -- keep Blizzard CDM viewer populated+invisible for in-combat target debuffs (default: off)")
     out("  |cffffd200/tenui aura dump|r                         -- CDM identity/runtime/display/matching dump (to debug window)")
     out("  |cffffd200/tenui aura pipeline|r                     -- prove WHERE the aura display chain breaks (to debug window)")
     out("  |cffffd200/tenui aura rawset|r                       -- dump RAW Blizzard CDM category sets (unfiltered) -- no-cooldownID vs HideByDefault (to debug window)")
@@ -520,11 +519,8 @@ local function handleAuras(rest)
         local pThr = Auras.GetPandemicThreshold and Auras:GetPandemicThreshold() or 0.30
         out(("  pandemic glow: |cffffd200%s|r  threshold=|cffffd200%d%%|r"):format(
             pOn and "on" or "off", math.floor(pThr * 100 + 0.5)))
-        local fvp = Auras.GetForceViewerPopulated and Auras:GetForceViewerPopulated()
-        out(("  forceViewerPopulated: |cffffd200%s|r  (in-combat target-debuff first-detect; default off)")
-            :format(fvp and "on" or "off"))
         local rch = Auras.GetRespectCDMHidden and Auras:GetRespectCDMHidden()
-        out(("  respectCDMHidden: |cffffd200%s|r  (hide CDM HideByDefault/disabled cooldowns; default off)")
+        out(("  respectCDMHidden: |cffffd200%s|r  (follow hidden entries in the active CDM layout; default off)")
             :format(rch and "on" or "off"))
         if Auras.GetLowTimeTextConfig then
             local ltEn, ltThr = Auras:GetLowTimeTextConfig()
@@ -599,28 +595,6 @@ local function handleAuras(rest)
         ns:DisableModule("Auras")
         ns:EnableModule("Auras")
         out("auras module reset to defaults")
-        return
-    end
-
-    if sub == "unsuppress" then
-        if not Auras then out("auras module not registered") return end
-        if Auras.UnsuppressNativeViewers then
-            Auras:UnsuppressNativeViewers()
-            out("native CDM aura viewers restored (alpha=1)")
-        else
-            out("auras suppression helpers not loaded")
-        end
-        return
-    end
-
-    if sub == "suppress" then
-        if not Auras then out("auras module not registered") return end
-        if Auras.SuppressNativeViewers then
-            Auras:SuppressNativeViewers()
-            out("native CDM aura viewers hidden (alpha=0)")
-        else
-            out("auras suppression helpers not loaded")
-        end
         return
     end
 
@@ -871,42 +845,9 @@ local function handleAuras(rest)
         return
     end
 
-    if sub == "forceviewer" then
-        if not Auras then out("auras module not registered") return end
-        if not Auras.SetForceViewerPopulated then
-            out("forceviewer helpers not loaded (Auras.lua out of date)")
-            return
-        end
-        local arg = (subRest or ""):gsub("^%s+", ""):gsub("%s+$", ""):lower()
-        if arg == "" then
-            local cur = Auras.GetForceViewerPopulated and Auras:GetForceViewerPopulated()
-            out(("auras forceViewerPopulated: |cffffd200%s|r"):format(cur and "on" or "off"))
-            out("  on  -- keep Blizzard CDM viewer populated (invisible) so in-combat")
-            out("         TARGET debuffs first-detect via the viewer engine")
-            out("  off -- default; engine spellID-family ticker query is the source of truth")
-            out("  |cffffd200/tenui aura forceviewer on|off|toggle|r")
-            return
-        end
-        local want
-        if arg == "toggle" then
-            local cur = Auras.GetForceViewerPopulated and Auras:GetForceViewerPopulated()
-            want = not cur
-        else
-            want = parseOnOff(arg)
-        end
-        if want == nil then
-            out("usage: |cffffd200/tenui aura forceviewer on|off|toggle|r")
-            return
-        end
-        local ok, changed = Auras:SetForceViewerPopulated(want)
-        if ok then
-            out(("auras forceViewerPopulated -> |cffffd200%s|r%s"):format(
-                want and "on" or "off",
-                changed == false and " (no change)" or ""))
-            out("  applied live -- no /reload required. The engine query remains the")
-            out("  default source; ON only ADDS viewer-detected target debuffs.")
-        else
-            out("could not set forceviewer: " .. tostring(changed))
+    if sub == "native" then
+        if ns.TrackedAuras then
+            for _, line in ipairs(ns.TrackedAuras:GetSourceStatus()) do out(line) end
         end
         return
     end
@@ -921,8 +862,7 @@ local function handleAuras(rest)
         if arg == "" then
             local cur = Auras.GetRespectCDMHidden and Auras:GetRespectCDMHidden()
             out(("auras respectCDMHidden: |cffffd200%s|r"):format(cur and "on" or "off"))
-            out("  on  -- hide cooldowns Blizzard CDM flags HideByDefault/disabled")
-            out("         (match the live Cooldown Manager's rendered subset)")
+            out("  on  -- exclude cooldowns hidden in the active Blizzard CDM layout")
             out("  off -- default; show the full CDM set including hidden entries")
             out("  |cffffd200/tenui aura respectcdmhidden on|off|toggle|r")
             return
@@ -1309,7 +1249,7 @@ local function handleAuras(rest)
         return
     end
 
-    out("usage: |cffffd200/tenui auras|r [|cffffd200icons on|off|r | |cffffd200bars on|off|r | |cffffd200rescan|r | |cffffd200reset|r | |cffffd200unsuppress|r | |cffffd200suppress|r | |cffffd200map|r | |cffffd200active|r | |cffffd200viewerstate|r | |cffffd200dump|r | |cffffd200pipeline|r | |cffffd200rawset|r | |cffffd200verifydk|r | |cffffd200pandemic ...|r | |cffffd200prefer bar|icon|r | |cffffd200probe on|off|r | |cffffd200lookup <spellID>|r | |cffffd200dedup dump|r | |cffffd200activeglow on|off|r | |cffffd200lowtime on|off|threshold <N>|color <r> <g> <b>|r | |cffffd200barpreview on|off|r [count] | |cffffd200glow dump|r [N]]")
+    out("usage: |cffffd200/tenui auras|r [|cffffd200icons on|off|r | |cffffd200bars on|off|r | |cffffd200rescan|r | |cffffd200reset|r | |cffffd200map|r | |cffffd200active|r | |cffffd200viewerstate|r | |cffffd200dump|r | |cffffd200pipeline|r | |cffffd200rawset|r | |cffffd200verifydk|r | |cffffd200pandemic ...|r | |cffffd200prefer bar|icon|r | |cffffd200probe on|off|r | |cffffd200lookup <spellID>|r | |cffffd200dedup dump|r | |cffffd200activeglow on|off|r | |cffffd200lowtime on|off|threshold <N>|color <r> <g> <b>|r | |cffffd200barpreview on|off|r [count] | |cffffd200glow dump|r [N]]")
 end
 
 local function trim(s) return (s or ""):gsub("^%s+", ""):gsub("%s+$", "") end

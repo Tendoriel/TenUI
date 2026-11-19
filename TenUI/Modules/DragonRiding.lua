@@ -164,6 +164,16 @@ end
 function DragonRiding:IsPlayerMountedLike()
     if IsMounted and IsMounted() then return true end
     if self._playerClass ~= "DRUID" then return false end
+    if GetNumShapeshiftForms and GetShapeshiftFormInfo then
+        for index = 1, GetNumShapeshiftForms() do
+            local _, active, _, spellID = GetShapeshiftFormInfo(index)
+            if not isSecret(active) and not isSecret(spellID) and active then
+                for _, formID in ipairs(DRUID_MOUNT_FORM_SPELLS) do
+                    if spellID == formID then return true end
+                end
+            end
+        end
+    end
     if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
         for i = 1, #DRUID_MOUNT_FORM_SPELLS do
             local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, DRUID_MOUNT_FORM_SPELLS[i])
@@ -532,9 +542,22 @@ function DragonRiding:UpdateWhirling()
     local p = self.profileRef
     if not p then return end
     local wsIcon = self.wsIcon
+    local spellID = SPELL_WHIRLING_SURGE
+    if C_Spell and C_Spell.GetOverrideSpell then
+        local ok, override = pcall(C_Spell.GetOverrideSpell, spellID)
+        if ok and not isSecret(override) and type(override) == "number" and override > 0 then
+            spellID = override
+        end
+    end
+    if wsIcon.spellID ~= spellID then
+        wsIcon.spellID = spellID
+        self._lastCdStart, self._lastCdDur = nil, nil
+        local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID)
+        wsIcon.tex:SetTexture(tex or DEFAULT_WS_ICON)
+    end
 
     if C_Spell and C_Spell.GetSpellCooldownDuration then
-        local ok, durObj = pcall(C_Spell.GetSpellCooldownDuration, SPELL_WHIRLING_SURGE, false)
+        local ok, durObj = pcall(C_Spell.GetSpellCooldownDuration, spellID, true)
         if ok and durObj then
             local applied = pcall(wsIcon.cd.SetCooldownFromDurationObject, wsIcon.cd, durObj)
             if applied then
@@ -556,7 +579,7 @@ function DragonRiding:UpdateWhirling()
     end
 
     if C_Spell and C_Spell.GetSpellCooldown then
-        local ok, info = pcall(C_Spell.GetSpellCooldown, SPELL_WHIRLING_SURGE)
+        local ok, info = pcall(C_Spell.GetSpellCooldown, spellID)
         if ok and type(info) == "table" then
             local start = info.startTime
             local dur   = info.duration
@@ -595,7 +618,7 @@ end
 
 function DragonRiding:UpdateWhirlingText()
     if not (C_Spell and C_Spell.GetSpellCooldown) then return end
-    local ok, info = pcall(C_Spell.GetSpellCooldown, SPELL_WHIRLING_SURGE)
+    local ok, info = pcall(C_Spell.GetSpellCooldown, self.wsIcon.spellID or SPELL_WHIRLING_SURGE)
     if not ok or type(info) ~= "table" then return end
     local start = info.startTime
     local dur   = info.duration
@@ -669,6 +692,11 @@ function DragonRiding:UpdateVisibility()
     local hideCombat = p.hideInCombat and UnitAffectingCombat("player")
     local visible = onSky and not hideCombat
 
+    if visible and not self.content:IsShown() then
+        self._skyridingDirty = true
+        self._secondWindDirty = true
+        self._whirlingDirty = true
+    end
     self.content:SetShown(visible)
     if visible then
         self.content:SetScript("OnUpdate", dragonRiding_OnUpdate)
@@ -695,6 +723,8 @@ local function dragonRiding_OnEvent(_, event)
     elseif event == "SPELL_UPDATE_COOLDOWN" then
         DragonRiding._whirlingDirty = true
         return
+    elseif event == "TRAIT_CONFIG_UPDATED" then
+        DragonRiding._whirlingDirty = true
     elseif event == "PLAYER_ENTERING_WORLD" then
         DragonRiding._skyridingDirty = true
         DragonRiding._secondWindDirty = true
@@ -712,6 +742,7 @@ function DragonRiding:EnsureEventFrame()
     ef:RegisterEvent("PLAYER_REGEN_ENABLED")
     ef:RegisterEvent("PLAYER_REGEN_DISABLED")
     ef:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    ef:RegisterEvent("TRAIT_CONFIG_UPDATED")
     ef:SetScript("OnEvent", dragonRiding_OnEvent)
     self.evtFrame = ef
 end

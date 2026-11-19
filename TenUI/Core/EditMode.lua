@@ -538,6 +538,46 @@ local function syncAurasBarPreviewAuto()
     end
 end
 
+local function applyAnchorState(name, anchor)
+    if editModeActive and not (ns.Visibility and ns.Visibility:IsNever(name)) then
+        anchor:SetMovable(true)
+        anchor:EnableMouse(false)
+        local o = ensureOverlay(anchor)
+        if not o._dragging then
+            o:SetAllPoints(anchor)
+        end
+        if o.label and anchor.def then
+            o.label:SetText(anchor.def.label or anchor.anchorName)
+        end
+        o:EnableMouse(true)
+        o:Show()
+        if o._selected then
+            showNudges(o)
+        else
+            o._hover = false
+            hideNudges(o)
+        end
+    else
+        anchor:EnableMouse(false)
+        anchor:SetMovable(false)
+        local o = overlays[name]
+        if o then
+            if o._selected and editModeActive then clearSelection() end
+            o:EnableMouse(false)
+            o._hover = false
+            o._selected = false
+            applyDeselectedVisual(o)
+            hideNudges(o)
+            o:Hide()
+        end
+    end
+end
+
+function EditMode:RefreshAnchorVisibility(name)
+    local anchor = ns:GetAnchor(name)
+    if anchor and anchor.frame then applyAnchorState(name, anchor.frame) end
+end
+
 local function applyState()
     syncAurasBarPreviewAuto()
     requestAurasPreviewRefresh()
@@ -555,37 +595,7 @@ local function applyState()
         ns.CastBar.icon:Hide()
     end
     for name, anchor in ns.Anchors:Iterate() do
-        if editModeActive then
-            anchor:SetMovable(true)
-            anchor:EnableMouse(false)
-            local o = ensureOverlay(anchor)
-            if not o._dragging then
-                o:SetAllPoints(anchor)
-            end
-            if o.label and anchor.def then
-                o.label:SetText(anchor.def.label or anchor.anchorName)
-            end
-            o:EnableMouse(true)
-            o:Show()
-            if o._selected then
-                showNudges(o)
-            else
-                o._hover = false
-                hideNudges(o)
-            end
-        else
-            anchor:EnableMouse(false)
-            anchor:SetMovable(false)
-            local o = overlays[name]
-            if o then
-                o:EnableMouse(false)
-                o._hover = false
-                o._selected = false
-                applyDeselectedVisual(o)
-                hideNudges(o)
-                o:Hide()
-            end
-        end
+        applyAnchorState(name, anchor)
     end
     ns:Fire("EDIT_MODE_CHANGED", editModeActive)
 end

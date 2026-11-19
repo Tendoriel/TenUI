@@ -236,26 +236,23 @@ local function isSecret(v)
     return type(issecretvalue) == "function" and issecretvalue(v)
 end
 
-local GCD_SPELL_ID = 61304
+local function durationShowsCooldown(duration)
+    if isSecret(duration) then return nil end
+    if duration == nil then return false end
+    if not duration.IsZero then return nil end
+    local ok, zero = pcall(duration.IsZero, duration)
+    if ok and not isSecret(zero) then return not zero end
+    return nil
+end
 
-local scratchCooldownParent = CreateFrame("Frame")
-scratchCooldownParent:Hide()
-local scratchCooldown = CreateFrame("Cooldown", nil, scratchCooldownParent, "CooldownFrameTemplate")
-
-local function durationShowsCooldown(durObj)
-    if not durObj then return false end
-    local ok = pcall(scratchCooldown.SetCooldownFromDurationObject, scratchCooldown, durObj)
-    if not ok then return false end
-    local shown = scratchCooldown:IsShown()
-    scratchCooldown:Clear()
-    return shown and true or false
+local function getCooldownDuration(spellID, ignoreGCD)
+    if not (spellID and C_Spell and C_Spell.GetSpellCooldownDuration) then return nil end
+    local ok, duration = pcall(C_Spell.GetSpellCooldownDuration, spellID, ignoreGCD)
+    if ok then return duration end
 end
 
 local function realCooldownShown(spellID)
-    if not (spellID and C_Spell and C_Spell.GetSpellCooldownDuration) then return false end
-    local ok, dur = pcall(C_Spell.GetSpellCooldownDuration, spellID, true)
-    if not ok then return false end
-    return durationShowsCooldown(dur)
+    return durationShowsCooldown(getCooldownDuration(spellID, true))
 end
 
 local MIRROR_VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer" }
@@ -263,15 +260,6 @@ local MIRROR_VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer"
 local _mirrorMap = {}
 local _mirrorMapDirty = true
 local _mirrorHooked = {}
-
-local function mirrorForcePopEnabled()
-    local a = ns.Auras
-    if a and type(a.IsForceViewerPopulated) == "function" then
-        local ok, v = pcall(a.IsForceViewerPopulated, a)
-        if ok then return v == true end
-    end
-    return false
-end
 
 local function getMirrorViewer(name)
     local v = _G[name]
@@ -304,40 +292,6 @@ local function hookMirrorViewer(name, viewer)
     pcall(hooksecurefunc, viewer, "RefreshLayout", function()
         _mirrorMapDirty = true
     end)
-end
-
-local function suppressMirrorViewers()
-    if not mirrorForcePopEnabled() then return end
-    for i = 1, #MIRROR_VIEWER_NAMES do
-        local name = MIRROR_VIEWER_NAMES[i]
-        local viewer = getMirrorViewer(name)
-        if viewer then
-            hookMirrorViewer(name, viewer)
-            if not (InCombatLockdown and InCombatLockdown()) then
-                local alpha
-                if type(viewer.GetAlpha) == "function" then
-                    local okA, a = pcall(viewer.GetAlpha, viewer)
-                    if okA and not isSecret(a) then alpha = a end
-                end
-                if alpha ~= 0 then
-                    pcall(viewer.SetAlpha, viewer, 0)
-                end
-            end
-        end
-    end
-end
-
-local function unsuppressMirrorViewers()
-    if InCombatLockdown and InCombatLockdown() then return end
-    for i = 1, #MIRROR_VIEWER_NAMES do
-        local viewer = getMirrorViewer(MIRROR_VIEWER_NAMES[i])
-        if viewer then
-            pcall(viewer.SetAlpha, viewer, 1)
-            if type(viewer.UpdateShownState) == "function" then
-                pcall(viewer.UpdateShownState, viewer)
-            end
-        end
-    end
 end
 
 local function addMirrorKey(child, sid)
@@ -391,7 +345,7 @@ local function mirrorChildLive(child)
     end
     if type(viewer) ~= "table" or type(viewer.IsShown) ~= "function" then return false end
     local ok, shown = pcall(viewer.IsShown, viewer)
-    return (ok and shown == true) and true or false
+    return ok and not isSecret(shown) and shown == true or false
 end
 
 local function viewerMirrorOnRealCD(sid, activeSID, baseSID)
@@ -401,7 +355,7 @@ local function viewerMirrorOnRealCD(sid, activeSID, baseSID)
     if type(child) ~= "table" then return nil end
     if not mirrorChildLive(child) then return nil end
     local v = child.isOnActualCooldown
-    if v ~= nil and not isSecret(v) and type(v) == "boolean" then
+    if not isSecret(v) and type(v) == "boolean" then
         return v, "field"
     end
     local tex = child.Icon
@@ -534,7 +488,7 @@ local function getRowsForScope(scopeKey)
     if not p then return nil end
     local s = p.scopes[scopeKey]
     if not s then
-        s = { rows = {} }
+        s = { rows = {}, seedFromCDM = true }
         p.scopes[scopeKey] = s
     end
     s.rows = s.rows or {}
@@ -663,40 +617,56 @@ end
 
 local CDM = {}
 
-local CATEGORY_TO_ROW = {
-    [0] = "EssentialCooldowns",
-    [1] = "UtilityCooldowns",
+local CDM_CATEGORIES = {
+    EssentialCooldowns = { 0, 5, 7 },
+    UtilityCooldowns = { 1 },
 }
 
 local function cdmAvailable()
-    if not C_CooldownViewer then return false end
-    if type(C_CooldownViewer.GetCooldownViewerCategorySet) ~= "function" then return false end
-    if type(C_CooldownViewer.GetCooldownViewerCooldownInfo) ~= "function" then return false end
-    return true
+    return C_CooldownViewer
+        and type(C_CooldownViewer.GetCooldownViewerCategorySet) == "function"
+        and type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function"
 end
 
-local function scanCategory(cat)
+local function scanCategory(cat, configuredOnly)
     local out = {}
     if not cdmAvailable() then return out end
-    local ok, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, true)
-    if not ok or type(ids) ~= "table" then
-        dlog("CDM: GetCooldownViewerCategorySet(%s) failed or returned non-table", tostring(cat))
-        return out
-    end
-    for i = 1, #ids do
-        local cdID = ids[i]
-        local info
-        local ok2 = pcall(function()
-            info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+    local ids
+    local settings = _G.CooldownViewerSettings
+    if configuredOnly and settings and settings.GetDataProvider then
+        local ok, configured = pcall(function()
+            return settings:GetDataProvider():GetOrderedCooldownIDsForCategory(cat, false)
         end)
-        if ok2 and type(info) == "table" then
+        if ok then ids = configured end
+    end
+    if type(ids) ~= "table" then
+        local ok, categoryIDs = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, not configuredOnly)
+        if ok then ids = categoryIDs end
+    end
+    if type(ids) ~= "table" then return out end
+    for _, cdID in ipairs(ids) do
+        local ok, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+        if ok and type(info) == "table" and not info.isInvisible and (not configuredOnly or info.isKnown ~= false) then
             local sid = tonumber(info.overrideSpellID) or tonumber(info.spellID)
-            if sid and sid > 0 then
-                tinsert(out, { type = "spell", id = sid })
+            if info.equipSlot and GetInventoryItemID then
+                local id = GetInventoryItemID("player", info.equipSlot)
+                if id then out[#out + 1] = { type = "item", id = id, slot = info.equipSlot } end
+            elseif sid and sid > 0 then
+                out[#out + 1] = { type = "spell", id = sid }
             end
         end
     end
     return out
+end
+
+local function scanCDMRow(rowName, configuredOnly)
+    local entries = {}
+    for _, cat in ipairs(CDM_CATEGORIES[rowName]) do
+        for _, entry in ipairs(scanCategory(cat, configuredOnly)) do
+            entries[#entries + 1] = entry
+        end
+    end
+    return entries
 end
 
 local function dedupForRow(rowName, entries)
@@ -729,15 +699,10 @@ function CDM:ScanRow(rowName)
         dlog("CDM:ScanRow(%s): CDM API unavailable", tostring(rowName))
         return false, "CDM API unavailable"
     end
-    local cat
-    for c, r in pairs(CATEGORY_TO_ROW) do
-        if r == rowName then cat = c break end
-    end
-    if cat == nil then
-        dlog("CDM:ScanRow(%s): no CDM category mapped (manual-add row)", tostring(rowName))
+    if not CDM_CATEGORIES[rowName] then
         return false, "no CDM category for this row"
     end
-    local entries = scanCategory(cat)
+    local entries = scanCDMRow(rowName, false)
     entries = dedupForRow(rowName, entries)
     local rp = getRowProfile(rowName)
     if not rp then return false, "profile not ready" end
@@ -753,16 +718,9 @@ function CDM:ScanAll()
         return false, "CDM API unavailable"
     end
     local total = 0
-    for cat, rowName in pairs(CATEGORY_TO_ROW) do
-        local entries = scanCategory(cat)
-        entries = dedupForRow(rowName, entries)
-        local rp = getRowProfile(rowName)
-        if rp then
-            wipe(rp.candidates)
-            for i = 1, #entries do rp.candidates[i] = entries[i] end
-            total = total + #rp.candidates
-            dlog("CDM:ScanAll: row=%s cat=%d candidates=%d", rowName, cat, #rp.candidates)
-        end
+    for rowName in pairs(CDM_CATEGORIES) do
+        local ok, count = self:ScanRow(rowName)
+        if ok then total = total + count end
     end
     return true, total
 end
@@ -886,8 +844,7 @@ function TrinketScanner:GetStatus()
             if ok then
                 entry.cdStart    = s
                 entry.cdDuration = d
-                if type(s) == "number" and type(d) == "number" and d > 0
-                   and not isSecret(s) and not isSecret(d) then
+                if not isSecret(s) and not isSecret(d) and type(s) == "number" and type(d) == "number" and d > 0 then
                     local remaining = (s + d) - GetTime()
                     entry.ready     = remaining <= 0
                     entry.remaining = remaining > 0 and remaining or 0
@@ -1976,7 +1933,7 @@ function Row:RefreshIcon(icon, entry, desat)
                 })
             end
             local tex = getSpellTexture(sid)
-            if tex then icon:SetTexture(tex) end
+            if isSecret(tex) or tex then icon:SetTexture(tex) end
             icon:SetDesaturated(false)
             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
             icon._lastTintKey = "normal"
@@ -2012,7 +1969,7 @@ function Row:RefreshIcon(icon, entry, desat)
                                 })
                             end
                             local tex = getSpellTexture(sid)
-                            if tex then icon:SetTexture(tex) end
+                            if isSecret(tex) or tex then icon:SetTexture(tex) end
                             icon:SetDesaturated(false)
                             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
                             icon._lastTintKey = "normal"
@@ -2033,7 +1990,7 @@ function Row:RefreshIcon(icon, entry, desat)
             end
         end
         local tex = getSpellTexture(sid)
-        if tex then icon:SetTexture(tex) end
+        if isSecret(tex) or tex then icon:SetTexture(tex) end
 
         local known = spellIsKnown(sid)
         if not known and desat then
@@ -2063,7 +2020,7 @@ function Row:RefreshIcon(icon, entry, desat)
         local inRange
         if C_Spell and C_Spell.IsSpellInRange and UnitExists and UnitExists("target") then
             local ok, r = pcall(C_Spell.IsSpellInRange, activeSID, "target")
-            if ok then inRange = r end
+            if ok and not isSecret(r) then inRange = r end
         end
 
         local chargesInfo
@@ -2071,9 +2028,8 @@ function Row:RefreshIcon(icon, entry, desat)
             local ok, info = pcall(C_Spell.GetSpellCharges, activeSID)
             if ok and type(info) == "table" then chargesInfo = info end
         end
-        local isChargeSpell = chargesInfo
-                           and type(chargesInfo.maxCharges) == "number"
-                           and chargesInfo.maxCharges > 1
+        local isChargeSpell = chargesInfo and not isSecret(chargesInfo.maxCharges)
+            and type(chargesInfo.maxCharges) == "number" and chargesInfo.maxCharges > 1
 
         local baseSID = resolveBaseSpellID(sid)
         local holdKey = baseSID or sid
@@ -2121,56 +2077,20 @@ function Row:RefreshIcon(icon, entry, desat)
         end
 
         local showGCD = (Bars.profileRef and Bars.profileRef.showGCDSwipe) ~= false
-        local realGCD = (cdInfo and cdInfo.isOnGCD) and true or false
-        local onGCD = cdActive and not onRealCooldown
-        if resourceGated and not realGCD then
-            onGCD = false
-        end
+        local onGCD = snap and snap.onGCD == true and onRealCooldown ~= true
 
-        if isChargeSpell then
-            if chargesInfo.isActive then
-                local dur
-                if C_Spell and C_Spell.GetSpellChargeDuration then
-                    local ok, d = pcall(C_Spell.GetSpellChargeDuration, activeSID)
-                    if ok then dur = d end
-                end
-                if dur then
-                    icon:SetCooldown(dur)
-                    icon._lastArmPath = "bars:charge"
-                else
-                    icon:ClearCooldown()
-                end
-            else
-                icon:ClearCooldown()
-            end
-        elseif onRealCooldown then
-            if C_Spell and C_Spell.GetSpellCooldownDuration then
-                local ok, dur = pcall(C_Spell.GetSpellCooldownDuration, cdSpellID, false)
-                if ok and dur then
-                    icon:SetCooldown(dur)
-                    icon._lastArmPath = "bars:realCD"
-                else
-                    icon:ClearCooldown()
-                end
-            else
-                icon:ClearCooldown()
-            end
-        elseif onGCD and showGCD then
-            local dur
-            if C_Spell and C_Spell.GetSpellCooldownDuration then
-                local ok, d = pcall(C_Spell.GetSpellCooldownDuration, activeSID, false)
-                if ok then dur = d end
-                if not dur then
-                    local ok2, d2 = pcall(C_Spell.GetSpellCooldownDuration, GCD_SPELL_ID, false)
-                    if ok2 then dur = d2 end
-                end
-            end
-            if dur then
-                icon:SetCooldown(dur)
-                icon._lastArmPath = "bars:gcd"
-            else
-                icon:ClearCooldown()
-            end
+        local duration, source
+        if isChargeSpell and chargesInfo.isActive and C_Spell.GetSpellChargeDuration then
+            local ok, value = pcall(C_Spell.GetSpellChargeDuration, activeSID)
+            if ok then duration, source = value, "bars:charge" end
+        end
+        if not duration then
+            duration = getCooldownDuration(cdSpellID, not showGCD)
+            source = onGCD and "bars:gcd" or "bars:spell"
+        end
+        if duration then
+            icon:SetCooldown(duration)
+            icon._lastArmPath = source
         else
             icon:ClearCooldown()
         end
@@ -2207,7 +2127,7 @@ function Row:RefreshIcon(icon, entry, desat)
 
         local hasEmphasis = (icon._summonActiveUntil and GetTime() < icon._summonActiveUntil)
                          or (icon._procApplied == true)
-        local readyVisual = (not onRealCooldown) and (usable ~= false)
+        local readyVisual = onRealCooldown == false and not usableSecret and usable ~= false
 
         local tintKey
         if inRange == false then
@@ -2288,9 +2208,14 @@ function Row:RefreshIcon(icon, entry, desat)
 
     elseif entry.type == "item" then
         local iid = entry.id
-        if not iid then return end
+        if entry.slot then iid = GetInventoryItemID("player", entry.slot) end
+        if not iid then
+            icon:SetTexture(nil)
+            icon:ClearCooldown()
+            return
+        end
         local tex = getItemTexture(iid)
-        if tex then icon:SetTexture(tex) end
+        if isSecret(tex) or tex then icon:SetTexture(tex) end
         icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
 
         if entry.consumable then
@@ -2314,8 +2239,8 @@ function Row:RefreshIcon(icon, entry, desat)
             if ok then start, duration = s, d end
         end
 
-        if type(start) == "number" and type(duration) == "number" and duration > 0
-           and not isSecret(start) and not isSecret(duration) then
+        if not isSecret(start) and not isSecret(duration)
+           and type(start) == "number" and type(duration) == "number" and duration > 0 then
             local dur = getDurationFor(icon)
             if dur and dur.SetTimeFromStart then
                 local okSet = pcall(dur.SetTimeFromStart, dur, start, duration, 1)
@@ -2436,6 +2361,7 @@ function Row:SnapshotCooldowns()
                          tostring(cdSpellID), tostring(activeSID))
                 end
                 snap.onReal = onReal
+                snap.onGCD = cdInfo and cdInfo.isOnGCD == true
                 snap.cdSpellID = cdSpellID
                 snap.at = now
             end
@@ -2465,12 +2391,6 @@ local ROW_EVENTS_COMMON = {
     "PLAYER_REGEN_ENABLED",
 }
 
-local SNAPSHOT_EVENTS = {
-    SPELL_UPDATE_COOLDOWN = true,
-    SPELL_UPDATE_CHARGES  = true,
-    BAG_UPDATE_COOLDOWN   = true,
-}
-
 function Row:Enable()
     if self._enabled then return end
     self._enabled = true
@@ -2480,14 +2400,14 @@ function Row:Enable()
         self.eventFrame = ef
         local row = self
         ef:SetScript("OnEvent", function(_, event, ...)
-            if SNAPSHOT_EVENTS[event] then
+            if event == "SPELL_UPDATE_COOLDOWN" then
                 row:SnapshotCooldowns()
                 row:RequestRefresh()
                 return
             end
             if event == "UNIT_SPELLCAST_SUCCEEDED" then
                 local _unit, _castGUID, spellID = ...
-                if type(spellID) == "number" then
+                if type(spellID) == "number" and not isSecret(spellID) then
                     vlog("UNIT_SPELLCAST_SUCCEEDED spellID=%s row=%s",
                          tostring(spellID), tostring(row.name))
                     if row.icons then
@@ -2605,9 +2525,7 @@ function Row:Enable()
     for _, ev in ipairs(ROW_EVENTS_COMMON) do
         self.eventFrame:RegisterEvent(ev)
     end
-    if self.name == "Trinkets" then
-        self.eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
-    end
+    self.eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     if self.name == "Consumables" then
         self.eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
         self.eventFrame:RegisterEvent("ENCOUNTER_END")
@@ -2704,7 +2622,7 @@ function Bars:AddEntry(rowName, entry)
     if findEntry(rp.displayed, entry) then
         return false, "already in row"
     end
-    local clean = { type = entry.type, id = entry.id }
+    local clean = { type = entry.type, id = entry.id, slot = entry.slot }
     local sd = tonumber(entry.summonDuration)
     if sd and sd > 0 then
         clean.summonDuration = sd
@@ -2767,7 +2685,7 @@ function Bars:MoveEntryToRow2(rowName, entry)
     local idx = findEntry(rp.displayed, entry)
     if idx then tremove(rp.displayed, idx) end
     if not findEntry(rp2.displayed, entry) then
-        local clean = { type = entry.type, id = entry.id }
+        local clean = { type = entry.type, id = entry.id, slot = entry.slot }
         local sd = tonumber(entry.summonDuration)
         if sd and sd > 0 then clean.summonDuration = sd end
         if entry.hideWhileUnknown then clean.hideWhileUnknown = true end
@@ -2785,7 +2703,7 @@ function Bars:MoveEntryToRow1(rowName, entry)
     local idx2 = findEntry(rp2.displayed, entry)
     if idx2 then tremove(rp2.displayed, idx2) end
     if not findEntry(rp.displayed, entry) then
-        local clean = { type = entry.type, id = entry.id }
+        local clean = { type = entry.type, id = entry.id, slot = entry.slot }
         local sd = tonumber(entry.summonDuration)
         if sd and sd > 0 then clean.summonDuration = sd end
         if entry.hideWhileUnknown then clean.hideWhileUnknown = true end
@@ -3009,6 +2927,49 @@ function Bars:_TickAll()
     end
 end
 
+function Bars:_SeedScope()
+    local scopeKey = self._currentScopeKey
+    if not scopeKey or scopeKey:sub(-4) == "_NIL" or InCombatLockdown() then return false end
+    local rows = getRowsForScope(scopeKey)
+    local scope = self.profileRef.scopes[scopeKey]
+    if not scope.seedFromCDM then return false end
+
+    for name in pairs(CDM_CATEGORIES) do
+        if #rows[name].displayed > 0 or #(rows[name].rows2 and rows[name].rows2.displayed or {}) > 0 then
+            scope.seedFromCDM = nil
+            return false
+        end
+    end
+
+    local class = scopeKey:match("^(.+)_")
+    local keys = self:GetScopes()
+    local any = false
+    for name in pairs(CDM_CATEGORIES) do
+        local entries = {}
+        local seen = {}
+        for _, key in ipairs(keys) do
+            if key ~= scopeKey and key:match("^(.+)_") == class then
+                local source = self.profileRef.scopes[key].rows
+                source = source and source[name] and source[name].displayed
+                for _, entry in ipairs(source or {}) do
+                    if entry.type == "spell" and not seen[entry.id] and spellIsKnown(entry.id) then
+                        local copy = {}
+                        ns._deepCopyMissing(copy, entry)
+                        entries[#entries + 1] = copy
+                        seen[entry.id] = true
+                    end
+                end
+                if #entries > 0 then break end
+            end
+        end
+        if #entries == 0 then entries = scanCDMRow(name, true) end
+        rows[name].displayed = dedupForRow(name, entries)
+        any = any or #rows[name].displayed > 0
+    end
+    if any then scope.seedFromCDM = nil end
+    return any
+end
+
 function Bars:_ResyncScope()
     if not self._enabled then return end
     local newKey = self:GetCurrentScopeKey()
@@ -3016,6 +2977,7 @@ function Bars:_ResyncScope()
     local oldKey = self._currentScopeKey
     self._currentScopeKey = newKey
     getRowsForScope(newKey)
+    self:_SeedScope()
     dlog("scope changed: %s -> %s", tostring(oldKey), tostring(newKey))
     if ConsumablesScanner and ConsumablesScanner.Sync then
         ConsumablesScanner:Sync()
@@ -3031,10 +2993,6 @@ function Bars:OnEnable(_, profile)
     if self._enabled then return end
     self.profileRef = profile
     self._enabled = true
-
-    if ns.Auras and type(ns.Auras.EnsureCDMViewerEditModePolicy) == "function" then
-        pcall(ns.Auras.EnsureCDMViewerEditModePolicy, ns.Auras)
-    end
 
     migrateLegacyRows()
 
@@ -3053,6 +3011,7 @@ function Bars:OnEnable(_, profile)
     for _, name in ipairs(ROW_NAMES) do
         getRowProfile(name)
     end
+    self:_SeedScope()
 
     for _, name in ipairs(ROW_NAMES) do
         local r = Row:New(name)
@@ -3108,13 +3067,13 @@ function Bars:OnEnable(_, profile)
         ef:SetScript("OnEvent", function(_, event, ...)
             local spellID = ...
             if event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW" then
-                if type(spellID) == "number" then
+                if type(spellID) == "number" and not isSecret(spellID) then
                     mod._activeProcs[spellID] = true
                     dlog("proc SHOW spellID=%s", tostring(spellID))
                     dispatchProcGlow(spellID, true)
                 end
             elseif event == "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" then
-                if type(spellID) == "number" then
+                if type(spellID) == "number" and not isSecret(spellID) then
                     mod._activeProcs[spellID] = nil
                     dlog("proc HIDE spellID=%s", tostring(spellID))
                     dispatchProcGlow(spellID, false)
@@ -3131,9 +3090,13 @@ function Bars:OnEnable(_, profile)
     do
         local ef = self._mirrorEventFrame
         ef:UnregisterAllEvents()
-        ef:SetScript("OnEvent", function()
+        ef:SetScript("OnEvent", function(_, event)
             _mirrorMapDirty = true
-            suppressMirrorViewers()
+            if event == "COOLDOWN_VIEWER_DATA_LOADED" or event == "PLAYER_REGEN_ENABLED" or event == "SPELLS_CHANGED" then
+                if self:_SeedScope() then
+                    for _, row in pairs(self.rows) do row:Rebuild() end
+                end
+            end
         end)
         ef:RegisterEvent("PLAYER_ENTERING_WORLD")
         ef:RegisterEvent("PLAYER_REGEN_DISABLED")
@@ -3142,7 +3105,6 @@ function Bars:OnEnable(_, profile)
         ef:RegisterEvent("SPELLS_CHANGED")
         pcall(ef.RegisterEvent, ef, "COOLDOWN_VIEWER_DATA_LOADED")
     end
-    suppressMirrorViewers()
 
     if not self._pollTicker and C_Timer and C_Timer.NewTicker then
         local mod = self
@@ -3177,7 +3139,6 @@ function Bars:OnDisable()
         self._mirrorEventFrame:UnregisterAllEvents()
         self._mirrorEventFrame:SetScript("OnEvent", nil)
     end
-    unsuppressMirrorViewers()
     wipe(_mirrorMap)
     _mirrorMapDirty = true
     wipe(self._activeProcs)
@@ -3208,7 +3169,11 @@ ns:RegisterMessage("PROFILE_CHANGED", function()
     Bars.profileRef = prof.modules.Bars
     Bars._currentScopeKey = Bars:GetCurrentScopeKey()
     getRowsForScope(Bars._currentScopeKey)
+    wipe(_cdSnapshot)
+    migrateLegacyRows()
+    Bars:_SeedScope()
     Bars:SyncCustomRows()
+    if TrinketScanner then TrinketScanner:Sync() end
     if ConsumablesScanner and ConsumablesScanner.Sync then
         pcall(ConsumablesScanner.Sync, ConsumablesScanner)
     end

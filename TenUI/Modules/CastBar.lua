@@ -586,6 +586,7 @@ function CastBar:HideNow()
     self:ClearTimeText()
     self._state = "idle"
     self._activeCastID = nil
+    self._activeCastBarID = nil
 end
 
 function CastBar:PlayInterruptedVisual()
@@ -626,23 +627,17 @@ function CastBar:PlaySuccessVisual()
     self:HideAfterDelay(profile.holdTime or 0.4)
 end
 
-local function castMatches(eventName, eventCastGUID)
-    if eventCastGUID == nil then return true end
-    if CastBar._activeCastID == nil then
-        dlog("CastBar GUARD: " .. tostring(eventName)
-            .. " rejected (no active cast) -- incoming castGUID="
-            .. tostring(eventCastGUID))
-        return false
-    end
-    if eventCastGUID == CastBar._activeCastID then return true end
-    dlog("CastBar GUARD: " .. tostring(eventName)
-        .. " rejected (castGUID mismatch) -- incoming="
-        .. tostring(eventCastGUID)
-        .. " active=" .. tostring(CastBar._activeCastID))
-    return false
+local function readCastGUID(value)
+    if not (issecretvalue and issecretvalue(value)) then return value end
 end
 
-function CastBar:OnSpellcastStart(castGUID)
+local function castMatches(castGUID, castBarID)
+    if castBarID and CastBar._activeCastBarID then return castBarID == CastBar._activeCastBarID end
+    local readable = readCastGUID(castGUID)
+    return readable ~= nil and readable == CastBar._activeCastID
+end
+
+function CastBar:OnSpellcastStart(castGUID, castBarID)
     if self._state == "channeling" or self._state == "empowering" then
         local castingName = UnitCastingInfo and UnitCastingInfo("player")
         if castingName then
@@ -680,7 +675,8 @@ function CastBar:OnSpellcastStart(castGUID)
 
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, false)
 
-    self._activeCastID = castID or castGUID
+    self._activeCastID = readCastGUID(castID) or readCastGUID(castGUID)
+    self._activeCastBarID = castBarID
     self._succeededFlag = false
     self._failedFlag    = false
     self._state = "casting"
@@ -699,8 +695,8 @@ function CastBar:OnSpellcastStart(castGUID)
     self:SetStartTimeText(totalSec)
 end
 
-function CastBar:OnSpellcastDelayed(castGUID)
-    if not castMatches("UNIT_SPELLCAST_DELAYED", castGUID) then return end
+function CastBar:OnSpellcastDelayed(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "casting" then return end
     local name = UnitCastingInfo("player")
     if not name then return end
@@ -711,7 +707,7 @@ function CastBar:OnSpellcastDelayed(castGUID)
     end
 end
 
-function CastBar:OnChannelStart(castGUID)
+function CastBar:OnChannelStart(castGUID, castBarID)
     if self._state ~= "idle" then
         dlog("CastBar: preempting previous cast (state="
             .. tostring(self._state) .. ") for new CHANNEL_START")
@@ -734,7 +730,8 @@ function CastBar:OnChannelStart(castGUID)
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, true)
 
     self._state = "channeling"
-    self._activeCastID = castGUID
+    self._activeCastID = readCastGUID(castGUID)
+    self._activeCastBarID = castBarID
     self._succeededFlag = false
     self._failedFlag    = false
 
@@ -752,8 +749,8 @@ function CastBar:OnChannelStart(castGUID)
     self:SetStartTimeText(totalSec)
 end
 
-function CastBar:OnChannelUpdate(castGUID)
-    if not castMatches("UNIT_SPELLCAST_CHANNEL_UPDATE", castGUID) then return end
+function CastBar:OnChannelUpdate(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "channeling" then return end
     local duration = UnitChannelDuration("player")
     if duration then
@@ -762,7 +759,7 @@ function CastBar:OnChannelUpdate(castGUID)
     end
 end
 
-function CastBar:OnEmpowerStart(castGUID)
+function CastBar:OnEmpowerStart(castGUID, castBarID)
     if self._state ~= "idle" then
         dlog("CastBar: preempting previous cast (state="
             .. tostring(self._state) .. ") for new EMPOWER_START")
@@ -784,7 +781,8 @@ function CastBar:OnEmpowerStart(castGUID)
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, true)
 
     self._state = "empowering"
-    self._activeCastID = castGUID
+    self._activeCastID = readCastGUID(castGUID)
+    self._activeCastBarID = castBarID
     self._succeededFlag = false
     self._failedFlag    = false
     self:ApplyCastVisual("empower", displayName or name, texture, notInterruptible)
@@ -808,8 +806,8 @@ function CastBar:OnEmpowerStart(castGUID)
     self:SetStartTimeText(totalSec)
 end
 
-function CastBar:OnEmpowerUpdate(castGUID)
-    if not castMatches("UNIT_SPELLCAST_EMPOWER_UPDATE", castGUID) then return end
+function CastBar:OnEmpowerUpdate(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "empowering" then return end
     local duration = (UnitEmpoweredChannelDuration and UnitEmpoweredChannelDuration("player"))
                      or UnitChannelDuration("player")
@@ -822,12 +820,13 @@ function CastBar:OnEmpowerUpdate(castGUID)
     self:SetupStagePips(numStages, startMs)
 end
 
-function CastBar:OnSpellcastStop(castGUID)
-    if not castMatches("UNIT_SPELLCAST_STOP", castGUID) then return end
+function CastBar:OnSpellcastStop(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
 
-    self._pendingNaturalStop = true
+    local pending = {}
+    self._pendingNaturalStop = pending
     C_Timer.After(0, function()
-        if not CastBar._pendingNaturalStop then
+        if CastBar._pendingNaturalStop ~= pending then
             return
         end
         CastBar._pendingNaturalStop = false
@@ -836,6 +835,7 @@ function CastBar:OnSpellcastStop(castGUID)
             CastBar._succeededFlag = false
             CastBar:PlaySuccessVisual()
             CastBar._activeCastID = nil
+            CastBar._activeCastBarID = nil
             clearLastCast()
             return
         end
@@ -843,6 +843,7 @@ function CastBar:OnSpellcastStop(castGUID)
             CastBar._failedFlag = false
             CastBar:PlayFailedVisual()
             CastBar._activeCastID = nil
+            CastBar._activeCastBarID = nil
             clearLastCast()
             return
         end
@@ -854,6 +855,7 @@ function CastBar:OnSpellcastStop(castGUID)
                 local delay = GRACE_WINDOW_SEC - (GetTime() - (lastCast.seenAt or 0))
                 if delay < 0.05 then delay = 0.05 end
                 CastBar:CancelHideTimer()
+                CastBar._state = "finishing"
                 CastBar._hideTimer = C_Timer.NewTimer(delay, function()
                     CastBar._hideTimer = nil
                     if CastBar._state == "casting" or CastBar._state == "channeling"
@@ -868,6 +870,7 @@ function CastBar:OnSpellcastStop(castGUID)
                     clearLastCast()
                 end)
                 CastBar._activeCastID = nil
+                CastBar._activeCastBarID = nil
                 return
             end
         end
@@ -877,22 +880,30 @@ function CastBar:OnSpellcastStop(castGUID)
         local profile = getProfile()
         CastBar:HideAfterDelay((profile and profile.holdTime) or 0.4)
         CastBar._activeCastID = nil
+        CastBar._activeCastBarID = nil
         clearLastCast()
     end)
 end
 
-function CastBar:OnChannelStop(castGUID)
-    if not castMatches("UNIT_SPELLCAST_CHANNEL_STOP", castGUID) then return end
+function CastBar:OnChannelStop(castGUID, complete, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
 
-    self._pendingNaturalStop = true
+    if complete == false then
+        self:OnSpellcastInterrupted(castGUID, castBarID)
+        return
+    end
+
+    local pending = {}
+    self._pendingNaturalStop = pending
     C_Timer.After(0, function()
-        if not CastBar._pendingNaturalStop then return end
+        if CastBar._pendingNaturalStop ~= pending then return end
         CastBar._pendingNaturalStop = false
 
         if CastBar._failedFlag then
             CastBar._failedFlag = false
             CastBar:PlayFailedVisual()
             CastBar._activeCastID = nil
+            CastBar._activeCastBarID = nil
             clearLastCast()
             return
         end
@@ -904,6 +915,7 @@ function CastBar:OnChannelStop(castGUID)
                 local delay = GRACE_WINDOW_SEC - (GetTime() - (lastCast.seenAt or 0))
                 if delay < 0.05 then delay = 0.05 end
                 CastBar:CancelHideTimer()
+                CastBar._state = "finishing"
                 CastBar._hideTimer = C_Timer.NewTimer(delay, function()
                     CastBar._hideTimer = nil
                     if CastBar._state == "casting" or CastBar._state == "channeling"
@@ -918,6 +930,7 @@ function CastBar:OnChannelStop(castGUID)
                     clearLastCast()
                 end)
                 CastBar._activeCastID = nil
+                CastBar._activeCastBarID = nil
                 return
             end
         end
@@ -927,23 +940,25 @@ function CastBar:OnChannelStop(castGUID)
         local profile = getProfile()
         CastBar:HideAfterDelay((profile and profile.holdTime) or 0.4)
         CastBar._activeCastID = nil
+        CastBar._activeCastBarID = nil
         clearLastCast()
     end)
 end
 
-function CastBar:OnSpellcastInterrupted(castGUID)
-    if not castMatches("UNIT_SPELLCAST_INTERRUPTED", castGUID) then return end
+function CastBar:OnSpellcastInterrupted(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
 
     self._pendingNaturalStop = false
     self._succeededFlag = false
     self._failedFlag    = false
     self:PlayInterruptedVisual()
     self._activeCastID = nil
+    self._activeCastBarID = nil
     clearLastCast()
 end
 
-function CastBar:OnSpellcastFailed(castGUID)
-    if not castMatches("UNIT_SPELLCAST_FAILED", castGUID) then return end
+function CastBar:OnSpellcastFailed(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
 
     self._failedFlag = true
     C_Timer.After(0, function()
@@ -951,17 +966,18 @@ function CastBar:OnSpellcastFailed(castGUID)
             CastBar._failedFlag = false
             CastBar:PlayFailedVisual()
             CastBar._activeCastID = nil
+            CastBar._activeCastBarID = nil
             clearLastCast()
         end
     end)
 end
 
-function CastBar:OnSpellcastFailedQuiet(castGUID)
-    if not castMatches("UNIT_SPELLCAST_FAILED_QUIET", castGUID) then return end
+function CastBar:OnSpellcastFailedQuiet(castGUID, castBarID)
+    if not castMatches(castGUID, castBarID) then return end
     self._failedFlag = false
 end
 
-function CastBar:OnSpellcastSucceeded(castGUID)
+function CastBar:OnSpellcastSucceeded(castGUID, castBarID)
     if instantEnabled()
        and self._state ~= "casting"
        and self._state ~= "channeling"
@@ -986,7 +1002,7 @@ function CastBar:OnSpellcastSucceeded(castGUID)
         end
     end
 
-    if not castMatches("UNIT_SPELLCAST_SUCCEEDED", castGUID) then return end
+    if not castMatches(castGUID, castBarID) then return end
     if self._state == "casting" then
         self._succeededFlag = true
     end
@@ -1152,24 +1168,30 @@ function CastBar:RunTest()
 end
 
 local EVENT_DISPATCH = {
-    UNIT_SPELLCAST_START               = function(_unit, castGUID) CastBar:OnSpellcastStart(castGUID) end,
-    UNIT_SPELLCAST_STOP                = function(_unit, castGUID) CastBar:OnSpellcastStop(castGUID) end,
-    UNIT_SPELLCAST_DELAYED             = function(_unit, castGUID) CastBar:OnSpellcastDelayed(castGUID) end,
-    UNIT_SPELLCAST_FAILED              = function(_unit, castGUID) CastBar:OnSpellcastFailed(castGUID) end,
-    UNIT_SPELLCAST_FAILED_QUIET        = function(_unit, castGUID) CastBar:OnSpellcastFailedQuiet(castGUID) end,
-    UNIT_SPELLCAST_SUCCEEDED           = function(_unit, castGUID, spellID)
-        CastBar._instantPendingSpellID = spellID
-        CastBar:OnSpellcastSucceeded(castGUID)
+    UNIT_SPELLCAST_START               = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastStart(castGUID, castBarID) end,
+    UNIT_SPELLCAST_STOP                = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastStop(castGUID, castBarID) end,
+    UNIT_SPELLCAST_DELAYED             = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastDelayed(castGUID, castBarID) end,
+    UNIT_SPELLCAST_FAILED              = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastFailed(castGUID, castBarID) end,
+    UNIT_SPELLCAST_FAILED_QUIET        = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastFailedQuiet(castGUID, castBarID) end,
+    UNIT_SPELLCAST_SUCCEEDED           = function(_unit, castGUID, spellID, castBarID)
+        CastBar._instantPendingSpellID = readCastGUID(spellID)
+        CastBar:OnSpellcastSucceeded(castGUID, castBarID)
     end,
-    UNIT_SPELLCAST_INTERRUPTED         = function(_unit, castGUID) CastBar:OnSpellcastInterrupted(castGUID) end,
+    UNIT_SPELLCAST_INTERRUPTED         = function(_unit, castGUID, _spellID, _interruptedBy, castBarID) CastBar:OnSpellcastInterrupted(castGUID, castBarID) end,
     UNIT_SPELLCAST_INTERRUPTIBLE       = function() CastBar:OnInterruptibleChanged(false) end,
     UNIT_SPELLCAST_NOT_INTERRUPTIBLE   = function() CastBar:OnInterruptibleChanged(true) end,
-    UNIT_SPELLCAST_CHANNEL_START       = function(_unit, castGUID) CastBar:OnChannelStart(castGUID) end,
-    UNIT_SPELLCAST_CHANNEL_STOP        = function(_unit, castGUID) CastBar:OnChannelStop(castGUID) end,
-    UNIT_SPELLCAST_CHANNEL_UPDATE      = function(_unit, castGUID) CastBar:OnChannelUpdate(castGUID) end,
-    UNIT_SPELLCAST_EMPOWER_START       = function(_unit, castGUID) CastBar:OnEmpowerStart(castGUID) end,
-    UNIT_SPELLCAST_EMPOWER_STOP        = function(_unit, castGUID) CastBar:OnChannelStop(castGUID) end,
-    UNIT_SPELLCAST_EMPOWER_UPDATE      = function(_unit, castGUID) CastBar:OnEmpowerUpdate(castGUID) end,
+    UNIT_SPELLCAST_CHANNEL_START       = function(_unit, castGUID, _spellID, castBarID) CastBar:OnChannelStart(castGUID, castBarID) end,
+    UNIT_SPELLCAST_CHANNEL_STOP        = function(_unit, castGUID, _spellID, interruptedBy, castBarID)
+        local secret = issecretvalue and issecretvalue(interruptedBy)
+        CastBar:OnChannelStop(castGUID, secret or interruptedBy == nil, castBarID)
+    end,
+    UNIT_SPELLCAST_CHANNEL_UPDATE      = function(_unit, castGUID, _spellID, castBarID) CastBar:OnChannelUpdate(castGUID, castBarID) end,
+    UNIT_SPELLCAST_EMPOWER_START       = function(_unit, castGUID, _spellID, castBarID) CastBar:OnEmpowerStart(castGUID, castBarID) end,
+    UNIT_SPELLCAST_EMPOWER_STOP        = function(_unit, castGUID, _spellID, complete, _interruptedBy, castBarID)
+        local secret = issecretvalue and issecretvalue(complete)
+        CastBar:OnChannelStop(castGUID, secret or complete, castBarID)
+    end,
+    UNIT_SPELLCAST_EMPOWER_UPDATE      = function(_unit, castGUID, _spellID, castBarID) CastBar:OnEmpowerUpdate(castGUID, castBarID) end,
     PLAYER_ENTERING_WORLD              = function() CastBar:OnPlayerEnteringWorld() end,
 }
 
@@ -1290,9 +1312,9 @@ function CastBar:OnEnable(_, profile)
 
     if not self.eventFrame then
         self.eventFrame = CreateFrame("Frame", "TenUICastBarEventFrame")
-        self.eventFrame:SetScript("OnEvent", castbar_OnEvent)
     end
     local ef = self.eventFrame
+    ef:SetScript("OnEvent", castbar_OnEvent)
 
     local function regUnit(event)
         local ok2, err = pcall(ef.RegisterUnitEvent, ef, event, "player")
@@ -1367,6 +1389,7 @@ function CastBar:OnDisable()
     self._succeededFlag = false
     self._failedFlag = false
     self._activeCastID = nil
+    self._activeCastBarID = nil
     self._state = "idle"
 
     if self.bar then self.bar:Hide() end
@@ -1499,3 +1522,9 @@ ns:RegisterModule("CastBar", {
     OnEnable = function(mod, profile) CastBar:OnEnable(mod, profile) end,
     OnDisable = function(mod) CastBar:OnDisable() end,
 })
+
+ns:RegisterMessage("PROFILE_CHANGED", function()
+    if not CastBar._enabled then return end
+    CastBar._baseProfile = ns:GetProfile().modules.CastBar
+    CastBar:ApplyOptions()
+end)

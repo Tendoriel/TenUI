@@ -53,6 +53,18 @@ ns:RegisterMessage("SAVEDVARS_READY", function()
     ensureGeneralBranch()
 end)
 
+ns:RegisterMessage("PROFILE_CHANGED", function()
+    local general = ensureGeneralBranch()
+    for _, name in ipairs({ "CombatAlerts", "StealthTracking", "TooltipControl", "ClassReminders", "TalentReminder" }) do
+        local module = ns[name]
+        local registered = ns:GetModule(name)
+        if module and registered and registered.enabled then
+            module.profileRef = general
+            if module.ApplyOptions then module:ApplyOptions() end
+        end
+    end
+end)
+
 local function getCA()
     local g = ensureGeneralBranch()
     if not g then return {} end

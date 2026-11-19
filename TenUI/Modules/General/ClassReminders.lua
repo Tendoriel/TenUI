@@ -37,7 +37,8 @@ local BEACON_OF_VIRTUE   = 200025
 
 local SHADOW_SPEC        = 258
 local SHADOWFORM         = 232698
-local SHADOWFORM_AURAS   = { 232698, 15473 }
+local SHADOWFORM_AURAS   = { 232698, 15473, 194249 }
+local SHADOWFORM_FORMS   = { [232698] = true, [15473] = true, [194249] = true, [185916] = true }
 
 local DEMONOLOGY_SPEC    = 266
 local SUMMON_FELGUARD    = 30146
@@ -186,6 +187,22 @@ local function anyPlayerAuraPresent(list)
         if playerAuraPresent(list[i]) then return true end
     end
     return false
+end
+
+local function shadowformMissing()
+    if GetNumShapeshiftForms and GetShapeshiftFormInfo then
+        for i = 1, GetNumShapeshiftForms() do
+            local _, active, _, spellID = GetShapeshiftFormInfo(i)
+            if not (issecretvalue and (issecretvalue(active) or issecretvalue(spellID)))
+                and active and SHADOWFORM_FORMS[spellID] then
+                return false
+            end
+        end
+    end
+    if C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() then
+        return false
+    end
+    return not anyPlayerAuraPresent(SHADOWFORM_AURAS)
 end
 
 local function unitAuraPresent(unit, spellID)
@@ -385,7 +402,7 @@ local function evaluate(o)
     if class == "PRIEST" and o.shadowform
         and currentSpecID() == SHADOW_SPEC
         and spellKnown(SHADOWFORM) then
-        if not anyPlayerAuraPresent(SHADOWFORM_AURAS) then
+        if shadowformMissing() then
             push(spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform")
         end
     end
@@ -686,6 +703,8 @@ local LIFECYCLE_EVENTS = {
     "PLAYER_MOUNT_DISPLAY_CHANGED",
     "ZONE_CHANGED_NEW_AREA",
     "SPELLS_CHANGED",
+    "UPDATE_SHAPESHIFT_FORM",
+    "UPDATE_SHAPESHIFT_FORMS",
     "PET_BAR_UPDATE",
     "PLAYER_SPECIALIZATION_CHANGED",
     "TRAIT_CONFIG_UPDATED",

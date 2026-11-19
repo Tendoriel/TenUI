@@ -58,6 +58,7 @@ local function makeTextArea(C, parent, height)
 
     local eb = CreateFrame("EditBox", nil, sf)
     eb:SetMultiLine(true)
+    eb:SetMaxLetters(0)
     eb:SetFontObject(C.Fonts.value)
     eb:SetTextColor(unpack(Theme.color.textBright))
     eb:SetWidth(300)
@@ -101,26 +102,11 @@ local function buildProfilesPage(sc)
     local rebuildSpecMatrix
     local profileDropdown
 
-    if ns.savedVarsReady and ns.db and not InCombatLockdown() then
-        local specIdx = GetSpecialization and GetSpecialization() or 0
-        local specID = specIdx and specIdx > 0 and GetSpecializationInfo and GetSpecializationInfo(specIdx) or nil
-        if type(specID) == "number" and specID > 0 then
-            local ck = ns.GetCharKey and ns:GetCharKey()
-            if ck then
-                ns.db.lastSpecByChar = ns.db.lastSpecByChar or {}
-                ns.db.lastSpecByChar[ck] = specID
-            end
-            local assigned = ns:GetSpecProfile(specID)
-            if assigned and assigned ~= ns:GetProfileKey()
-               and ns.db.profiles and ns.db.profiles[assigned] then
-                ns:SetActiveProfile(assigned)
-            end
-        end
-    end
-
     children[#children + 1] = C.CreateSection(sc, "Profiles")
 
     children[#children + 1] = C.CreateSubSection(sc, "Active Profile")
+    children[#children + 1] = C.CreateHelpText(sc,
+        "A manually selected profile is shared with new characters. Specialization assignments apply when you change spec.")
 
     local profileValues = {}
     local function refreshProfileValues()
@@ -144,10 +130,7 @@ local function buildProfilesPage(sc)
                 end
                 return
             end
-            if ns.db then
-                ns.db.activeProfile = k
-                ns:Fire("PROFILE_CHANGED", k)
-            end
+            ns:SetActiveProfile(k)
         end
     )
     children[#children + 1] = profileDropdown
@@ -172,8 +155,7 @@ local function buildProfilesPage(sc)
             if not ns.db.profiles[name] then
                 ns.db.profiles[name] = { modules = {} }
                 ns:_AddProfileToOrder(name)
-                ns.db.activeProfile = name
-                ns:Fire("PROFILE_CHANGED", name)
+                ns:SetActiveProfile(name)
                 newNameEB:SetText("")
                 if ns.Options and ns.Options.RebuildPage then
                     ns.Options:RebuildPage("profiles")
@@ -230,7 +212,10 @@ local function buildProfilesPage(sc)
                 OnAccept = function()
                     local key = ns:GetProfileKey()
                     if ns.db and ns.db.profiles then
-                        ns.db.profiles[key] = { modules = {} }
+                        if InCombatLockdown() then return end
+                        local profile = { modules = {} }
+                        ns.db.profiles[key] = profile
+                        ns:PrepareProfile(profile)
                         ns:Fire("PROFILE_CHANGED", key)
                     end
                 end,

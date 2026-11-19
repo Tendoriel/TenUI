@@ -244,6 +244,13 @@ function Resources:OnDisable()
     end
 end
 
+ns:RegisterMessage("PROFILE_CHANGED", function()
+    local module = ns:GetModule("Resources")
+    if not (module and module.enabled) then return end
+    Resources._baseProfile = ns:GetProfile().modules.Resources
+    Resources:ApplyOptions()
+end)
+
 function Resources:ApplyOptions()
     local resolved = resolveResourcesBlock(self._baseProfile or self.profileRef)
     if resolved ~= self.profileRef then

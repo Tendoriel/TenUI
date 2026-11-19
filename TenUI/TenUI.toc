@@ -1,8 +1,8 @@
-## Interface: 120007
+## Interface: 120105
 ## Title: TenUI
 ## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
 ## Author: tendoriel
-## Version: 0.3.1
+## Version: 0.5.0
 ## SavedVariables: TenUIDB, TendorHUDDB
 ## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
 ## OptionalDeps: SharedMedia
@@ -40,6 +40,7 @@ Modules\Resources\ResourceModule.lua
 Modules\Glow.lua
 Modules\GlowFX.lua
 Modules\Bars.lua
+Modules\TrackedAuras.lua
 Modules\Auras.lua
 Modules\Scanner.lua
 Modules\DragonRiding.lua

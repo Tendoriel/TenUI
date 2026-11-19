@@ -1,7 +1,7 @@
 local addonName, ns = ...
 
 ns.name = addonName
-ns.version = "0.3.1"
+ns.version = C_AddOns.GetAddOnMetadata(addonName, "Version")
 
 ns.modules = {}
 ns.eventHandlers = {}

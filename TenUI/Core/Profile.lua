@@ -123,7 +123,7 @@ function ns:GetProfile()
     return self.db.profiles[key]
 end
 
-function ns:SetActiveProfile(name)
+function ns:SetActiveProfile(name, fromSpec)
     if not self.savedVarsReady or not self.db then return false end
     if type(name) ~= "string" or name == "" then return false end
     if InCombatLockdown() then
@@ -133,8 +133,16 @@ function ns:SetActiveProfile(name)
         return false
     end
     if not (self.db.profiles and self.db.profiles[name]) then return false end
+    if not fromSpec then
+        if self.charDb then
+            self.charDb.selectedProfile = name
+            self.charDb.selectedSpec = self:GetLiveSpecID()
+        end
+        self.db.defaultProfile = name
+    end
     if self.db.activeProfile == name then return true end
     self.db.activeProfile = name
+    self:PrepareProfile(self:GetProfile())
     self:Fire("PROFILE_CHANGED", name)
     return true
 end
@@ -160,6 +168,8 @@ function ns:AssignProfileToSpec(name, specID)
     if not (self.db.profiles and self.db.profiles[name]) then return false end
     self.db.specProfiles = self.db.specProfiles or {}
     self.db.specProfiles[specID] = name
+    if self.charDb and self.charDb.selectedSpec == specID then self.charDb.selectedSpec = nil end
+    self:Fire("SPEC_PROFILE_ASSIGNMENT_CHANGED", specID)
     return true
 end
 
@@ -168,6 +178,8 @@ function ns:UnassignSpec(specID)
     if type(specID) ~= "number" or specID <= 0 then return false end
     if type(self.db.specProfiles) ~= "table" then return false end
     self.db.specProfiles[specID] = nil
+    if self.charDb and self.charDb.selectedSpec == specID then self.charDb.selectedSpec = nil end
+    self:Fire("SPEC_PROFILE_ASSIGNMENT_CHANGED", specID)
     return true
 end
 
@@ -178,42 +190,46 @@ function ns:GetSpecProfile(specID)
     return self.db.specProfiles[specID]
 end
 
+function ns:GetLiveSpecID()
+    local index = GetSpecialization and GetSpecialization()
+    if type(index) ~= "number" or index < 1 or not GetSpecializationInfo then return nil end
+    local specID = GetSpecializationInfo(index)
+    if type(specID) == "number" and specID > 0 then return specID end
+end
+
 function ns:ResolveSpecProfile()
     if not self.savedVarsReady or not self.db then return nil end
-    local specProfiles = self.db.specProfiles
-    if type(specProfiles) ~= "table" or next(specProfiles) == nil then return nil end
-
+    local specID = self:GetLiveSpecID()
     local charKey = self:GetCharKey()
-    if not charKey then return nil end
-    self.db.lastSpecByChar = self.db.lastSpecByChar or {}
-
-    local resolvedSpecID = self.db.lastSpecByChar[charKey]
-
-    if not resolvedSpecID then
-        local specIdx = GetSpecialization and GetSpecialization()
-        if type(specIdx) == "number" and specIdx > 0 then
-            local liveSpecID = GetSpecializationInfo and GetSpecializationInfo(specIdx)
-            if type(liveSpecID) == "number" and liveSpecID > 0 then
-                resolvedSpecID = liveSpecID
-                self.db.lastSpecByChar[charKey] = resolvedSpecID
-            end
-        end
+    if charKey and specID then
+        self.db.lastSpecByChar = self.db.lastSpecByChar or {}
+        self.db.lastSpecByChar[charKey] = specID
     end
+    local name = specID and self:GetSpecProfile(specID)
+    if name and self.db.profiles[name] then return name, specID, charKey end
+    return nil, specID, charKey
+end
 
-    if not resolvedSpecID then return nil end
+function ns:GetDefaultProfileKey()
+    local selected = self.charDb and self.charDb.selectedProfile
+    if selected and self.db.profiles[selected] then return selected end
+    local shared = self.db.defaultProfile
+    if shared and self.db.profiles[shared] then return shared end
+    return "Default"
+end
 
-    local targetProfile = specProfiles[resolvedSpecID]
-    if not targetProfile then return nil, resolvedSpecID, charKey end
-
-    if not (self.db.profiles and self.db.profiles[targetProfile]) then
-        return nil, resolvedSpecID, charKey
+function ns:ResolveActiveProfile()
+    local assigned, specID = self:ResolveSpecProfile()
+    local char = self.charDb
+    if specID and char and char.selectedSpec == specID and self.db.profiles[char.selectedProfile] then
+        return char.selectedProfile, specID
     end
-
-    return targetProfile, resolvedSpecID, charKey
+    return assigned or self:GetDefaultProfileKey(), specID
 end
 
 function ns:RenameProfile(oldName, newName)
     if not self.savedVarsReady or not self.db then return false, "saved variables not ready" end
+    if InCombatLockdown() then return false, "in combat" end
     if type(oldName) ~= "string" or oldName == "" then return false, "invalid source name" end
     if type(newName) == "string" then
         newName = newName:gsub("^%s+", ""):gsub("%s+$", "")
@@ -244,6 +260,8 @@ function ns:RenameProfile(oldName, newName)
             if pName == oldName then self.db.specProfiles[specID] = newName end
         end
     end
+    if self.db.defaultProfile == oldName then self.db.defaultProfile = newName end
+    if self.charDb and self.charDb.selectedProfile == oldName then self.charDb.selectedProfile = newName end
 
     if self.db.activeProfile == oldName then
         self.db.activeProfile = newName
@@ -260,6 +278,7 @@ end
 
 function ns:DeleteProfile(name)
     if not self.savedVarsReady or not self.db then return false, "saved variables not ready" end
+    if InCombatLockdown() then return false, "in combat" end
     if type(name) ~= "string" or name == "" then return false, "invalid name" end
     if name == "Default" then return false, "cannot delete the Default profile" end
     self.db.profiles = self.db.profiles or {}
@@ -276,12 +295,11 @@ function ns:DeleteProfile(name)
 
     self.db.profiles["Default"] = self.db.profiles["Default"] or { modules = {} }
     self:_AddProfileToOrder("Default")
+    if self.db.defaultProfile == name then self.db.defaultProfile = "Default" end
+    if self.charDb and self.charDb.selectedProfile == name then self.charDb.selectedProfile = nil end
 
     if self.db.activeProfile == name then
-        self.db.activeProfile = "Default"
-        if not InCombatLockdown() then
-            self:Fire("PROFILE_CHANGED", "Default")
-        end
+        self:SetActiveProfile(self:ResolveSpecProfile() or self:GetDefaultProfileKey(), true)
     end
 
     if self.Debug and self.Debug.Log then
@@ -303,62 +321,69 @@ local function deepCopyData(t)
     return out
 end
 
+function ns:SeedSharedProfileSettings(profile)
+    if profile._sharedSettingsSeeded then return end
+    local scopes = profile.specScopes
+    if type(scopes) == "table" then
+        local current = self:GetSpecScopeKey()
+        local keys = {}
+        for key, scope in pairs(scopes) do
+            if type(key) == "string" and type(scope) == "table" then keys[#keys + 1] = key end
+        end
+        table.sort(keys, function(a, b)
+            if a == current then return false end
+            if b == current then return true end
+            return a < b
+        end)
+        local function overlay(base, source)
+            if type(source) ~= "table" then return base end
+            local dest = type(base) == "table" and base or {}
+            for key, value in pairs(source) do
+                dest[key] = type(value) == "table" and deepCopyData(value) or value
+            end
+            return dest
+        end
+        local modules = profile.modules or {}
+        profile.modules = modules
+        for _, key in ipairs(keys) do
+            local scope = scopes[key]
+            profile.anchors = overlay(profile.anchors, scope.anchors)
+            if type(scope.layoutVisuals) == "table" then
+                modules.Layout = modules.Layout or {}
+                modules.Layout.visuals = overlay(modules.Layout.visuals, scope.layoutVisuals)
+            end
+            modules.CastBar = overlay(modules.CastBar, scope.castbar)
+            modules.Resources = overlay(modules.Resources, scope.resources)
+        end
+    end
+    profile._sharedSettingsSeeded = true
+end
+
 function ns:GetLayoutVisuals(anchorName, create)
     if not self.savedVarsReady then return nil end
     if type(anchorName) ~= "string" or anchorName == "" then return nil end
     local p = self:GetProfile()
     if type(p) ~= "table" then return nil end
 
-    if not create then
-        local overlay = self:GetSpecScope("layoutVisuals", false)
-        if type(overlay) == "table" and type(overlay[anchorName]) == "table" then
-            return overlay[anchorName]
-        end
-        local base = p.modules and p.modules.Layout and p.modules.Layout.visuals
-        if type(base) == "table" then
-            return base[anchorName]
-        end
-        return nil
+    local overlay = self:GetSpecScope("layoutVisuals", false)
+    if type(overlay) == "table" and type(overlay[anchorName]) == "table" then
+        return overlay[anchorName]
     end
-
-    local overlay = self:GetSpecScope("layoutVisuals", true)
-    if type(overlay) ~= "table" then return nil end
-    if type(overlay[anchorName]) ~= "table" then
-        local base = p.modules and p.modules.Layout and p.modules.Layout.visuals
-        local src = type(base) == "table" and base[anchorName] or nil
-        overlay[anchorName] = (type(src) == "table") and deepCopyData(src) or {}
+    if create then
+        p.modules.Layout = p.modules.Layout or {}
+        local layout = p.modules.Layout
+        layout.visuals = layout.visuals or {}
+        layout.visuals[anchorName] = layout.visuals[anchorName] or {}
+        return layout.visuals[anchorName]
     end
-    return overlay[anchorName]
+    local layout = p.modules and p.modules.Layout
+    return layout and layout.visuals and layout.visuals[anchorName]
 end
 
-function ns:GetSpecBlock(overlayDomain, baseGetter, create, excludeKeys)
-    if not self.savedVarsReady then
-        return type(baseGetter) == "function" and baseGetter() or nil
-    end
-    local base = type(baseGetter) == "function" and baseGetter() or nil
-    if not create then
-        local overlay = self:GetSpecScope(overlayDomain, false)
-        if type(overlay) == "table" then return overlay end
-        return base
-    end
-    local overlay = self:GetSpecScope(overlayDomain, true)
-    if type(overlay) ~= "table" then return base end
-    if next(overlay) == nil and type(base) == "table" then
-        local skip = {}
-        if type(excludeKeys) == "table" then
-            for i = 1, #excludeKeys do skip[excludeKeys[i]] = true end
-        end
-        for k, v in pairs(base) do
-            if not skip[k] then
-                if type(v) == "table" then
-                    overlay[k] = deepCopyData(v)
-                else
-                    overlay[k] = v
-                end
-            end
-        end
-    end
-    return overlay
+function ns:GetSpecBlock(overlayDomain, baseGetter)
+    local overlay = self:GetSpecScope(overlayDomain, false)
+    if type(overlay) == "table" and next(overlay) then return overlay end
+    return type(baseGetter) == "function" and baseGetter() or nil
 end
 
 local EXPORT_FORMAT_VERSION = 1
@@ -720,6 +745,8 @@ function ns:ExportProfileString()
 
     local data = deepCopyProfileData(p)
     stripNonPortable(data)
+    data._sharedSettingsSeeded = nil
+    self:SeedSharedProfileSettings(data)
 
     local payload = serializeValue(data, 1, {})
     if type(payload) ~= "string" then
@@ -755,7 +782,7 @@ function ns:DeserializeProfileString(str)
         return nil, "invalid profile data (missing 'modules' table)"
     end
     for _, key in ipairs({ "anchors", "abilities", "auras",
-                           "abilitiesDefaults", "aurasDefaults" }) do
+                           "abilitiesDefaults", "aurasDefaults", "specScopes" }) do
         if data[key] ~= nil and type(data[key]) ~= "table" then
             return nil, ("invalid profile data ('%s' is not a table)"):format(key)
         end
@@ -792,12 +819,9 @@ function ns:ImportProfile(str, profileName)
     stripNonPortable(data)
     data.modules = data.modules or {}
 
+    self:PrepareProfile(data)
     self.db.profiles[name] = data
     self:_AddProfileToOrder(name)
-
-    if self._deepCopyMissing and self.dbDefaults and self.dbDefaults.profiles then
-        self._deepCopyMissing(self.db.profiles[name], self.dbDefaults.profiles.Default)
-    end
 
     if self.Debug and self.Debug.Log then
         self.Debug:Log("[Profile] Imported profile '%s' (%d chars)", name, #str)
