@@ -295,21 +295,8 @@ local function buildProfilesPage(sc)
     local _selectedCopyFrom = nil
 
     local function doCopyPositions()
-        if InCombatLockdown() then return end
         if not _selectedCopyFrom then return end
-        if not ns.db or not ns.db.profiles then return end
-        local src = ns.db.profiles[_selectedCopyFrom]
-        if not src then return end
-        local dst = ns:GetProfile()
-        if src.anchors then
-            local function deepCopy(t)
-                if type(t) ~= "table" then return t end
-                local o = {}
-                for k, v in pairs(t) do o[k] = deepCopy(v) end
-                return o
-            end
-            dst.anchors = deepCopy(src.anchors)
-            ns:Fire("PROFILE_CHANGED", ns:GetProfileKey())
+        if ns:CopyAnchorPositions(_selectedCopyFrom) then
             if ns.Debug and ns.Debug.Log then
                 ns.Debug:Log("[ProfilesPanel] Anchor positions copied from '%s'", _selectedCopyFrom)
             end

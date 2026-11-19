@@ -307,9 +307,14 @@ local function rebuildCandidateGrid()
                     entryRef = entry,
                 }
             elseif entry.type == "item" then
+                local name = entry.name
+                if not name and C_Item and C_Item.GetItemNameByID then
+                    local ok, itemName = pcall(C_Item.GetItemNameByID, entry.id)
+                    if ok then name = itemName end
+                end
                 items[#items + 1] = {
-                    texture  = nil,
-                    label    = "Item " .. tostring(entry.id),
+                    texture  = entry.icon or getItemIconTex(entry.id),
+                    label    = name or ("Item " .. tostring(entry.id)),
                     spellID  = nil,
                     source   = entry.source or "item",
                     isKnown  = true,
@@ -332,7 +337,7 @@ local function rebuildCandidateGrid()
     local callbacks = {
         onClick = function(data)
             if ns.Scanner and ns.Scanner.AddToBar then
-                local ok, err = ns.Scanner:AddToBar(rowKey, data.spellID or (data.entryRef and data.entryRef.id), data.source)
+                local ok, err = ns.Scanner:AddToBar(rowKey, data.entryRef or data.spellID)
                 if ok then
                     rebuildBarLayoutList()
                     rebuildCandidateGrid()

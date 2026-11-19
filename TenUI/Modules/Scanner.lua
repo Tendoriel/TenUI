@@ -272,8 +272,8 @@ function Scanner:GetCandidates(container, filter)
 
     local function addEntry(entry)
         if not entry then return end
-        local key = (entry.type or "?") .. ":" .. tostring(entry.id or "")
-        if not seen[key] then
+        local key = ns.Bars.EntryKey(entry)
+        if key and not seen[key] then
             seen[key] = true
             merged[#merged + 1] = entry
         end
@@ -326,8 +326,8 @@ function Scanner:GetCandidates(container, filter)
         for _, row in pairs(rows) do
             if type(row) == "table" and type(row.displayed) == "table" then
                 for _, entry in ipairs(row.displayed) do
-                    local k = (entry.type or "?") .. ":" .. tostring(entry.id or "")
-                    displayedSet[k] = true
+                    local key = ns.Bars.EntryKey(entry)
+                    if key then displayedSet[key] = true end
                 end
             end
         end
@@ -339,18 +339,25 @@ function Scanner:GetCandidates(container, filter)
         else
             if entry.type == "spell" and isPassiveSpell(entry.id) then
             else
-                local known = entry.isKnown
+                local known = entry.type == "item" or entry.isKnown
                 if known == nil then known = isSpellKnown(entry.id) end
                 if filter.knownOnly and not known then
                 else
-                    local name = entry.name or getSpellName(entry.id) or ""
+                    local name = entry.name
+                    if not name and entry.type == "item" and C_Item and C_Item.GetItemNameByID then
+                        local ok, itemName = pcall(C_Item.GetItemNameByID, entry.id)
+                        if ok then name = itemName end
+                    elseif not name and entry.type == "spell" then
+                        name = getSpellName(entry.id)
+                    end
                     local searchOk = true
                     if filter.search and filter.search ~= "" then
                         local lo = filter.search:lower()
-                        searchOk = name:lower():find(lo, 1, true) ~= nil
+                        searchOk = (name or ""):lower():find(lo, 1, true) ~= nil
+                            or tostring(entry.id):find(lo, 1, true) ~= nil
                     end
                     if searchOk then
-                        local key = (entry.type or "?") .. ":" .. tostring(entry.id or "")
+                        local key = ns.Bars.EntryKey(entry)
                         if filter.hideDisplayed and displayedSet[key] then
                         else
                             out[#out + 1] = entry
@@ -389,11 +396,19 @@ function Scanner:RebuildCandidateCache()
     return true
 end
 
-function Scanner:AddToBar(container, spellID, source)
+function Scanner:AddToBar(container, candidate)
     if not (ns.Bars and ns.Bars.AddEntry) then
         return false, "Bars module not loaded"
     end
-    local entry = { type = "spell", id = tonumber(spellID) }
+    local entry
+    if type(candidate) == "table" then
+        entry = { type = candidate.type, id = tonumber(candidate.id), slot = tonumber(candidate.slot) }
+    else
+        entry = { type = "spell", id = tonumber(candidate) }
+    end
+    if not entry.id or entry.id <= 0 or (entry.type ~= "spell" and entry.type ~= "item") then
+        return false, "invalid candidate"
+    end
     return ns.Bars:AddEntry(container, entry)
 end
 

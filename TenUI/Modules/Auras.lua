@@ -66,6 +66,7 @@ local DEFAULTS = {
         showName  = true,
         showTimer = true,
         showIcon  = true,
+        showStackText = true,
         showInactive = false,
         activeGlow = {
             enabled = false,
@@ -1654,7 +1655,8 @@ end
 
 local function itemPreferenceKeys(item)
     if type(item) ~= "table" then return nil, nil end
-    local cdID = tonumber(item.cooldownID)
+    local id = item.cooldownID
+    local cdID = not isSecret(id) and tonumber(id) or nil
     local cdInfo = item.cooldownInfo
     local sid, osid
     if type(cdInfo) == "table" then
@@ -1678,13 +1680,13 @@ local function itemPreferenceKeys(item)
             end
             rec[1], rec[2] = primary, sid
         end
-        return primary, sid
+        return primary, sid, cdID
     end
     if cdID and Auras._itemKeyCache then
         local rec = Auras._itemKeyCache[cdID]
-        if rec then return rec[1], rec[2] end
+        if rec then return rec[1], rec[2], cdID end
     end
-    return nil, nil
+    return nil, nil, cdID
 end
 
 local function itemDisplayEnabled(item)
@@ -1707,28 +1709,11 @@ local function itemDisplayEnabled(item)
 end
 
 function Auras.PerAuraActiveGlow(item)
-    if not (ns.GetProfile and ns.savedVarsReady) then return nil end
-    local ok, p = pcall(ns.GetProfile, ns)
-    if not ok or type(p) ~= "table" or type(p.auras) ~= "table" then return nil end
-    local primary, base = itemPreferenceKeys(item)
-    if not primary then return nil end
-    local g
-    local ap = p.auras[primary]
-    if type(ap) == "table" and type(ap.glow) == "table"
-       and type(ap.glow.activeAura) == "table"
-       and ap.glow.activeAura.enabled ~= nil then
-        g = ap.glow.activeAura
-    end
-    if not g and base and base ~= primary then
-        local apb = p.auras[base]
-        if type(apb) == "table" and type(apb.glow) == "table"
-           and type(apb.glow.activeAura) == "table"
-           and apb.glow.activeAura.enabled ~= nil then
-            g = apb.glow.activeAura
-        end
-    end
-    if not g then return nil end
-    if g.enabled ~= true then return false end
+    local primary, base, cdID = itemPreferenceKeys(item)
+    local g = Auras:GetAuraGlowSettings(cdID and ("cdm:" .. cdID), primary, "activeAura", base)
+    local mode = Auras:GetAuraGlowMode(g, "activeAura")
+    if mode == "inherit" then return nil end
+    if mode == "off" then return false end
     local s = Auras._perAuraGlowScratch
     if not s then
         s = {}
@@ -1792,27 +1777,11 @@ function Auras._resolveActiveGlowSticky(item)
 end
 
 function Auras.PerAuraPandemicGlow(item, globalOpts)
-    if not (ns.GetProfile and ns.savedVarsReady) then return nil end
-    local ok, p = pcall(ns.GetProfile, ns)
-    if not ok or type(p) ~= "table" or type(p.auras) ~= "table" then return nil end
-    local primary, base = itemPreferenceKeys(item)
-    if not primary then return nil end
-    local g
-    local ap = p.auras[primary]
-    if type(ap) == "table" and type(ap.glow) == "table"
-       and type(ap.glow.pandemic) == "table" then
-        g = ap.glow.pandemic
-    end
-    if not g and base and base ~= primary then
-        local apb = p.auras[base]
-        if type(apb) == "table" and type(apb.glow) == "table"
-           and type(apb.glow.pandemic) == "table" then
-            g = apb.glow.pandemic
-        end
-    end
-    if not g then return nil end
-    if g.enabled == false then return false end
-    if g.enabled ~= true or g.userSet ~= true then return nil end
+    local primary, base, cdID = itemPreferenceKeys(item)
+    local g = Auras:GetAuraGlowSettings(cdID and ("cdm:" .. cdID), primary, "pandemic", base)
+    local mode = Auras:GetAuraGlowMode(g, "pandemic")
+    if mode == "inherit" then return nil end
+    if mode == "off" then return false end
 
     local s = Auras._perAuraPandemicScratch
     if not s then
@@ -1821,7 +1790,6 @@ function Auras.PerAuraPandemicGlow(item, globalOpts)
     end
     s.enabled = true
     wipe(s.only)
-    local cdID = type(item) == "table" and tonumber(item.cooldownID) or nil
     if cdID then s.only[cdID] = true end
     s.skip = nil
     s.evalInterval  = globalOpts and globalOpts.evalInterval or nil
@@ -4002,9 +3970,9 @@ function IconDisplay:BuildActive(preview)
     return active
 end
 
-function IconDisplay:RenderActive(active, suppressSet)
+function IconDisplay:RenderActive(active, suppressSet, preview)
     active = active or {}
-    local ok, err = pcall(self._RenderActiveImpl, self, active, suppressSet)
+    local ok, err = pcall(self._RenderActiveImpl, self, active, suppressSet, preview)
     if not ok then
         dwarnOnce("renderactive-icon-throw",
             "[AURA RENDER ERROR] IconDisplay:RenderActive threw: %s (combat=%s)",
@@ -4017,7 +3985,7 @@ function IconDisplay:RenderActive(active, suppressSet)
     end
 end
 
-function IconDisplay:_RenderActiveImpl(active, suppressSet)
+function IconDisplay:_RenderActiveImpl(active, suppressSet, preview)
     if not self:Enabled() then
         for i = 1, #self.icons do
             local w = self.icons[i]
@@ -4267,7 +4235,7 @@ function IconDisplay:_RenderActiveImpl(active, suppressSet)
     self.activeCount = needed
     if self.container then self.container:SetAlpha(needed == 0 and 0 or 1) end
 
-    if needed > 0 and ns.AutoFitAnchor then
+    if needed > 0 and not preview and ns.AutoFitAnchor then
         if vertical then
             ns:AutoFitAnchor(self.anchorName, iconW, totalH)
         else
@@ -4280,8 +4248,9 @@ function IconDisplay:_RenderActiveImpl(active, suppressSet)
 end
 
 function IconDisplay:Refresh()
-    local active = self:BuildActive() or {}
-    self:RenderActive(active, nil)
+    local preview = cdmPreviewOpen() or (ns.EditMode and ns.EditMode:IsActive())
+    local active = self:BuildActive(preview) or {}
+    self:RenderActive(active, nil, preview)
 end
 
 local _lastLayoutLog = setmetatable({}, { __index = function() return 0 end })
@@ -5125,7 +5094,7 @@ function Auras:Refresh()
     end
 
     if self.IconDisplay and self.IconDisplay.RenderActive then
-        self.IconDisplay:RenderActive(iconActive, iconSuppress)
+        self.IconDisplay:RenderActive(iconActive, iconSuppress, preview)
     elseif self.IconDisplay then
         self.IconDisplay:Refresh()
     end
@@ -7473,6 +7442,7 @@ local function migrateSchema(p)
 end
 
 local MIRROR_EVENTS = {
+    "ADDON_RESTRICTION_STATE_CHANGED",
     "PLAYER_ENTERING_WORLD",
     "PLAYER_SPECIALIZATION_CHANGED",
     "PLAYER_REGEN_ENABLED",
@@ -7517,6 +7487,11 @@ function Auras:OnEnable(_, profile)
         local ef = self._mirrorFrame
         local mod = self
         ef:SetScript("OnEvent", function(_, event, ...)
+            if event == "ADDON_RESTRICTION_STATE_CHANGED" then
+                local _, state = ...
+                if state == Enum.AddOnRestrictionState.Inactive then mod:RequestRefresh() end
+                return
+            end
             if event == "PLAYER_REGEN_ENABLED" then
                 mod:RefreshTrackedAuraCatalog()
             end
@@ -8345,6 +8320,105 @@ function Auras._NativeIncludeSets(kind, enabled)
     return units
 end
 
+function Auras:GetAuraGlowSettings(key, spellID, kind, baseSpellID)
+    local profile = ns.savedVarsReady and ns:GetProfile()
+    local auras = profile and profile.auras
+    if type(auras) ~= "table" then return nil end
+    local function settingsFor(id)
+        local entry = auras[id]
+        local glow = type(entry) == "table" and entry.glow
+        local settings = type(glow) == "table" and glow[kind]
+        if type(settings) == "table" then return settings end
+    end
+    local saved = settingsFor(key)
+    if saved and (saved.mode or self:GetAuraGlowMode(saved, kind) ~= "inherit") then return saved end
+    return settingsFor(spellID) or settingsFor(baseSpellID) or saved
+end
+
+function Auras:GetAuraGlowMode(settings, kind)
+    if not settings then return "inherit" end
+    if settings.mode == "inherit" or settings.mode == "on" or settings.mode == "off" then
+        return settings.mode
+    end
+    if settings.enabled == true and (settings.userSet == true or kind ~= "pandemic") then return "on" end
+    if settings.enabled == false and (settings.userSet == true or kind == "pandemic") then return "off" end
+    return "inherit"
+end
+
+function Auras:_NativeAuraStyle(entry, style)
+    local override = {}
+    local key, spellID, baseID = entry.stableEntryID, entry.overrideSpellID or entry.spellID, entry.spellID
+    local timer = self:GetAuraGlowSettings(key, spellID, "lowTime", baseID)
+    local timerMode = self:GetAuraGlowMode(timer, "lowTime")
+    if timerMode == "off" then
+        override.timerColors = false
+    elseif timer and (timerMode == "on" or (style.timerColors and (timer.threshold or timer.color))) then
+        local _, threshold, nr, ng, nb, na, lr, lg, lb, la = self:GetLowTimeTextConfig()
+        override.timerColors = {
+            threshold = math.max(1, math.min(60, tonumber(timer.threshold) or threshold)),
+            normal = { nr, ng, nb, na },
+            low = type(timer.color) == "table" and timer.color or { lr, lg, lb, la },
+        }
+    end
+    if style.glowsEnabled == false then return next(override) and override or nil end
+
+    local function customStyle(name)
+        if ns.Glow and ns.Glow.GetStyleRenderer and ns.Glow:GetStyleRenderer(name) then return name end
+    end
+    local gain = self:GetAuraGlowSettings(key, spellID, "gain", baseID)
+    if self:GetAuraGlowMode(gain, "gain") == "on" then
+        override.gainColor = type(gain.color) == "table" and gain.color or { 0.4, 0.8, 1, 0.8 }
+        override.gainGlowStyle = customStyle(gain.style)
+    end
+
+    local pandemic = self:GetAuraGlowSettings(key, spellID, "pandemic", baseID)
+    local pandemicMode = self:GetAuraGlowMode(pandemic, "pandemic")
+    local filters = self:GetPandemicOpts()
+    local cdID = entry.cooldownID
+    if pandemicMode == "on" then
+        override.pandemic = true
+    elseif pandemicMode == "off" or (cdID and filters and (
+        (type(filters.skip) == "table" and filters.skip[cdID])
+        or (type(filters.only) == "table" and next(filters.only) and not filters.only[cdID]))) then
+        override.pandemic = false
+    end
+    if pandemic and (pandemic.mode or pandemic.userSet) then
+        if type(pandemic.color) == "table" then override.pandemicColor = pandemic.color end
+        if pandemic.style == "pulse" then override.pandemicStyle = "pulse" end
+        override.pandemicGlowStyle = customStyle(pandemic.style)
+    end
+
+    local active = self:GetAuraGlowSettings(key, spellID, "activeAura", baseID)
+    local activeMode = self:GetAuraGlowMode(active, "activeAura")
+    if activeMode == "off" then
+        override.activeBorder = false
+    elseif active and (activeMode == "on" or style.activeBorder) then
+        if type(active.color) == "table" and (active.mode or activeMode == "on") then
+            override.activeBorder = active.color
+        elseif activeMode == "on" then
+            override.activeBorder = { 0.4, 0.8, 1, 1 }
+        end
+        override.activeGlowStyle = customStyle(active.style)
+    end
+    return next(override) and override or nil
+end
+
+function Auras:_NativeStyleOverrides(kind, config, units)
+    local overrides = { player = {}, target = {} }
+    for _, entry in ipairs(_auraCatalog[kind]) do
+        if entryDisplayEnabled(entry) then
+            local style = self:_NativeAuraStyle(entry, config.style)
+            if style then
+                for _, id in ipairs(entry.matchSpellIDs) do
+                    if units.player[id] then overrides.player[id] = overrides.player[id] or style end
+                    if not entry.selfAura and units.target[id] then overrides.target[id] = overrides.target[id] or style end
+                end
+            end
+        end
+    end
+    return overrides
+end
+
 function Auras._NativeConfig(display, isBar)
     local anchor = ns:GetAnchor(display.anchorName)
     if not (anchor and anchor.frame) then return nil end
@@ -8354,7 +8428,11 @@ function Auras._NativeConfig(display, isBar)
     local width, height, spacing
     local point, vertical
     local glowEnabled = not ns.Glow or not ns.Glow.IsGloballyEnabled or ns.Glow:IsGloballyEnabled()
-    local style = { pandemic = glowEnabled and Auras:IsPandemicEnabled() }
+    local style = { pandemic = glowEnabled and Auras:IsPandemicEnabled(), glowsEnabled = glowEnabled }
+    local colorTimers, threshold, nr, ng, nb, na, lr, lg, lb, la = Auras:GetLowTimeTextConfig()
+    if colorTimers then
+        style.timerColors = { threshold = threshold, normal = { nr, ng, nb, na }, low = { lr, lg, lb, la } }
+    end
     if isBar then
         width, height, spacing = resolveTrackedBarsGeometry(opts.barHeight, opts.spacing)
         point, vertical = "BOTTOMLEFT", true
@@ -8363,7 +8441,7 @@ function Auras._NativeConfig(display, isBar)
         style.showTimer = opts.showTimer ~= false
         style.showIcon = opts.showIcon ~= false
         style.showCount = opts.showStackText ~= false
-        style.count = { anchor = "LEFT", x = 2 }
+        style.count = { anchor = "LEFT", x = style.showIcon and height + 4 or 2, y = -4 }
         style.texture = ns.Widgets.resolveMedia("statusbar", visuals.texture, ns.Widgets.DEFAULT_STATUSBAR)
             or [[Interface\TargetingFrame\UI-StatusBar]]
         style.fill = visuals.fillColor or { 1, 1, 1, 1 }
@@ -8387,7 +8465,7 @@ function Auras._NativeConfig(display, isBar)
     end
     local glow = opts.activeGlow
     if glowEnabled and glow and glow.enabled then
-        style.border = glow.color or { glow.colorR or 1, glow.colorG or 0.85,
+        style.activeBorder = glow.color or { glow.colorR or 1, glow.colorG or 0.85,
             glow.colorB or 0.3, glow.colorA or 0.85 }
     end
     return {
@@ -8406,11 +8484,6 @@ end
 function Auras:_SyncNativeDisplays(preview)
     local native = ns.TrackedAuras
     self._fixedBarIndices = nil
-    if preview then
-        native:Hide()
-        self._nativeIcons, self._nativeBars = false, false
-        return false, false
-    end
     local showIcons = self.IconDisplay and self.IconDisplay:Enabled()
     local showBars = self.BarDisplay and self.BarDisplay:Enabled()
     local iconIDs = self._NativeIncludeSets("TrackedIcon", showIcons)
@@ -8423,6 +8496,7 @@ function Auras:_SyncNativeDisplays(preview)
     end
     local iconConfig = showIcons and self._NativeConfig(self.IconDisplay, false)
     local barConfig = showBars and self._NativeConfig(self.BarDisplay, true)
+    if iconConfig then iconConfig.overrides = self:_NativeStyleOverrides("TrackedIcon", iconConfig, iconIDs) end
     self._nativeIcons = native:SyncDisplay("icons", iconConfig, iconIDs)
     local fixedRows
     if barConfig and self:GetBarShowInactive() then
@@ -8437,6 +8511,7 @@ function Auras:_SyncNativeDisplays(preview)
                     name = not isSecret(name) and name or nil,
                     icon = not isSecret(icon) and icon or nil,
                     rank = rank[entry.cooldownID] or math.huge,
+                    styleOverrides = self:_NativeAuraStyle(entry, barConfig.style),
                     player = {},
                     target = {},
                 }
@@ -8455,8 +8530,15 @@ function Auras:_SyncNativeDisplays(preview)
         end)
         self._fixedBarIndices = {}
         for index, row in ipairs(fixedRows) do self._fixedBarIndices[row.key] = index end
+    elseif barConfig then
+        barConfig.overrides = self:_NativeStyleOverrides("TrackedBars", barConfig, barIDs)
     end
     self._nativeBars = native:SyncDisplay("bars", barConfig, barIDs, fixedRows)
+    if preview then
+        -- Prepare the native filters before combat can close Edit Mode.
+        native:Hide()
+        self._nativeIcons, self._nativeBars = false, false
+    end
     if not self._nativeBars then self._fixedBarIndices = nil end
     return self._nativeIcons, self._nativeBars
 end

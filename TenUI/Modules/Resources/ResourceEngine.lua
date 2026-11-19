@@ -191,7 +191,7 @@ local function readStagger(key)
         return rawStagger, rawMax, true
     end
     local cCur, cMax = pseudoCacheGet(key)
-    return (cCur or 0), (cMax or 0), false
+    return (cCur or 0), (cMax or 0), false, rawStagger, rawMax
 end
 Engine.readStagger = readStagger
 

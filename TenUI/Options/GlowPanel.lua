@@ -156,7 +156,7 @@ local function buildGlowPage(sc)
     end
 
     children[#children + 1] = C.CreateHelpText(sc,
-        "Right-click an ability in CDM Bars to override these defaults. Set the Blizzard Pandemic warning on the Auras page.")
+        "Right-click an ability in CDM Bars to override its glow. For Pandemic, use Auras or right-click a tracked aura.")
 
     children[#children + 1] = C.CreateSubSection(sc, "Preview")
 

@@ -17,6 +17,14 @@ local tostring       = tostring
 local type           = type
 local pairs          = pairs
 
+local function isSecret(value)
+    return issecretvalue and issecretvalue(value)
+end
+
+local function hasCastInfo(value)
+    return isSecret(value) or value ~= nil
+end
+
 local INTERP_IMMEDIATE = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate or 0
 local DIR_ELAPSED      = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.ElapsedTime or 0
 local DIR_REMAINING    = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime or 1
@@ -193,7 +201,8 @@ function CastBar:ApplyCastVisual(castType, spellName, iconTexture, notInterrupti
     if profile.enabled == false then return end
 
     local colorKey = castType
-    if notInterruptible and (castType == "cast" or castType == "channel" or castType == "empower") then
+    if not isSecret(notInterruptible) and notInterruptible
+       and (castType == "cast" or castType == "channel" or castType == "empower") then
         colorKey = "uninterruptible"
     end
     applyColor(self.bar, profile.colors and profile.colors[colorKey])
@@ -254,17 +263,12 @@ local function tick_OnUpdate(_self, _elapsed)
     end
 
     local ok, remaining = pcall(duration.GetRemainingDuration, duration)
-    if not ok or type(remaining) ~= "number" then
+    if not ok or isSecret(remaining) or type(remaining) ~= "number" then
         if CastBar.bar then CastBar.bar:SetRightText("") end
         return
     end
 
     if remaining < 0 then remaining = 0 end
-
-    if type(issecretvalue) == "function" and issecretvalue(remaining) then
-        if CastBar.bar then CastBar.bar:SetRightText("") end
-        return
-    end
 
     local tenths = math.floor(remaining * 10)
     if tenths == CastBar._lastDisplayedTenths then return end
@@ -634,23 +638,29 @@ end
 local function castMatches(castGUID, castBarID)
     if castBarID and CastBar._activeCastBarID then return castBarID == CastBar._activeCastBarID end
     local readable = readCastGUID(castGUID)
-    return readable ~= nil and readable == CastBar._activeCastID
+    if readable ~= nil and CastBar._activeCastID ~= nil then
+        return readable == CastBar._activeCastID
+    end
+end
+
+local function playerHasLiveCast()
+    return (UnitCastingInfo and hasCastInfo(UnitCastingInfo("player")))
+        or (UnitChannelInfo and hasCastInfo(UnitChannelInfo("player")))
 end
 
 function CastBar:OnSpellcastStart(castGUID, castBarID)
     if self._state == "channeling" or self._state == "empowering" then
         local castingName = UnitCastingInfo and UnitCastingInfo("player")
-        if castingName then
-            dlog("CastBar: hardcast preempted " .. tostring(self._state)
-                .. " (engine reports cast=" .. tostring(castingName) .. " active)")
+        if hasCastInfo(castingName) then
+            dlog("CastBar: hardcast preempted " .. self._state)
         else
             dlog("CastBar GUARD: OnSpellcastStart rejected -- state="
                 .. tostring(self._state) .. " (instant during channel/empower)")
             return
         end
     end
-    if UnitChannelInfo and UnitChannelInfo("player")
-       and not (UnitCastingInfo and UnitCastingInfo("player")) then
+    if UnitChannelInfo and hasCastInfo(UnitChannelInfo("player"))
+       and not (UnitCastingInfo and hasCastInfo(UnitCastingInfo("player"))) then
         dlog("CastBar GUARD: OnSpellcastStart rejected -- UnitChannelInfo active (no engine cast)")
         return
     end
@@ -666,9 +676,9 @@ function CastBar:OnSpellcastStart(castGUID, castBarID)
     self:StopLiveTimer()
     self:ClearStagePips()
 
-    local name, displayName, texture, startMs, endMs, isTradeSkill, castID, notInterruptible, spellID =
+    local name, displayName, texture, startMs, endMs, isTradeSkill, castID, notInterruptible, spellID, nativeCastBarID =
         UnitCastingInfo("player")
-    if not name then
+    if not hasCastInfo(name) then
         dlog("OnSpellcastStart: no UnitCastingInfo (likely race) -- ignoring")
         return
     end
@@ -676,7 +686,7 @@ function CastBar:OnSpellcastStart(castGUID, castBarID)
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, false)
 
     self._activeCastID = readCastGUID(castID) or readCastGUID(castGUID)
-    self._activeCastBarID = castBarID
+    self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
     self._failedFlag    = false
     self._state = "casting"
@@ -699,7 +709,7 @@ function CastBar:OnSpellcastDelayed(castGUID, castBarID)
     if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "casting" then return end
     local name = UnitCastingInfo("player")
-    if not name then return end
+    if not hasCastInfo(name) then return end
     local duration = UnitCastingDuration("player")
     if duration then
         self:ArmTimer(duration, false)
@@ -720,9 +730,10 @@ function CastBar:OnChannelStart(castGUID, castBarID)
     self:StopLiveTimer()
     self:ClearStagePips()
 
-    local name, displayName, texture, startMs, endMs, isTradeSkill, notInterruptible, spellID =
+    local name, displayName, texture, startMs, endMs, isTradeSkill, notInterruptible, spellID,
+        _isEmpowered, _numStages, nativeCastBarID =
         UnitChannelInfo("player")
-    if not name then
+    if not hasCastInfo(name) then
         dlog("OnChannelStart: no UnitChannelInfo -- ignoring")
         return
     end
@@ -731,7 +742,7 @@ function CastBar:OnChannelStart(castGUID, castBarID)
 
     self._state = "channeling"
     self._activeCastID = readCastGUID(castGUID)
-    self._activeCastBarID = castBarID
+    self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
     self._failedFlag    = false
 
@@ -750,8 +761,13 @@ function CastBar:OnChannelStart(castGUID, castBarID)
 end
 
 function CastBar:OnChannelUpdate(castGUID, castBarID)
-    if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "channeling" then return end
+    local matches = castMatches(castGUID, castBarID)
+    if matches == false then return end
+    if matches == nil then
+        local name, _, _, _, _, _, _, _, empowered = UnitChannelInfo("player")
+        if not hasCastInfo(name) or empowered then return end
+    end
     local duration = UnitChannelDuration("player")
     if duration then
         self:ArmTimer(duration, true)
@@ -771,9 +787,9 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
     self._failedFlag    = false
     self:StopLiveTimer()
 
-    local name, displayName, texture, startMs, endMs, isTradeSkill, notInterruptible, spellID, isEmpowered, numStages =
+    local name, displayName, texture, startMs, endMs, isTradeSkill, notInterruptible, spellID, isEmpowered, numStages, nativeCastBarID =
         UnitChannelInfo("player")
-    if not name then
+    if not hasCastInfo(name) then
         dlog("OnEmpowerStart: no UnitChannelInfo -- ignoring")
         return
     end
@@ -782,7 +798,7 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
 
     self._state = "empowering"
     self._activeCastID = readCastGUID(castGUID)
-    self._activeCastBarID = castBarID
+    self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
     self._failedFlag    = false
     self:ApplyCastVisual("empower", displayName or name, texture, notInterruptible)
@@ -799,7 +815,7 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
         self:StartLiveTimer(duration)
     end
 
-    self._stageNotInterruptible = notInterruptible and true or false
+    self._stageNotInterruptible = not isSecret(notInterruptible) and notInterruptible == true
     self:SetupStagePips(numStages, startMs)
 
     local totalSec = computeRemainingSec(startMs, endMs)
@@ -807,16 +823,18 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
 end
 
 function CastBar:OnEmpowerUpdate(castGUID, castBarID)
-    if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "empowering" then return end
+    local matches = castMatches(castGUID, castBarID)
+    if matches == false then return end
+    local _n, _dn, _tex, startMs, _endMs, _ts, _ni, _sid, empowered, numStages =
+        UnitChannelInfo("player")
+    if matches == nil and not empowered then return end
     local duration = (UnitEmpoweredChannelDuration and UnitEmpoweredChannelDuration("player"))
                      or UnitChannelDuration("player")
     if duration then
         self:ArmTimer(duration, false)
         self:StartLiveTimer(duration)
     end
-    local _n, _dn, _tex, startMs, _endMs, _ts, _ni, _sid, _emp, numStages =
-        UnitChannelInfo("player")
     self:SetupStagePips(numStages, startMs)
 end
 
@@ -849,9 +867,7 @@ function CastBar:OnSpellcastStop(castGUID, castBarID)
         end
 
         if withinGraceWindow() then
-            local castingNow = UnitCastingInfo and UnitCastingInfo("player")
-            local channelNow = UnitChannelInfo and UnitChannelInfo("player")
-            if not castingNow and not channelNow then
+            if not playerHasLiveCast() then
                 local delay = GRACE_WINDOW_SEC - (GetTime() - (lastCast.seenAt or 0))
                 if delay < 0.05 then delay = 0.05 end
                 CastBar:CancelHideTimer()
@@ -886,18 +902,32 @@ function CastBar:OnSpellcastStop(castGUID, castBarID)
 end
 
 function CastBar:OnChannelStop(castGUID, complete, castBarID)
-    if not castMatches(castGUID, castBarID) then return end
+    if self._state ~= "channeling" and self._state ~= "empowering" then return end
+    local matches = castMatches(castGUID, castBarID)
+    if matches == false then return end
 
-    if complete == false then
+    if matches and complete == false then
         self:OnSpellcastInterrupted(castGUID, castBarID)
         return
     end
 
-    local pending = {}
+    local previous = self._pendingNaturalStop
+    if previous and previous.channelStop and previous.complete == false and complete == nil then
+        complete = false
+    end
+    local pending = { channelStop = true, complete = complete }
     self._pendingNaturalStop = pending
     C_Timer.After(0, function()
         if CastBar._pendingNaturalStop ~= pending then return end
         CastBar._pendingNaturalStop = false
+
+        -- With neither a readable GUID nor a castBarID, a delayed STOP may
+        -- belong to a previous channel. Leave any current cast alone.
+        if not matches and playerHasLiveCast() then return end
+        if complete == false then
+            CastBar:FinishInterruptedCast()
+            return
+        end
 
         if CastBar._failedFlag then
             CastBar._failedFlag = false
@@ -909,9 +939,7 @@ function CastBar:OnChannelStop(castGUID, complete, castBarID)
         end
 
         if withinGraceWindow() then
-            local castingNow = UnitCastingInfo and UnitCastingInfo("player")
-            local channelNow = UnitChannelInfo and UnitChannelInfo("player")
-            if not castingNow and not channelNow then
+            if not playerHasLiveCast() then
                 local delay = GRACE_WINDOW_SEC - (GetTime() - (lastCast.seenAt or 0))
                 if delay < 0.05 then delay = 0.05 end
                 CastBar:CancelHideTimer()
@@ -937,6 +965,7 @@ function CastBar:OnChannelStop(castGUID, complete, castBarID)
 
         CastBar:StopLiveTimer()
         CastBar:ClearTimeText()
+        CastBar._state = "finishing"
         local profile = getProfile()
         CastBar:HideAfterDelay((profile and profile.holdTime) or 0.4)
         CastBar._activeCastID = nil
@@ -945,9 +974,7 @@ function CastBar:OnChannelStop(castGUID, complete, castBarID)
     end)
 end
 
-function CastBar:OnSpellcastInterrupted(castGUID, castBarID)
-    if not castMatches(castGUID, castBarID) then return end
-
+function CastBar:FinishInterruptedCast()
     self._pendingNaturalStop = false
     self._succeededFlag = false
     self._failedFlag    = false
@@ -957,12 +984,26 @@ function CastBar:OnSpellcastInterrupted(castGUID, castBarID)
     clearLastCast()
 end
 
+function CastBar:OnSpellcastInterrupted(castGUID, castBarID)
+    local matches = castMatches(castGUID, castBarID)
+    if matches then
+        self:FinishInterruptedCast()
+    elseif matches == nil then
+        self:OnChannelStop(castGUID, false, castBarID)
+    end
+end
+
 function CastBar:OnSpellcastFailed(castGUID, castBarID)
+    if self._state == "channeling" or self._state == "empowering" then return end
     if not castMatches(castGUID, castBarID) then return end
 
-    self._failedFlag = true
+    local failure = {}
+    self._failedFlag = failure
     C_Timer.After(0, function()
-        if CastBar._failedFlag and not CastBar._pendingNaturalStop then
+        if CastBar._failedFlag ~= failure then return end
+        if playerHasLiveCast() then
+            CastBar._failedFlag = false
+        elseif not CastBar._pendingNaturalStop then
             CastBar._failedFlag = false
             CastBar:PlayFailedVisual()
             CastBar._activeCastID = nil
@@ -982,9 +1023,7 @@ function CastBar:OnSpellcastSucceeded(castGUID, castBarID)
        and self._state ~= "casting"
        and self._state ~= "channeling"
        and self._state ~= "empowering" then
-        local castingNow = UnitCastingInfo and UnitCastingInfo("player")
-        local channelNow = UnitChannelInfo and UnitChannelInfo("player")
-        if not castingNow and not channelNow then
+        if not playerHasLiveCast() then
             local sname, stex = nil, nil
             local sid = self._instantPendingSpellID
             self._instantPendingSpellID = nil
@@ -1009,12 +1048,11 @@ function CastBar:OnSpellcastSucceeded(castGUID, castBarID)
 end
 
 function CastBar:OnInterruptibleChanged(notInterruptible)
+    if isSecret(notInterruptible) then return end
     if self._state ~= "casting" and self._state ~= "channeling" and self._state ~= "empowering" then
         return
     end
-    local castingName = UnitCastingInfo("player")
-    local channelName = UnitChannelInfo("player")
-    if not castingName and not channelName then return end
+    if not playerHasLiveCast() then return end
 
     local profile = getProfile()
     if not (profile and profile.colors) then return end
@@ -1182,14 +1220,15 @@ local EVENT_DISPATCH = {
     UNIT_SPELLCAST_NOT_INTERRUPTIBLE   = function() CastBar:OnInterruptibleChanged(true) end,
     UNIT_SPELLCAST_CHANNEL_START       = function(_unit, castGUID, _spellID, castBarID) CastBar:OnChannelStart(castGUID, castBarID) end,
     UNIT_SPELLCAST_CHANNEL_STOP        = function(_unit, castGUID, _spellID, interruptedBy, castBarID)
-        local secret = issecretvalue and issecretvalue(interruptedBy)
-        CastBar:OnChannelStop(castGUID, secret or interruptedBy == nil, castBarID)
+        local complete
+        if not isSecret(interruptedBy) then complete = interruptedBy == nil end
+        CastBar:OnChannelStop(castGUID, complete, castBarID)
     end,
     UNIT_SPELLCAST_CHANNEL_UPDATE      = function(_unit, castGUID, _spellID, castBarID) CastBar:OnChannelUpdate(castGUID, castBarID) end,
     UNIT_SPELLCAST_EMPOWER_START       = function(_unit, castGUID, _spellID, castBarID) CastBar:OnEmpowerStart(castGUID, castBarID) end,
     UNIT_SPELLCAST_EMPOWER_STOP        = function(_unit, castGUID, _spellID, complete, _interruptedBy, castBarID)
-        local secret = issecretvalue and issecretvalue(complete)
-        CastBar:OnChannelStop(castGUID, secret or complete, castBarID)
+        if isSecret(complete) then complete = nil end
+        CastBar:OnChannelStop(castGUID, complete, castBarID)
     end,
     UNIT_SPELLCAST_EMPOWER_UPDATE      = function(_unit, castGUID, _spellID, castBarID) CastBar:OnEmpowerUpdate(castGUID, castBarID) end,
     PLAYER_ENTERING_WORLD              = function() CastBar:OnPlayerEnteringWorld() end,
@@ -1455,10 +1494,10 @@ function CastBar:ApplyOptions()
         local notInterruptible = false
         if self._state == "casting" then
             local _n, _d, _t, _s, _e, _ts, _cid, ni = UnitCastingInfo("player")
-            notInterruptible = ni or false
+            notInterruptible = not isSecret(ni) and ni == true
         elseif UnitChannelInfo then
             local _n, _d, _t, _s, _e, _ts, ni = UnitChannelInfo("player")
-            notInterruptible = ni or false
+            notInterruptible = not isSecret(ni) and ni == true
         end
         local colorKey = (notInterruptible and "uninterruptible") or key
         if profile.colors then

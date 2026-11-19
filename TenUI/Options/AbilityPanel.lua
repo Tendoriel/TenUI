@@ -25,27 +25,6 @@ local function getAbilityProfile(spellID)
     return p.abilities[spellID]
 end
 
-local function glowStyleValues(defaultKey, excludeBlizzard)
-    local names
-    if ns.Glow and ns.Glow.GetRegisteredStyles then
-        names = ns.Glow:GetRegisteredStyles()
-    else
-        names = { "blizzard", "border", "overlay", "pixel", "solid" }
-    end
-    local values = {}
-    for i = 1, #names do
-        local k = names[i]
-        if not (excludeBlizzard and k == "blizzard") then
-            local label = (ns.Glow and ns.Glow.GetStyleLabel) and ns.Glow:GetStyleLabel(k) or k
-            if k == defaultKey then
-                label = label .. " (default)"
-            end
-            values[#values + 1] = { key = k, label = label }
-        end
-    end
-    return values
-end
-
 local function buildAbilityPage(sc)
     local C = ns.UI
     if not C then return end
@@ -200,7 +179,7 @@ local function buildAbilityPage(sc)
     )
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Proc Glow Style",
-        glowStyleValues("blizzard"),
+        ns.Glow:GetStyleChoices("blizzard"),
         function()
             local ap = getAbilityProfile(spellID)
             return (ap.glow and ap.glow.proc and ap.glow.proc.style) or "blizzard"
@@ -276,7 +255,7 @@ local function buildAbilityPage(sc)
     )
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Ready Glow Style",
-        glowStyleValues("border", true),
+        ns.Glow:GetStyleChoices("border", true),
         function()
             local ap = getAbilityProfile(spellID)
             local s = (ap.glow and ap.glow.ready and ap.glow.ready.style) or "border"
@@ -354,7 +333,7 @@ local function buildAbilityPage(sc)
     )
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Max Stacks Glow Style",
-        glowStyleValues("solid", true),
+        ns.Glow:GetStyleChoices("solid", true),
         function()
             local ap = getAbilityProfile(spellID)
             local s = (ap.glow and ap.glow.maxStacks and ap.glow.maxStacks.style) or "solid"

@@ -137,6 +137,11 @@ local CAST_COUNT_SPELLS = {
     [196277] = true,
 }
 
+local VOIDFORM_SPELL_ID = 228260
+local VOIDFORM_CDM_SPELL_ID = 228264
+local VOID_VOLLEY_SPELL_ID = 1242173
+local VOID_VOLLEY_AURA_ID = 1242171
+
 local CONSUMABLE_PRESETS = {
     {
         key        = "healthstone",
@@ -619,10 +624,16 @@ local function getRowProfile(name)
     return rows[name]
 end
 
+function Bars.EntryKey(entry)
+    if not (entry and entry.type and entry.id) then return nil end
+    local slot = entry.type == "item" and tonumber(entry.slot)
+    if slot then return "slot:" .. slot end
+    return entry.type .. ":" .. tostring(tonumber(entry.id) or entry.id)
+end
+
 local function entriesEqual(a, b)
-    return a and b
-        and a.type == b.type
-        and tonumber(a.id) == tonumber(b.id)
+    local key = Bars.EntryKey(a)
+    return key ~= nil and key == Bars.EntryKey(b)
 end
 
 local function findEntry(list, entry)
@@ -695,20 +706,16 @@ local function dedupForRow(rowName, entries)
     local seen = {}
     local displayed = rp.displayed or {}
     for i = 1, #displayed do
-        local d = displayed[i]
-        if d and d.type and d.id then
-            seen[d.type .. ":" .. tostring(d.id)] = true
-        end
+        local key = Bars.EntryKey(displayed[i])
+        if key then seen[key] = true end
     end
     local out = {}
     for i = 1, #entries do
         local e = entries[i]
-        if e and e.type and e.id then
-            local key = e.type .. ":" .. tostring(e.id)
-            if not seen[key] then
-                seen[key] = true
-                tinsert(out, e)
-            end
+        local key = Bars.EntryKey(e)
+        if key and not seen[key] then
+            seen[key] = true
+            tinsert(out, e)
         end
     end
     return out
@@ -1622,6 +1629,9 @@ local function destroyIconList(list)
     for i = 1, #list do
         local icon = list[i]
         if icon then
+            if icon.frame and ns.TrackedAuras then
+                ns.TrackedAuras:ReleaseCooldownDebuff(icon)
+            end
             if ns.Glow and ns.Glow.ClearAll then
                 pcall(ns.Glow.ClearAll, ns.Glow, icon)
             end
@@ -1677,10 +1687,30 @@ local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
     showText = showText and not (text and text.enabled == false)
     icon.frame.cooldown:SetHideCountdownNumbers(not showText)
     icon:ApplyCooldownTextStyle(style)
+    if entry.type == "spell" and ns.TrackedAuras and
+       (entry.id == VOIDFORM_SPELL_ID or entry.id == VOIDFORM_CDM_SPELL_ID or entry.id == VOID_VOLLEY_SPELL_ID) then
+        ns.TrackedAuras:SetupPlayerAuraCount(icon, VOID_VOLLEY_AURA_ID)
+    end
     if options and options.targetDebuffTimer and ns.TrackedAuras then
         local ids = { [entry.id] = true }
         local base = resolveBaseSpellID(entry.id)
         if base then ids[base] = true end
+        local active = activeSpellID(entry.id)
+        if active then ids[active] = true end
+        if _mirrorMapDirty then rebuildMirrorMap() end
+        local child = _mirrorMap[active or entry.id] or _mirrorMap[entry.id] or _mirrorMap[base]
+        local info = child and child.cooldownInfo
+        if not isSecret(info) and type(info) == "table" then
+            local function addID(id)
+                if not isSecret(id) and type(id) == "number" and id > 0 then ids[id] = true end
+            end
+            addID(info.spellID)
+            addID(info.overrideSpellID)
+            addID(info.overrideTooltipSpellID)
+            if not isSecret(info.linkedSpellIDs) and type(info.linkedSpellIDs) == "table" then
+                for _, id in ipairs(info.linkedSpellIDs) do addID(id) end
+            end
+        end
         ns.TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, style)
     elseif ns.TrackedAuras then
         ns.TrackedAuras:SyncCooldownDebuff(icon)
@@ -2164,7 +2194,12 @@ function Row:RefreshIcon(icon, entry, desat)
             icon:ClearCooldown()
         end
 
-        if isChargeSpell then
+        local auraCount = icon._playerAuraCount
+        local showAuraCount = auraCount and activeSID == VOID_VOLLEY_SPELL_ID
+        if auraCount then auraCount.container:SetShown(showAuraCount) end
+        if showAuraCount then
+            icon:SetStackTextRaw("")
+        elseif isChargeSpell then
             local current = chargesInfo.currentCharges
             local okCmp, isZero = pcall(function() return current == 0 end)
             if okCmp and isZero then

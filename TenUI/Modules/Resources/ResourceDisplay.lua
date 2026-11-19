@@ -2293,9 +2293,17 @@ local function secondary_RefreshStaggerBar()
     if not (bar and desc) then return end
     local c = resolveSecondaryColor(Secondary.profileRef) or desc.color
     if c then bar:SetColor(c[1] or 1, c[2] or 1, c[3] or 1, c[4] or 1) end
-    local cur, max = 0, 0
+    local cur, max, readable, rawStagger, rawMax = 0, 0
     if Engine and Engine.readStagger then
-        cur, max = Engine.readStagger("STAGGER")
+        cur, max, readable, rawStagger, rawMax = Engine.readStagger("STAGGER")
+    end
+    if not readable and type(rawStagger) == "number" and type(rawMax) == "number" then
+        local rangeSet = pcall(bar.SetMinMaxValues, bar, 0, rawMax)
+        if rangeSet and pcall(bar.SetValue, bar, rawStagger) then
+            bar:SetRightText("")
+            bar:Show()
+            return
+        end
     end
     secondary_SetPseudoBar(cur, max, true)
 end

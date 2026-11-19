@@ -5,16 +5,12 @@ local C_Timer            = C_Timer
 local C_PlayerInfo       = C_PlayerInfo
 local C_Spell            = C_Spell
 local C_ChallengeMode    = C_ChallengeMode
-local C_UnitAuras        = C_UnitAuras
-local IsMounted          = IsMounted
 local IsInInstance       = IsInInstance
 local InCombatLockdown   = InCombatLockdown
 local UnitAffectingCombat = UnitAffectingCombat
 local GetTime            = GetTime
-local UnitClass          = UnitClass
 local pcall              = pcall
 local type               = type
-local ipairs             = ipairs
 local issecretvalue      = issecretvalue
 local floor              = math.floor
 local min               = math.min
@@ -32,8 +28,6 @@ local UPDATE_THROTTLE = 1 / 30
 local SPEED_EMA_ALPHA = 0.25
 local WHITE_TEX       = "Interface\\Buttons\\WHITE8x8"
 local DEFAULT_WS_ICON = 135860
-
-local DRUID_MOUNT_FORM_SPELLS = { 783, 33943, 40120, 165962, 210053 }
 
 local DEFAULTS = {
     enabled      = true,
@@ -104,7 +98,6 @@ local DragonRiding = {
     _lastSkyCur = -1, _lastSkyProgress = -1,
     _lastSwCur  = -1, _lastSwProgress  = -1,
     _lastCdStart = -1, _lastCdDur = -1,
-    _playerClass = nil,
 }
 ns.DragonRiding = DragonRiding
 
@@ -161,30 +154,7 @@ function DragonRiding:IsInLockedContent()
     return false
 end
 
-function DragonRiding:IsPlayerMountedLike()
-    if IsMounted and IsMounted() then return true end
-    if self._playerClass ~= "DRUID" then return false end
-    if GetNumShapeshiftForms and GetShapeshiftFormInfo then
-        for index = 1, GetNumShapeshiftForms() do
-            local _, active, _, spellID = GetShapeshiftFormInfo(index)
-            if not isSecret(active) and not isSecret(spellID) and active then
-                for _, formID in ipairs(DRUID_MOUNT_FORM_SPELLS) do
-                    if spellID == formID then return true end
-                end
-            end
-        end
-    end
-    if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
-        for i = 1, #DRUID_MOUNT_FORM_SPELLS do
-            local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, DRUID_MOUNT_FORM_SPELLS[i])
-            if ok and aura then return true end
-        end
-    end
-    return false
-end
-
 function DragonRiding:IsOnSkyridingMount()
-    if not self:IsPlayerMountedLike() then return false end
     if not (C_PlayerInfo and C_PlayerInfo.GetGlidingInfo) then return false end
     local ok, _, canGlide = pcall(C_PlayerInfo.GetGlidingInfo)
     return ok and canGlide == true
@@ -723,9 +693,7 @@ local function dragonRiding_OnEvent(_, event)
     elseif event == "SPELL_UPDATE_COOLDOWN" then
         DragonRiding._whirlingDirty = true
         return
-    elseif event == "TRAIT_CONFIG_UPDATED" then
-        DragonRiding._whirlingDirty = true
-    elseif event == "PLAYER_ENTERING_WORLD" then
+    elseif event == "TRAIT_CONFIG_UPDATED" or event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
         DragonRiding._skyridingDirty = true
         DragonRiding._secondWindDirty = true
         DragonRiding._whirlingDirty = true
@@ -739,17 +707,17 @@ function DragonRiding:EnsureEventFrame()
     ef:RegisterEvent("PLAYER_ENTERING_WORLD")
     ef:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
     ef:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
+    ef:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
     ef:RegisterEvent("PLAYER_REGEN_ENABLED")
     ef:RegisterEvent("PLAYER_REGEN_DISABLED")
     ef:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
     ef:RegisterEvent("TRAIT_CONFIG_UPDATED")
+    ef:RegisterEvent("SPELLS_CHANGED")
     ef:SetScript("OnEvent", dragonRiding_OnEvent)
     self.evtFrame = ef
 end
 
 function DragonRiding:OnEnable(_, profile)
-    local _, class = UnitClass("player")
-    self._playerClass = class
     self.profileRef = self:GetProfile() or profile
     self._enabled = true
 

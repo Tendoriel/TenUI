@@ -25,9 +25,6 @@ local function getAuraProfile(spellID)
     p.auras = p.auras or {}
     if not p.auras[spellID] then
         p.auras[spellID] = {}
-        if p.aurasDefaults and ns._deepCopyMissing then
-            ns._deepCopyMissing(p.auras[spellID], p.aurasDefaults)
-        end
     end
     return p.auras[spellID]
 end
@@ -433,6 +430,51 @@ local function buildAuraPage(sc)
         function(v) if ns.Auras then ns.Auras:SetPandemicEnabled(v) end end
     )
 
+    for _, display in ipairs({ { key = "icon", label = "Tracked Icons" }, { key = "bar", label = "Tracked Bars" } }) do
+        local kind = display.key
+        children[#children + 1] = C.CreateCheckBox(sc, "Show stacks (" .. display.label .. ")",
+            function()
+                local profile = ns.Auras and ns.Auras.profileRef
+                local options = profile and profile[kind .. "s"]
+                return not (options and options.showStackText == false)
+            end,
+            function(v)
+                local auras = ns.Auras
+                if auras and auras.profileRef then
+                    auras.profileRef[kind .. "s"].showStackText = v
+                    auras:RequestRefresh()
+                end
+            end
+        )
+        children[#children + 1] = C.CreateCheckBox(sc, "Active aura highlight (" .. display.label .. ")",
+            function() return ns.Auras and ns.Auras:IsActiveGlowEnabled(kind) end,
+            function(v) if ns.Auras then ns.Auras:SetActiveGlowEnabled(v, kind) end end
+        )
+    end
+
+    children[#children + 1] = C.CreateSubSection(sc, "Timer Colors")
+    children[#children + 1] = C.CreateCheckBox(sc, "Color expiring aura timers",
+        function() return ns.Auras and ns.Auras:GetLowTimeTextEnabled() end,
+        function(v) if ns.Auras then ns.Auras:SetLowTimeTextEnabled(v) end end
+    )
+    children[#children + 1] = C.CreateSlider(sc, "Low time (seconds)", 1, 60, 1,
+        function()
+            if not ns.Auras then return 5 end
+            local _, threshold = ns.Auras:GetLowTimeTextConfig()
+            return threshold
+        end,
+        function(v) if ns.Auras then ns.Auras:SetLowTimeTextThreshold(v) end end
+    )
+    children[#children + 1] = C.CreateColorSwatch(sc, "Low-time color",
+        function()
+            if not ns.Auras then return 1, 0.15, 0.1, 1 end
+            return select(7, ns.Auras:GetLowTimeTextConfig())
+        end,
+        function(r, g, b)
+            if ns.Auras then ns.Auras:SetLowTimeTextLowRGB(r, g, b) end
+        end
+    )
+
     children[#children + 1] = C.CreateSubSection(sc, "Tracked Auras")
 
     local auraContainer = CreateFrame("Frame", nil, sc)
@@ -492,6 +534,101 @@ local function buildAuraSettingsPage(sc)
         if ns.Auras then ns.Auras:OpenBlizzardCDMSettings() end
     end)
 
+    local function getGlow(kind)
+        return ns.Auras and ns.Auras:GetAuraGlowSettings(key, spellID, kind)
+    end
+
+    local function setGlow(kind, setting, value)
+        if not ns.Auras then return end
+        local existing = getGlow(kind)
+        local aura = getAuraProfile(key)
+        if type(aura.glow) ~= "table" then aura.glow = {} end
+        if type(aura.glow[kind]) ~= "table" or existing ~= aura.glow[kind] then
+            aura.glow[kind] = {}
+            if existing then ns._deepCopyMissing(aura.glow[kind], existing) end
+        end
+        local glow = aura.glow[kind]
+        glow.mode = ns.Auras:GetAuraGlowMode(glow, kind)
+        glow[setting] = value
+        ns.Auras:RequestRefresh()
+    end
+
+    local glowModes = {
+        { key = "inherit", label = "Use Auras setting" },
+        { key = "on", label = "Always enabled" },
+        { key = "off", label = "Off" },
+    }
+    local function addGlowMode(label, kind)
+        children[#children + 1] = C.CreateDropdownLikeList(sc, label, glowModes,
+            function() return ns.Auras and ns.Auras:GetAuraGlowMode(getGlow(kind), kind) or "inherit" end,
+            function(v) setGlow(kind, "mode", v) end
+        )
+    end
+    local function addGlowStyle(label, kind, choices)
+        local default = choices[1].key
+        for _, choice in ipairs(ns.Glow:GetStyleChoices(nil, kind ~= "gain")) do
+            choices[#choices + 1] = choice
+        end
+        children[#children + 1] = C.CreateDropdownLikeList(sc, label, choices,
+            function()
+                local glow = getGlow(kind)
+                local style = glow and glow.style
+                for _, choice in ipairs(choices) do
+                    if choice.key == style then return style end
+                end
+                return default
+            end,
+            function(v) setGlow(kind, "style", v) end
+        )
+    end
+    local function addGlowColor(label, kind, default)
+        children[#children + 1] = C.CreateColorSwatch(sc, label,
+            function()
+                local glow = getGlow(kind)
+                local color = glow and type(glow.color) == "table" and glow.color
+                    or (type(default) == "function" and default() or default)
+                return unpack(color)
+            end,
+            function(r, g, b, a) setGlow(kind, "color", { r, g, b, a }) end
+        )
+    end
+
+    children[#children + 1] = C.CreateSection(sc, "Glow Effects")
+    children[#children + 1] = C.CreateSubSection(sc, "Pandemic")
+    addGlowMode("Pandemic warning", "pandemic")
+    addGlowStyle("Pandemic glow style", "pandemic", {
+        { key = "static", label = "Blizzard (static)" }, { key = "pulse", label = "Blizzard (pulse)" },
+    })
+    addGlowColor("Pandemic color", "pandemic", { 1, 1, 1, 1 })
+    children[#children + 1] = C.CreateHelpText(sc,
+        "The warning follows Blizzard's refresh window for this aura.")
+
+    children[#children + 1] = C.CreateSubSection(sc, "Active Aura")
+    addGlowMode("Active aura highlight", "activeAura")
+    addGlowStyle("Active aura glow style", "activeAura", { { key = "default", label = "Default outline" } })
+    addGlowColor("Active aura highlight color", "activeAura", { 0.4, 0.8, 1, 1 })
+    children[#children + 1] = C.CreateSubSection(sc, "Aura Proc")
+    children[#children + 1] = C.CreateCheckBox(sc, "Glow when aura appears",
+        function() return ns.Auras and ns.Auras:GetAuraGlowMode(getGlow("gain"), "gain") == "on" end,
+        function(v) setGlow("gain", "mode", v and "on" or "off") end
+    )
+    addGlowStyle("Proc glow style", "gain", { { key = "flash", label = "Flash (default)" } })
+    addGlowColor("Proc glow color", "gain", { 0.4, 0.8, 1, 0.8 })
+
+    children[#children + 1] = C.CreateSubSection(sc, "Low Time")
+    addGlowMode("Color expiring aura timer", "lowTime")
+    children[#children + 1] = C.CreateSlider(sc, "Low time (seconds)", 1, 60, 1,
+        function()
+            local glow = getGlow("lowTime")
+            local _, threshold = ns.Auras:GetLowTimeTextConfig()
+            return glow and tonumber(glow.threshold) or threshold
+        end,
+        function(v) setGlow("lowTime", "threshold", v) end
+    )
+    addGlowColor("Low-time color", "lowTime", function()
+        return { select(7, ns.Auras:GetLowTimeTextConfig()) }
+    end)
+
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math.max(totalH, 10))
 end
@@ -501,8 +638,8 @@ function AuraPanel:OpenForAura(spellID, containerKey, cooldownID)
     _currentAuraContainer = containerKey
     _currentAuraCooldownID = tonumber(cooldownID)
     if ns.Options then
-        ns.Options:SelectPage("aura_settings", true)
         ns.Options:Open()
+        ns.Options:SelectPage("aura_settings", true)
     end
 end
 

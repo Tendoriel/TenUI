@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.2] - 2026-11-16
+
+### Added
+
+- Aura Settings offers the CDM glow styles, including animated FX, for Pandemic warnings, active auras, and the moment an aura appears.
+- Each tracked aura can use its own timer color and low-time threshold. Auras also has separate stack and active-highlight controls for Tracked Icons and Tracked Bars.
+
+### Fixed
+
+- Tracked Bars places player buffs and current-target debuffs in one column. Native aura filters are prepared during Edit Mode so the trackers are ready when combat starts.
+- Void Volley shows the stack count from its buff on the CDM icon and updates after each cast.
+- CDM debuff timers match linked spell IDs. Scanner keeps an equipment entry's item type and slot when adding it to a bar.
+- Cast Bar ignores late stop events for a previous cast, clears ended channels, and preserves the interrupted state.
+- Layout restores Global Scale and preserves saved anchor opacity and scale. Copy Positions and profile exports handle older specialization layouts.
+- Stagger updates the bar with restricted values. Devourer can use the Collapsing Star aura to identify Void Metamorphosis. Skyriding detection uses the client's gliding state for Soar and flight forms.
+
 ## [0.5.1] - 2026-11-15
 
 ### Added

@@ -332,7 +332,10 @@ function Resolver:IsInVoidMeta()
         return false
     end
     local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, VOID_META_AURA_ID)
-    return ok and aura ~= nil
+    if ok and ((issecretvalue and issecretvalue(aura)) or aura ~= nil) then return true end
+    -- The transformation may be hidden while its Collapsing Star aura is still readable.
+    local found, collapsingStar = pcall(C_UnitAuras.GetPlayerAuraBySpellID, COLLAPSING_STAR_AURA_ID)
+    return found and ((issecretvalue and issecretvalue(collapsingStar)) or collapsingStar ~= nil) or false
 end
 
 function Resolver:HasSoulGlutton()

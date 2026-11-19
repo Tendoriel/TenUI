@@ -729,6 +729,30 @@ function ns:SaveCurrentAsProfile(name)
     return self:CopyProfile(self:GetProfileKey(), name)
 end
 
+function ns:CopyAnchorPositions(sourceName)
+    if not self.savedVarsReady or InCombatLockdown() then return false end
+    local source = self.db.profiles[sourceName]
+    local destination = self:GetProfile()
+    if not source or source == destination or type(source.anchors) ~= "table" then return false end
+
+    local copied = deepCopyData(source.anchors)
+    local sourceScope = type(source.specScopes) == "table" and source.specScopes[self:GetSpecScopeKey()]
+    if type(sourceScope) == "table" and type(sourceScope.anchors) == "table" then
+        for name, entry in pairs(sourceScope.anchors) do
+            copied[name] = deepCopyData(entry)
+        end
+    end
+    local destinationOverrides = self:GetSpecScope("anchors", false)
+    destination.anchors = copied
+    if type(destinationOverrides) == "table" then
+        for name in pairs(destinationOverrides) do
+            destinationOverrides[name] = deepCopyData(copied[name])
+        end
+    end
+    self:Fire("PROFILE_CHANGED", self:GetProfileKey())
+    return true
+end
+
 local function stripNonPortable(data)
     if type(data) ~= "table" then return end
     local m = data.modules
@@ -745,7 +769,6 @@ function ns:ExportProfileString()
 
     local data = deepCopyProfileData(p)
     stripNonPortable(data)
-    data._sharedSettingsSeeded = nil
     self:SeedSharedProfileSettings(data)
 
     local payload = serializeValue(data, 1, {})

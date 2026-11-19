@@ -617,6 +617,22 @@ function Glow:GetStyleLabel(name)
     return name
 end
 
+function Glow:GetStyleChoices(defaultKey, excludeBlizzard)
+    local choices = {}
+    for _, name in ipairs(self:GetRegisteredStyles()) do
+        if not (excludeBlizzard and name == "blizzard") then
+            local label = self:GetStyleLabel(name)
+            if name == defaultKey then label = label .. " (default)" end
+            choices[#choices + 1] = { key = name, label = label }
+        end
+    end
+    return choices
+end
+
+function Glow:GetStyleRenderer(name)
+    return STYLES[name]
+end
+
 function Glow:GetGlobalDefault(intent)
     local d = _globalDefault(intent)
     if not d then return nil, nil end

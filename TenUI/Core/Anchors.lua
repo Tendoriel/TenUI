@@ -286,7 +286,10 @@ local function validatePos(pos, def)
     if not isFiniteNumber(width) or width <= 0 then width = d.width corrupt = true end
     local height = pos.height
     if not isFiniteNumber(height) or height <= 0 then height = d.height corrupt = true end
-    return { point = point, x = x, y = y, width = width, height = height }, corrupt
+    local alpha = isFiniteNumber(pos.alpha) and math.max(0, math.min(1, pos.alpha)) or nil
+    local scale = isFiniteNumber(pos.scale) and pos.scale > 0 and pos.scale or nil
+    return { point = point, x = x, y = y, width = width, height = height,
+        alpha = alpha, scale = scale }, corrupt
 end
 
 local function clampToScreen(pos)
@@ -307,6 +310,8 @@ local function clampToScreen(pos)
 end
 
 local function applyPosition(anchor, pos)
+    local scale = pos.scale or 1
+    if anchor:GetScale() ~= scale then anchor:SetScale(scale) end
     local w = pos.width or anchor:GetWidth() or 200
     local h = pos.height or anchor:GetHeight() or 32
     anchor:SetSize(w, h)
@@ -871,9 +876,7 @@ function Anchors:ApplyProfile()
         end
         applyPosition(runtime.frame, entry)
         do
-            local savedAlpha = (type(rawResolved) == "table") and rawResolved.alpha or nil
-            if not isFiniteNumber(savedAlpha) then savedAlpha = 1.0 end
-            if savedAlpha < 0 then savedAlpha = 0 elseif savedAlpha > 1 then savedAlpha = 1 end
+            local savedAlpha = entry.alpha or 1.0
             runtime.restoreAlpha = savedAlpha
             if not runtime.visHidden then
                 runtime.frame:SetAlpha(savedAlpha)
@@ -1461,6 +1464,8 @@ for i = 1, #DEFAULT_ANCHORS do
 end
 
 ns:RegisterMessage("SAVEDVARS_READY", function()
+    local scale = ns.db.globalScale
+    parent:SetScale(isFiniteNumber(scale) and math.max(0.5, math.min(2, scale)) or 1)
     Anchors:ApplyProfile()
 end)
 
