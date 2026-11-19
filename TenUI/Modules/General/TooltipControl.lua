@@ -51,6 +51,8 @@ local function addIDLine(tooltip, label, id)
 end
 
 local function gate(tooltip)
+    local module = ns:GetModule("TooltipControl")
+    if not (module and module.enabled) then return nil end
     local o = getOpts()
     if not (o and o.enabled) then return nil end
     if o.requireModifier and not IsShiftKeyDown() then return nil end

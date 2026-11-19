@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.3] - 2026-11-16
+
+### Fixed
+
+- Tracked Bars keeps summons matched to the installed rows when combat delays a layout change. Unlearned auras stay out of the HUD by default.
+- Tracked Icons and Tracked Bars can prepare fresh aura containers on reload while combat is active. Changes to existing containers retry when restrictions lift.
+- Aura settings migrated from older profiles keep independent glow styles.
+- Maelstrom Weapon uses Blizzard's aura stack bindings for its segments and count. If the native display is unavailable, the fallback clears unreadable counts.
+- CDM updates target-debuff filters when spells change and waits for valid Blizzard layout data before applying layout changes or seeding a new specialization.
+- Holy Paladin reminders distinguish your Beacon effects from another Paladin's. The General page's Enable TenUI switch now controls the HUD and keeps the minimap launcher available.
+
 ## [0.5.2] - 2026-11-16
 
 ### Added

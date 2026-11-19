@@ -199,39 +199,24 @@ function Engine:ReadStagger(key)
     return readStagger(key)
 end
 
-local function readAuraStacks(key, spellId)
+local function readAuraStacks(_, spellId)
     if not spellId then
         return 0, true
     end
     if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then
-        local c = pseudoCacheGet(key)
-        return (c or 0), false
+        return nil, false
     end
     local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellId)
-    if not ok then
-        local c = pseudoCacheGet(key)
-        return (c or 0), false
-    end
+    if not ok or isSecret(aura) then return nil, false end
     if aura == nil then
         if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret and C_Secrets.ShouldSpellAuraBeSecret(spellId) then
-            local cached = pseudoCacheGet(key)
-            return cached or 0, false
+            return nil, false
         end
-        pseudoCacheSet(key, 0, nil)
         return 0, true
     end
     local stacks = aura.applications
-    if stacks == nil then
-        pseudoCacheSet(key, 1, nil)
-        return 1, true
-    end
-    if isSecret(stacks) then
-        local c = pseudoCacheGet(key)
-        return (c or 0), false
-    end
-    local n = tonumber(stacks) or 0
-    pseudoCacheSet(key, n, nil)
-    return n, true
+    if isSecret(stacks) then return nil, false end
+    return tonumber(stacks) or 1, true
 end
 Engine.readAuraStacks = readAuraStacks
 

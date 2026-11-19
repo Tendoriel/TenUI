@@ -1422,9 +1422,9 @@ function Primary:Enable(parentProfile)
 
     if not self.eventFrame then
         self.eventFrame = CreateFrame("Frame", "TenUIResourcePrimaryEventFrame")
-        self.eventFrame:SetScript("OnEvent", primary_OnEvent)
     end
     local ef = self.eventFrame
+    ef:SetScript("OnEvent", primary_OnEvent)
 
     local function regUnit(event)
         local ok, err = pcall(ef.RegisterUnitEvent, ef, event, "player")
@@ -1549,6 +1549,7 @@ local function secondary_ReleaseExtras(kind, n)
 end
 
 local function secondary_HideAllPooled()
+    if Secondary.nativeAura then Secondary.nativeAura.frame:Hide() end
     for i = 1, #Secondary.shardPool do
         local w = Secondary.shardPool[i]
         if w then w:Hide() end
@@ -1631,9 +1632,9 @@ local function secondary_EnsureCountText()
     return fs
 end
 
-local function secondary_ApplyCountFont()
-    local fs = Secondary.countText
-    local overlay = Secondary.countOverlay
+local function secondary_ApplyCountFont(fs, overlay)
+    fs = fs or Secondary.countText
+    overlay = overlay or Secondary.countOverlay
     if not (fs and overlay) then return end
     local sp = Primary.selfProfile or {}
     local t = secondary_TextConf() or {}
@@ -2341,13 +2342,99 @@ local function secondary_RefreshFragmentsBar()
     end
 end
 
+local function secondary_SyncNativeAuraPips()
+    local count, spellID = #Secondary.pips, Secondary.desc.auraSpellId
+    if count == 0 or not spellID then return false end
+    local current = Secondary.nativeAura
+    local restricted = InCombatLockdown()
+        or (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret())
+    local texture = secondary_ResolveTexture()
+    local color = resolveSecondaryColor(Secondary.profileRef) or Secondary.desc.color or { 1, 1, 1, 1 }
+    local style = secondary_StyleConf() or {}
+    local border = style.showBorder
+    if type(border) ~= "boolean" then border = (Primary.selfProfile or {}).showBorder ~= false end
+    local textEnabled = secondary_CountEnabled()
+    local function setFill(fill, pip)
+        local inset = border and 1 or 0
+        fill:ClearAllPoints()
+        fill:SetPoint("TOPLEFT", pip, "TOPLEFT", inset, -inset)
+        fill:SetPoint("BOTTOMRIGHT", pip, "BOTTOMRIGHT", -inset, inset)
+        fill:SetStatusBarTexture(texture)
+        fill:SetStatusBarColor(color[1] or 1, color[2] or 1, color[3] or 1, color[4] or 1)
+    end
+    if current and current.spellID == spellID and current.count == count then
+        if not restricted then
+            for index, fill in ipairs(current.fills) do setFill(fill, Secondary.pips[index]) end
+            secondary_ApplyCountFont(current.text, current.textHost)
+            current.textHost:SetShown(textEnabled)
+        end
+        current.frame:Show()
+        return true
+    end
+    if current then current.frame:Hide() end
+    if Secondary.nativeAuraRetry and Secondary.nativeAuraRetry > GetTime() then return false end
+
+    local frame
+    local candidate = { spellID = spellID, count = count, fills = {} }
+    local ok, err = pcall(function()
+        if C_AddOns and not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
+            C_AddOns.LoadAddOn("Blizzard_AuraContainer")
+        end
+        frame = CreateFrame("AuraContainer", nil, Secondary.container, "CustomAuraContainerTemplate")
+        frame:SetAllPoints(Secondary.container)
+        frame:EnableMouse(false)
+        frame:SetUnit("player")
+        local filters = { includeSpellIDs = { [spellID] = true } }
+        local formatter = C_StringUtil.CreateNumericRuleFormatter()
+        formatter:SetBreakpoints({ { threshold = 0, format = "%d" } })
+        for index, pip in ipairs(Secondary.pips) do
+            frame:AddAuraSlot(tostring(index), "HELPFUL", {
+                candidateFilters = filters,
+                initializeFrame = function(button)
+                    button:SetAllPoints(frame)
+                    button:EnableMouse(false)
+                    local fill = CreateFrame("StatusBar", nil, button)
+                    fill:SetFrameLevel(pip:GetFrameLevel() + 1)
+                    setFill(fill, pip)
+                    button:SetApplicationBar(fill, { minApplications = index - 1, maxApplications = index })
+                    candidate.fills[index] = fill
+                    if index == 1 then
+                        local host = CreateFrame("Frame", nil, button)
+                        host:SetAllPoints(frame)
+                        host:SetFrameLevel(pip:GetFrameLevel() + 10)
+                        local text = host:CreateFontString(nil, "OVERLAY")
+                        text:SetTextColor(1, 1, 1, 1)
+                        secondary_ApplyCountFont(text, host)
+                        host:SetShown(textEnabled)
+                        button:SetApplicationCount(text, { formatter = formatter })
+                        candidate.text, candidate.textHost = text, host
+                    end
+                end,
+            })
+        end
+        frame:SetEnabled(true)
+    end)
+    if not ok then
+        if frame then frame:Hide() end
+        Secondary.nativeAuraRetry = GetTime() + 2
+        dlog("Secondary aura pips: %s", tostring(err))
+        return false
+    end
+    candidate.frame = frame
+    Secondary.nativeAura, Secondary.nativeAuraRetry = candidate, nil
+    return true
+end
+
 local function secondary_RefreshAuraPips()
     local desc = Secondary.desc
     if not desc then return end
     local spellId = desc.auraSpellId
-    local count = 0
-    if Engine and Engine.readAuraStacks and spellId then
-        count = Engine.readAuraStacks(desc.auraKey or "AURA", spellId)
+    local native = secondary_SyncNativeAuraPips()
+    local count, known
+    if native then
+        if Engine and Engine.EnsureAuraTicker then Engine:EnsureAuraTicker(false) end
+    elseif Engine and Engine.readAuraStacks and spellId then
+        count, known = Engine.readAuraStacks(desc.auraKey or "AURA", spellId)
     end
     if type(count) ~= "number" or count < 0 then count = 0 end
     for i = 1, #Secondary.pips do
@@ -2357,7 +2444,7 @@ local function secondary_RefreshAuraPips()
         end
     end
     if secondary_CountActive() then
-        secondary_SetCountValue(count)
+        secondary_SetCountValue(known and count or nil)
     end
 end
 
@@ -2425,6 +2512,9 @@ local function secondary_PreviewRender()
 end
 
 local function secondary_Refresh()
+    if Secondary.nativeAura and (_previewActive or Secondary._valueSource ~= "aura") then
+        Secondary.nativeAura.frame:Hide()
+    end
     if _previewActive then
         secondary_PreviewRender()
         return
@@ -2460,6 +2550,8 @@ local function secondary_ApplyValueText()
     end
     if secondary_UpdateCountVisibility() then
         secondary_ApplyCountFont()
+    end
+    if Secondary._valueSource == "aura" or secondary_CountActive() then
         secondary_Refresh()
     end
 end
@@ -2643,6 +2735,10 @@ local function secondary_DeferredRelayout()
 end
 
 local function secondary_OnEvent(_self, event, unit, arg2)
+    if event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "PLAYER_REGEN_ENABLED" then
+        if Secondary._valueSource == "aura" then secondary_Refresh() end
+        return
+    end
     if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         secondary_Rebuild()
         secondary_Refresh()
@@ -2709,9 +2805,9 @@ function Secondary:Enable(parentProfile)
 
     if not self.eventFrame then
         self.eventFrame = CreateFrame("Frame", "TenUIResourceSecondaryEventFrame")
-        self.eventFrame:SetScript("OnEvent", secondary_OnEvent)
     end
     local ef = self.eventFrame
+    ef:SetScript("OnEvent", secondary_OnEvent)
 
     local function regUnit(event)
         local ok, err = pcall(ef.RegisterUnitEvent, ef, event, "player")
@@ -2722,6 +2818,8 @@ function Secondary:Enable(parentProfile)
     regUnit("UNIT_MAXPOWER")
     ef:RegisterEvent("PLAYER_ENTERING_WORLD")
     ef:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    ef:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ef:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
     pcall(ef.RegisterEvent, ef, "RUNE_POWER_UPDATE")
     pcall(ef.RegisterEvent, ef, "RUNE_TYPE_UPDATE")
     pcall(ef.RegisterEvent, ef, "PLAYER_TALENT_UPDATE")

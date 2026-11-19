@@ -659,16 +659,12 @@ local function cdmAvailable()
         and type(C_CooldownViewer.GetCooldownViewerCooldownInfo) == "function"
 end
 
-local function scanCategory(cat, configuredOnly)
+local function scanCategory(cat, configuredOnly, layout)
     local out = {}
     if not cdmAvailable() then return out end
     local ids
-    local settings = _G.CooldownViewerSettings
-    if configuredOnly and settings and settings.GetDataProvider then
-        local ok, configured = pcall(function()
-            return settings:GetDataProvider():GetOrderedCooldownIDsForCategory(cat, false)
-        end)
-        if ok then ids = configured end
+    if configuredOnly and layout then
+        ids = layout.configured[cat] or {}
     end
     if type(ids) ~= "table" then
         local ok, categoryIDs = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, cat, not configuredOnly)
@@ -690,10 +686,10 @@ local function scanCategory(cat, configuredOnly)
     return out
 end
 
-local function scanCDMRow(rowName, configuredOnly)
+local function scanCDMRow(rowName, configuredOnly, layout)
     local entries = {}
     for _, cat in ipairs(CDM_CATEGORIES[rowName]) do
-        for _, entry in ipairs(scanCategory(cat, configuredOnly)) do
+        for _, entry in ipairs(scanCategory(cat, configuredOnly, layout)) do
             entries[#entries + 1] = entry
         end
     end
@@ -1676,26 +1672,13 @@ local function hideSpellEntry(entry)
     return entry.hideWhileUnknown == true and not spellInActiveSpellbook(entry.id)
 end
 
-local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
-    local options = entry.type == "spell" and abilityOptions(entry)
-    local text = options and options.warnings and options.warnings.cooldownText or nil
-    local style = rowStyle
-    if text and (text.custom or text.font ~= "default" or text.size ~= 13
-        or text.anchor ~= "CENTER" or text.x ~= 0 or text.y ~= 0) then
-        style = text
-    end
-    showText = showText and not (text and text.enabled == false)
-    icon.frame.cooldown:SetHideCountdownNumbers(not showText)
-    icon:ApplyCooldownTextStyle(style)
-    if entry.type == "spell" and ns.TrackedAuras and
-       (entry.id == VOIDFORM_SPELL_ID or entry.id == VOIDFORM_CDM_SPELL_ID or entry.id == VOID_VOLLEY_SPELL_ID) then
-        ns.TrackedAuras:SetupPlayerAuraCount(icon, VOID_VOLLEY_AURA_ID)
-    end
-    if options and options.targetDebuffTimer and ns.TrackedAuras then
+local function syncAbilityDebuff(icon, entry, timer)
+    if not ns.TrackedAuras then return end
+    if timer then
         local ids = { [entry.id] = true }
         local base = resolveBaseSpellID(entry.id)
         if base then ids[base] = true end
-        local active = activeSpellID(entry.id)
+        local active = activeSpellID(base or entry.id)
         if active then ids[active] = true end
         if _mirrorMapDirty then rebuildMirrorMap() end
         local child = _mirrorMap[active or entry.id] or _mirrorMap[entry.id] or _mirrorMap[base]
@@ -1711,10 +1694,30 @@ local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
                 for _, id in ipairs(info.linkedSpellIDs) do addID(id) end
             end
         end
-        ns.TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, style)
-    elseif ns.TrackedAuras then
+        ns.TrackedAuras:SyncCooldownDebuff(icon, ids, timer.showText, timer.showSwipe, timer.style, active or entry.id)
+    else
         ns.TrackedAuras:SyncCooldownDebuff(icon)
     end
+end
+
+local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
+    local options = entry.type == "spell" and abilityOptions(entry)
+    local text = options and options.warnings and options.warnings.cooldownText or nil
+    local style = rowStyle
+    if text and (text.custom or text.font ~= "default" or text.size ~= 13
+        or text.anchor ~= "CENTER" or text.x ~= 0 or text.y ~= 0) then
+        style = text
+    end
+    showText = showText and not (text and text.enabled == false)
+    icon.frame.cooldown:SetHideCountdownNumbers(not showText)
+    icon:ApplyCooldownTextStyle(style)
+    if entry.type == "spell" and ns.TrackedAuras and
+       (entry.id == VOIDFORM_SPELL_ID or entry.id == VOIDFORM_CDM_SPELL_ID or entry.id == VOID_VOLLEY_SPELL_ID) then
+        ns.TrackedAuras:SetupPlayerAuraCount(icon, VOID_VOLLEY_AURA_ID)
+    end
+    icon._debuffTimer = options and options.targetDebuffTimer
+        and { showText = showText, showSwipe = showSwipe, style = style } or nil
+    syncAbilityDebuff(icon, entry, icon._debuffTimer)
 end
 
 local function buildIconsForList(container, displayedList, showText, rowName)
@@ -2665,7 +2668,6 @@ function Row:Disable()
     self._enabled = false
     if self.eventFrame then
         self.eventFrame:UnregisterAllEvents()
-        self.eventFrame:SetScript("OnEvent", nil)
     end
     if self._resizeCB then
         ns:UnregisterMessage("ANCHOR_RESIZED", self._resizeCB)
@@ -3053,6 +3055,8 @@ function Bars:_SeedScope()
             return false
         end
     end
+    local layout, ready = ns:ReadCooldownLayout()
+    if ready == false then return false end
 
     local class = scopeKey:match("^(.+)_")
     local keys = self:GetScopes()
@@ -3075,7 +3079,7 @@ function Bars:_SeedScope()
                 if #entries > 0 then break end
             end
         end
-        if #entries == 0 then entries = scanCDMRow(name, true) end
+        if #entries == 0 then entries = scanCDMRow(name, true, layout) end
         rows[name].displayed = dedupForRow(name, entries)
         any = any or #rows[name].displayed > 0
     end
@@ -3217,7 +3221,13 @@ function Bars:OnEnable(_, profile)
             elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
                 wipe(_spellOverrides)
             end
-            if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" or event == "SPELL_UPDATE_ICON" then
+            if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" or event == "SPELL_UPDATE_ICON"
+                or event == "ADDON_RESTRICTION_STATE_CHANGED" then
+                for _, row in pairs(self.rows) do
+                    for _, icon in ipairs(row.icons) do
+                        if icon._debuffTimer then syncAbilityDebuff(icon, icon._entry, icon._debuffTimer) end
+                    end
+                end
                 for _, row in pairs(self.rows) do row:RequestRefresh() end
             end
             if event == "COOLDOWN_VIEWER_DATA_LOADED" or event == "PLAYER_REGEN_ENABLED" or event == "SPELLS_CHANGED" then
@@ -3232,10 +3242,23 @@ function Bars:OnEnable(_, profile)
         ef:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         ef:RegisterEvent("SPELLS_CHANGED")
         ef:RegisterEvent("SPELL_UPDATE_ICON")
+        ef:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
         ef:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
         pcall(ef.RegisterEvent, ef, "COOLDOWN_VIEWER_DATA_LOADED")
     end
 
+    if not self._layoutCallbacks and EventRegistry and EventRegistry.RegisterCallback then
+        local function seedFromLayout()
+            C_Timer.After(0, function()
+                if self._enabled and self:_SeedScope() then
+                    for _, row in pairs(self.rows) do row:Rebuild() end
+                end
+            end)
+        end
+        self._layoutCallbacks = true
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnShow", seedFromLayout, self)
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", seedFromLayout, self)
+    end
     if not self._pollTicker and C_Timer and C_Timer.NewTicker then
         local mod = self
         self._pollTicker = C_Timer.NewTicker(POLL_INTERVAL_SEC, function()

@@ -103,6 +103,25 @@ function ns:EnableAllModules()
     end
 end
 
+function ns:ApplyHUDEnabled()
+    if not self.savedVarsReady or not self.hudStarted then return end
+    local general = self:GetProfile().modules.General
+    local enabled = not (general and general.enabled == false)
+    if self.hudEnabled == enabled or (self.hudEnabled ~= nil and InCombatLockdown()) then return end
+    self.hudEnabled = enabled
+
+    local failed = {}
+    for name in pairs(self.modules) do
+        local apply = (enabled or name == "MinimapButton") and self.EnableModule or self.DisableModule
+        if not apply(self, name) then failed[#failed + 1] = name end
+    end
+    if #failed > 0 then
+        table.sort(failed)
+        DEFAULT_CHAT_FRAME:AddMessage("|cff4fc3f7TenUI|r could not update: " .. table.concat(failed, ", "))
+    end
+    return failed
+end
+
 function ns:DisableAllModules()
     for name, mod in pairs(self.modules) do
         if mod.enabled then

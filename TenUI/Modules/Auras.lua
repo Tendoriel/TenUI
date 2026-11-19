@@ -1835,7 +1835,7 @@ local function entryDisplayEnabled(entry)
             return apb.enabled ~= false
         end
     end
-    return true
+    return entry.isKnown ~= false
 end
 
 local function cdmPreviewOpen()
@@ -5085,10 +5085,10 @@ function Auras:Refresh()
         barActive      = barActive,
     }
 
-    if nativeBars and self._fixedBarIndices then
+    if nativeBars then
         local overrides = {}
         for i, item in ipairs(barActive) do
-            if not barSuppress[i] and item._fixedBarIndex then overrides[item._fixedBarIndex] = true end
+            if not barSuppress[i] and item._fixedBarKey then overrides[item._fixedBarKey] = true end
         end
         ns.TrackedAuras:SetFixedBarOverrides(overrides)
     end
@@ -7582,6 +7582,7 @@ function Auras:OnEnable(_, profile)
             end)
         end
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", scheduleScan, self)
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnShow", scheduleScan, self)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnHide", scheduleScan, self)
     end
 
@@ -7691,36 +7692,15 @@ function liveCategorySet(category)
     if category == nil then return nil end
     if not cdmCatalogAvailable() then return nil end
     local okS, ids = pcall(C_CooldownViewer.GetCooldownViewerCategorySet, category, true)
-    if okS and type(ids) == "table" then
+    if okS and not isSecret(ids) and type(ids) == "table" then
         return ids
     end
     return nil
 end
 
-local function cdmSettingsDataProvider()
-    local cvs = _G.CooldownViewerSettings
-    if type(cvs) ~= "table" or type(cvs.GetDataProvider) ~= "function" then
-        return nil
-    end
-    local okP, provider = pcall(cvs.GetDataProvider, cvs)
-    if not okP or type(provider) ~= "table" then
-        return nil
-    end
-    if type(provider.GetOrderedCooldownIDsForCategory) ~= "function" then
-        return nil
-    end
-    return provider
-end
-
-function orderedConfiguredIDs(category)
+function orderedConfiguredIDs(category, layout)
     if category == nil then return nil end
-    local provider = cdmSettingsDataProvider()
-    if provider then
-        local okO, ids = pcall(provider.GetOrderedCooldownIDsForCategory, provider, category, true)
-        if okO and type(ids) == "table" then
-            return ids, "ordered"
-        end
-    end
+    if layout then return layout.ordered[category] or {}, "ordered" end
     local fallback = liveCategorySet(category)
     if type(fallback) == "table" then
         return fallback, "static"
@@ -7737,10 +7717,6 @@ local function liveRenderCategoryMap()
     if not cdmCatalogAvailable() then
         return nil
     end
-    if InCombatLockdown and InCombatLockdown() then
-        return nil
-    end
-
     local enum = Enum and Enum.CooldownViewerCategory
     local pairsCat = {
         { cat = (enum and enum.TrackedBuff) or CATEGORY_TRACKED_BUFF, displayType = "TrackedIcon" },
@@ -7751,7 +7727,7 @@ local function liveRenderCategoryMap()
     local rankByCategory = {}
     local sawOrdered = false
     for _, def in ipairs(pairsCat) do
-        local ids, src = orderedConfiguredIDs(def.cat)
+        local ids, src = orderedConfiguredIDs(def.cat, _liveRenderCat.layout)
         if src == "ordered" then sawOrdered = true end
         local rank = {}
         if type(ids) == "table" then
@@ -7776,12 +7752,6 @@ function Auras:_invalidateLiveRenderCategoryMap()
     _liveRenderCat.map = nil
     _liveRenderCat.source = nil
     _liveRenderCat.rankByCategory = nil
-end
-
-function Auras._ReadCDMLayoutInfo(provider, cooldownID)
-    if not (provider and provider.GetCooldownInfoForID) then return nil end
-    local ok, info = pcall(provider.GetCooldownInfoForID, provider, cooldownID)
-    if ok and type(info) == "table" and not isSecret(info) then return info end
 end
 
 function Auras._IsCDMLayoutHidden(info)
@@ -8116,22 +8086,25 @@ Auras._cdm = {
 }
 
 local function buildCatalogEntry(cdID, info, source, normCategory)
-    local spellID         = tonumber(info.spellID)
-    local overrideSpellID = tonumber(info.overrideSpellID)
-    local overrideTooltipSpellID = tonumber(info.overrideTooltipSpellID)
+    local function readableID(value)
+        if not isSecret(value) then return tonumber(value) end
+    end
+    local spellID         = readableID(info.spellID)
+    local overrideSpellID = readableID(info.overrideSpellID)
+    local overrideTooltipSpellID = readableID(info.overrideTooltipSpellID)
 
     local linked
-    if type(info.linkedSpellIDs) == "table" then
+    if not isSecret(info.linkedSpellIDs) and type(info.linkedSpellIDs) == "table" then
         linked = {}
         for j = 1, #info.linkedSpellIDs do
-            local lsid = tonumber(info.linkedSpellIDs[j])
+            local lsid = readableID(info.linkedSpellIDs[j])
             if lsid then linked[#linked + 1] = lsid end
         end
         if #linked == 0 then linked = nil end
     end
 
     local isKnown = true
-    if info.isKnown == false then isKnown = false end
+    if not isSecret(info.isKnown) and info.isKnown == false then isKnown = false end
 
     local entry = {
         cooldownID             = tonumber(cdID),
@@ -8147,7 +8120,7 @@ local function buildCatalogEntry(cdID, info, source, normCategory)
         activeAuraSource       = nil,
         source                 = source,
         isKnown                = isKnown,
-        selfAura               = info.selfAura == true,
+        selfAura               = not isSecret(info.selfAura) and info.selfAura == true,
     }
 
     entry.matchSpellIDs = BuildMatchSpellIDs(entry)
@@ -8222,7 +8195,7 @@ function buildAuraCatalog(displayType)
             end
         end
         for _, def in ipairs(defs) do
-            local oids = orderedConfiguredIDs(def.cat)
+            local oids = orderedConfiguredIDs(def.cat, _liveRenderCat.layout)
             if type(oids) == "table" then
                 for i = 1, #oids do
                     local cdID = tonumber(oids[i])
@@ -8240,7 +8213,7 @@ function buildAuraCatalog(displayType)
     if #candidates == 0 then return out end
 
     local respectHidden = respectCDMHiddenEnabled()
-    local provider = cdmSettingsDataProvider()
+    local layout = _liveRenderCat.layout
 
     for ci = 1, #candidates do
         local cand = candidates[ci]
@@ -8252,9 +8225,10 @@ function buildAuraCatalog(displayType)
         local ok2 = pcall(function()
             info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
         end)
-        local merged = Auras._ReadCDMLayoutInfo(provider, cdID)
+        local merged = layout and layout.byID[cdID]
         local hidden = Auras._IsCDMLayoutHidden(merged)
-        if ok2 and type(info) == "table" and not info.isInvisible
+        if ok2 and not isSecret(info) and type(info) == "table"
+           and not isSecret(info.isInvisible) and not info.isInvisible
            and not (respectHidden and hidden) then
             local entry = buildCatalogEntry(cdID, info, source, normCategory)
             if merged and not isSecret(merged.category) then
@@ -8483,7 +8457,6 @@ end
 
 function Auras:_SyncNativeDisplays(preview)
     local native = ns.TrackedAuras
-    self._fixedBarIndices = nil
     local showIcons = self.IconDisplay and self.IconDisplay:Enabled()
     local showBars = self.BarDisplay and self.BarDisplay:Enabled()
     local iconIDs = self._NativeIncludeSets("TrackedIcon", showIcons)
@@ -8528,8 +8501,6 @@ function Auras:_SyncNativeDisplays(preview)
             if a.rank ~= b.rank then return a.rank < b.rank end
             return a.key < b.key
         end)
-        self._fixedBarIndices = {}
-        for index, row in ipairs(fixedRows) do self._fixedBarIndices[row.key] = index end
     elseif barConfig then
         barConfig.overrides = self:_NativeStyleOverrides("TrackedBars", barConfig, barIDs)
     end
@@ -8539,7 +8510,6 @@ function Auras:_SyncNativeDisplays(preview)
         native:Hide()
         self._nativeIcons, self._nativeBars = false, false
     end
-    if not self._nativeBars then self._fixedBarIndices = nil end
     return self._nativeIcons, self._nativeBars
 end
 
@@ -8570,8 +8540,8 @@ function Auras:_BuildNativeSummonEntries(kind)
             end
             if ns._auraPresentTruthy(duration) then
                 local item = self._makeSummonBarItem(entry, duration)
-                if kind == "TrackedBars" and self._fixedBarIndices then
-                    item._fixedBarIndex = self._fixedBarIndices[entry.stableEntryID]
+                if kind == "TrackedBars" then
+                    item._fixedBarKey = entry.stableEntryID
                 end
                 out[#out + 1] = item
             end
@@ -8616,7 +8586,7 @@ local function migrateAuraSettingsKeys()
             if type(baseRec) ~= "table" then
                 baseRec = {}
                 if type(template) == "table" then
-                    for kk, vv in pairs(template) do baseRec[kk] = vv end
+                    ns._deepCopyMissing(baseRec, template)
                 end
                 p.auras[base] = baseRec
             end
@@ -8647,7 +8617,7 @@ local function migrateAuraSettingsKeys()
             local legacyRec = legacy and p.auras[legacy]
             if type(legacyRec) == "table" then
                 local rec = {}
-                for k, v in pairs(legacyRec) do rec[k] = v end
+                ns._deepCopyMissing(rec, legacyRec)
                 p.auras[newKey] = rec
             end
         end
@@ -9790,17 +9760,19 @@ buildActiveFromCatalog = function(displayType, preview)
 end
 
 function Auras:ScanBlizzardCDMAuras()
-    if InCombatLockdown and InCombatLockdown() then
+    if self._catalogScanned and InCombatLockdown and InCombatLockdown() then
         dlog("ScanBlizzardCDMAuras: skipped (combat) cachedIcon=%d cachedBars=%d",
             _lastCatalogCounts.TrackedIcon or 0, _lastCatalogCounts.TrackedBars or 0)
         return _lastCatalogCounts.TrackedIcon, _lastCatalogCounts.TrackedBars
     end
     pcall(self._invalidateLiveRenderCategoryMap, self)
+    _liveRenderCat.layout = ns:ReadCooldownLayout()
     pcall(liveRenderCategoryMap)
     _auraCatalog.TrackedIcon = buildAuraCatalog("TrackedIcon")
     _auraCatalog.TrackedBars = buildAuraCatalog("TrackedBars")
     _lastCatalogCounts.TrackedIcon = #_auraCatalog.TrackedIcon
     _lastCatalogCounts.TrackedBars = #_auraCatalog.TrackedBars
+    self._catalogScanned = true
     pcall(migrateAuraSettingsKeys)
     local _, mapSrc = liveRenderCategoryMap()
     dlog("ScanBlizzardCDMAuras: TrackedIcon=%d TrackedBars=%d (liveCat src=%s)",

@@ -481,7 +481,7 @@ local function syncIconAlignment(config, units, key)
     local restricted = TrackedAuras:IsRestricted()
     local failure = failures.alignment
     if failure and failure.signature == key and (not failure.restricted or restricted) then return nil end
-    if InCombatLockdown() or (restricted and state) then
+    if restricted and state then
         if state and state.key then
             for _, frame in pairs(state.measures) do frame:Show() end
             return state.anchor
@@ -565,7 +565,7 @@ local function syncIconAlignment(config, units, key)
     return state.anchor
 end
 
-function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textStyle)
+function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textStyle, activeSpellID)
     local frame = icon.frame
     local state = cooldownDebuffs[frame]
     if not ids then
@@ -573,16 +573,20 @@ function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textSty
         return
     end
     local restricted = self:IsRestricted()
-    if InCombatLockdown() or (restricted and state) then
-        if state then state.container:Show() end
+    local idSignature = signature(ids)
+    if restricted and state then
+        if state then
+            local sameSpell = activeSpellID ~= nil and state.activeSpellID == activeSpellID
+            state.container:SetShown(sameSpell or state.ids == idSignature)
+        end
         return
     end
-    local idSignature = signature(ids)
     local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe)
     local key = idSignature .. "/" .. styleSignature
     local failure = cooldownDebuffFailures[frame]
     if failure and failure.signature == key and (not failure.restricted or restricted) then return end
     if state and state.ids == idSignature and state.style == styleSignature then
+        state.activeSpellID = activeSpellID
         state.container:Show()
         return
     end
@@ -633,7 +637,7 @@ function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textSty
             end
             style(state.visual)
         end
-        state.ids, state.style = idSignature, styleSignature
+        state.ids, state.style, state.activeSpellID = idSignature, styleSignature, activeSpellID
         state.container:Show()
     end)
     if not ok then
@@ -655,8 +659,11 @@ end
 
 function TrackedAuras:SetupPlayerAuraCount(icon, auraSpellID)
     local frame = icon.frame
-    if not frame.stack or InCombatLockdown() then return end
+    if not frame.stack then return end
     local state = icon._playerAuraCount
+    local restricted = self:IsRestricted()
+    if restricted and state then return end
+    if icon._playerAuraCountFailed == restricted then return end
     local ok, err = pcall(function()
         if not state then
             local container = createContainer(frame, "player")
@@ -689,9 +696,11 @@ function TrackedAuras:SetupPlayerAuraCount(icon, auraSpellID)
     end)
     if ok then
         icon._playerAuraCount = state
+        icon._playerAuraCountFailed = nil
     else
-        if state then state.container:Hide() end
+        if state then pcall(state.container.Hide, state.container) end
         icon._playerAuraCount = nil
+        icon._playerAuraCountFailed = restricted
         if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] player aura count: %s", tostring(err)) end
     end
 end
@@ -711,7 +720,8 @@ ns:RegisterEvent("PLAYER_TARGET_CHANGED", function()
 end)
 
 function TrackedAuras:IsRestricted()
-    return InCombatLockdown() or (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret())
+    return InCombatLockdown()
+        or (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()) == true
 end
 
 function TrackedAuras:Sync(kind, unit, config)
@@ -727,7 +737,7 @@ function TrackedAuras:Sync(kind, unit, config)
         return true
     end
     local restricted = self:IsRestricted()
-    if InCombatLockdown() or (restricted and state and state.ready) then
+    if restricted and state and state.ready then
         if state and state.ready then state.frame:Show() end
         return state and state.ready or false
     end
@@ -791,6 +801,7 @@ local function updateFixedBar(state, index, entry, baseConfig, slotConfig)
         state.rows[index] = row
     end
     local frame, regions = row.frame, row.regions
+    row.key = entry.key
     frame:ClearAllPoints()
     frame:SetPoint("BOTTOMLEFT", state.frame, "BOTTOMLEFT", 0, (index - 1) * (config.height + config.spacing))
     frame:SetSize(config.width, config.height)
@@ -856,9 +867,11 @@ function TrackedAuras:SyncFixedBars(config, rows, configSignature)
         return true
     end
     local restricted = self:IsRestricted()
-    if InCombatLockdown() or (restricted and fixedBars) then
-        if fixedBars and fixedBars.ready then fixedBars.frame:Show() end
-        return fixedBars and fixedBars.ready or false
+    if restricted and fixedBars then
+        if not fixedBars.ready then return false end
+        fixedBars.frame:Show()
+        hideGroups("bars")
+        return true
     end
     local failure = failures.fixedBars
     if failure and failure.signature == configSignature and (not failure.restricted or restricted) then
@@ -913,9 +926,10 @@ function TrackedAuras:SyncFixedBars(config, rows, configSignature)
 end
 
 function TrackedAuras:SetFixedBarOverrides(overrides)
-    if not (fixedBars and fixedBars.ready) then return end
+    if not (fixedBars and fixedBars.ready and fixedBars.frame:IsShown()) then return end
     for index = 1, fixedBars.count or 0 do
-        fixedBars.rows[index].frame:SetShown(not overrides[index])
+        local row = fixedBars.rows[index]
+        row.frame:SetShown(not overrides[row.key])
     end
 end
 

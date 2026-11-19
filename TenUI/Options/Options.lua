@@ -559,6 +559,7 @@ local function buildGeneralPage(sc)
             p.modules = p.modules or {}
             p.modules.General = p.modules.General or {}
             p.modules.General.enabled = v
+            ns:ApplyHUDEnabled()
         end
     )
 

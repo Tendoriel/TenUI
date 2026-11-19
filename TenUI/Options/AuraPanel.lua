@@ -542,14 +542,13 @@ local function buildAuraSettingsPage(sc)
         if not ns.Auras then return end
         local existing = getGlow(kind)
         local aura = getAuraProfile(key)
-        if type(aura.glow) ~= "table" then aura.glow = {} end
-        if type(aura.glow[kind]) ~= "table" or existing ~= aura.glow[kind] then
-            aura.glow[kind] = {}
-            if existing then ns._deepCopyMissing(aura.glow[kind], existing) end
-        end
-        local glow = aura.glow[kind]
+        local allGlows, glow = {}, {}
+        if type(aura.glow) == "table" then ns._deepCopyMissing(allGlows, aura.glow) end
+        if existing then ns._deepCopyMissing(glow, existing) end
         glow.mode = ns.Auras:GetAuraGlowMode(glow, kind)
         glow[setting] = value
+        allGlows[kind] = glow
+        aura.glow = allGlows
         ns.Auras:RequestRefresh()
     end
 

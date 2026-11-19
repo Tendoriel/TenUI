@@ -207,32 +207,63 @@ local function shadowformMissing()
 end
 
 local function unitAuraPresent(unit, spellID)
-    if not C_UnitAuras then return false end
+    if not C_UnitAuras then return nil end
+    if C_UnitAuras.GetUnitAuras then
+        local ok, auras = pcall(C_UnitAuras.GetUnitAuras, unit, "HELPFUL|PLAYER")
+        if ok and not (issecretvalue and issecretvalue(auras)) and type(auras) == "table" then
+            local unknown = false
+            for _, aura in ipairs(auras) do
+                if issecretvalue and (issecretvalue(aura) or issecretvalue(aura.spellId)) then
+                    unknown = true
+                elseif aura.spellId == spellID then
+                    return true
+                end
+            end
+            if not unknown then return false end
+        end
+    end
     if C_UnitAuras.GetUnitAuraBySpellID then
         local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, spellID)
-        if ok then return aura ~= nil end
+        if ok and not (issecretvalue and issecretvalue(aura)) then
+            if aura == nil then return false end
+            local own = aura.isFromPlayerOrPlayerPet
+            if not (issecretvalue and issecretvalue(own)) and type(own) == "boolean" then
+                return own
+            end
+            local source = aura.sourceUnit
+            if not (issecretvalue and issecretvalue(source)) and source then
+                return UnitIsUnit and UnitIsUnit(source, "player") or source == "player"
+            end
+        end
     end
-    if C_UnitAuras.GetAuraDataBySpellID then
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellID, unit, spellID, "HELPFUL")
-        if ok then return aura ~= nil end
-    end
-    return false
 end
 
 local function groupHasAura(spellID)
-    if unitAuraPresent("player", spellID) then return true end
-    if IsInRaid() then
-        local n = GetNumGroupMembers() or 0
-        for i = 1, n do
-            if unitAuraPresent("raid" .. i, spellID) then return true end
+    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret and C_Secrets.ShouldSpellAuraBeSecret(spellID) then
+        local overlay = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
+        if overlay then
+            local ok, missing = pcall(overlay, spellID)
+            if ok and not (issecretvalue and issecretvalue(missing)) and type(missing) == "boolean" then
+                return not missing
+            end
         end
-    elseif IsInGroup() then
-        for i = 1, 4 do
-            local unit = "party" .. i
-            if UnitExists(unit) and unitAuraPresent(unit, spellID) then return true end
+        return nil
+    end
+    local own = unitAuraPresent("player", spellID)
+    if own then return true end
+    local unknown = own == nil
+    local raid = IsInRaid()
+    local prefix = raid and "raid" or "party"
+    local count = raid and (GetNumGroupMembers() or 0) or (IsInGroup() and 4 or 0)
+    for i = 1, count do
+        local unit = prefix .. i
+        if UnitExists(unit) then
+            local active = unitAuraPresent(unit, spellID)
+            if active then return true end
+            unknown = unknown or active == nil
         end
     end
-    return false
+    if not unknown then return false end
 end
 
 local function rebuildRoster()
@@ -354,10 +385,12 @@ local function evaluate(o)
         and currentSpecID() == HOLY_PALADIN_SPEC
         and not spellKnown(BEACON_OF_VIRTUE) then
         if spellKnown(BEACON_OF_LIGHT) then
-            push(spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", groupHasAura(BEACON_OF_LIGHT))
+            local active = groupHasAura(BEACON_OF_LIGHT)
+            if active ~= nil then push(spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", active) end
         end
         if spellKnown(BEACON_OF_FAITH) then
-            push(spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", groupHasAura(BEACON_OF_FAITH))
+            local active = groupHasAura(BEACON_OF_FAITH)
+            if active ~= nil then push(spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", active) end
         end
     end
 
@@ -776,6 +809,19 @@ function ClassReminders:OnEnable()
         event = "GROUP_ROSTER_UPDATE",
         fn    = ns:RegisterEvent("GROUP_ROSTER_UPDATE", onRosterEvent),
     }
+    if playerClass() == "PALADIN" then
+        for _, event in ipairs({ "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }) do
+            self._handlers[#self._handlers + 1] = {
+                event = event,
+                fn = ns:RegisterEvent(event, function(_, spellID)
+                    if not (issecretvalue and issecretvalue(spellID))
+                        and (spellID == BEACON_OF_LIGHT or spellID == BEACON_OF_FAITH) then
+                        scheduleUpdate()
+                    end
+                end),
+            }
+        end
+    end
 
     rebuildRoster()
     scheduleUpdate()

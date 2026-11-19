@@ -636,7 +636,7 @@ function DragonRiding:UpdateVisibility()
     if not self._built or not self.content then return end
     local p = self.profileRef
 
-    if not p or p.enabled == false then
+    if not self._enabled or not p or p.enabled == false then
         self.content:Hide()
         self.content:SetScript("OnUpdate", nil)
         self:UnregisterSpellEvents()

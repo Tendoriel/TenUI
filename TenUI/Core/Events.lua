@@ -117,15 +117,22 @@ ns:RegisterEvent("ADDON_LOADED", function(event, loadedName)
 end)
 
 ns:RegisterEvent("PLAYER_LOGIN", function()
-    ns:EnableAllModules()
+    ns.hudStarted = true
+    local failed = ns:ApplyHUDEnabled()
     if ns.Debug and ns.Debug.Log then
         ns.Debug:Log("PLAYER_LOGIN: TenUI v%s loaded", tostring(ns.version))
     end
-    DEFAULT_CHAT_FRAME:AddMessage(("|cff4fc3f7TenUI|r v%s loaded. Type |cffffd200/tenui|r for commands."):format(tostring(ns.version)))
+    local state = failed and #failed > 0 and "started with module errors"
+        or (ns.hudEnabled and "loaded" or "HUD disabled")
+    DEFAULT_CHAT_FRAME:AddMessage(("|cff4fc3f7TenUI|r v%s %s. Type |cffffd200/tenui|r for commands."):format(tostring(ns.version), state))
     ns:Fire("READY")
 end)
 
+ns:RegisterMessage("PROFILE_CHANGED", function() ns:ApplyHUDEnabled() end)
+ns:RegisterEvent("PLAYER_REGEN_ENABLED", function() ns:ApplyHUDEnabled() end)
+
 ns:RegisterEvent("PLAYER_LOGOUT", function()
+    ns.hudStarted = false
     ns:DisableAllModules()
     ns:Fire("SHUTDOWN")
 end)
