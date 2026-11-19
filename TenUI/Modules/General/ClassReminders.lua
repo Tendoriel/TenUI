@@ -96,6 +96,7 @@ local DEFAULTS = {
     hideInRested     = true,
     hideWhileMounted = true,
     onlyOutOfCombat  = false,
+    showActive       = false,
     glow             = true,
     iconSize         = 36,
     fontSize         = 11,
@@ -200,7 +201,7 @@ local function shadowformMissing()
         end
     end
     if C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() then
-        return false
+        return nil
     end
     return not anyPlayerAuraPresent(SHADOWFORM_AURAS)
 end
@@ -312,10 +313,12 @@ end
 
 local function evaluate(o)
     local out = {}
+    local activeEntries = {}
     local class = playerClass()
-    local function push(icon, label)
-        if #out < MAX_SLOTS then
-            out[#out + 1] = { icon = icon, label = label }
+    local function push(icon, label, active)
+        local entries = active and o.showActive and activeEntries or (not active and out)
+        if entries and #entries < MAX_SLOTS then
+            entries[#entries + 1] = { icon = icon, label = label, active = active }
         end
     end
 
@@ -323,10 +326,12 @@ local function evaluate(o)
         local knowsAny = spellKnown(EARTH_SHIELD) or spellKnown(LIGHTNING_SHIELD)
             or spellKnown(WATER_SHIELD)
         if knowsAny then
-            local active = anyPlayerAuraPresent(EARTH_SHIELD_SELF)
-                or playerAuraPresent(LIGHTNING_SHIELD)
-                or playerAuraPresent(WATER_SHIELD)
-            if not active then
+            local activeShield = anyPlayerAuraPresent(EARTH_SHIELD_SELF) and EARTH_SHIELD
+                or playerAuraPresent(LIGHTNING_SHIELD) and LIGHTNING_SHIELD
+                or playerAuraPresent(WATER_SHIELD) and WATER_SHIELD
+            if activeShield then
+                push(spellIcon(activeShield, FALLBACK_SHIELD), "Shield", true)
+            else
                 local spec = GetSpecialization and GetSpecialization()
                 local iconSpell
                 if spec == 3 and spellKnown(EARTH_SHIELD) then
@@ -348,11 +353,11 @@ local function evaluate(o)
     if class == "PALADIN" and o.paladinBeacons
         and currentSpecID() == HOLY_PALADIN_SPEC
         and not spellKnown(BEACON_OF_VIRTUE) then
-        if spellKnown(BEACON_OF_LIGHT) and not groupHasAura(BEACON_OF_LIGHT) then
-            push(spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon")
+        if spellKnown(BEACON_OF_LIGHT) then
+            push(spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", groupHasAura(BEACON_OF_LIGHT))
         end
-        if spellKnown(BEACON_OF_FAITH) and not groupHasAura(BEACON_OF_FAITH) then
-            push(spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith")
+        if spellKnown(BEACON_OF_FAITH) then
+            push(spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", groupHasAura(BEACON_OF_FAITH))
         end
     end
 
@@ -383,8 +388,8 @@ local function evaluate(o)
             missingLabel = "Elemental"
         end
 
-        if petExpected and not petAlive() then
-            push(missingIcon, missingLabel)
+        if petExpected then
+            push(missingIcon, missingLabel, petAlive())
         end
 
         if class == "WARLOCK" and currentSpecID() == DEMONOLOGY_SPEC
@@ -402,8 +407,9 @@ local function evaluate(o)
     if class == "PRIEST" and o.shadowform
         and currentSpecID() == SHADOW_SPEC
         and spellKnown(SHADOWFORM) then
-        if shadowformMissing() then
-            push(spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform")
+        local missing = shadowformMissing()
+        if missing ~= nil then
+            push(spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform", not missing)
         end
     end
 
@@ -415,11 +421,11 @@ local function evaluate(o)
         for i = 1, #NONLETHAL_POISONS do
             if spellKnown(NONLETHAL_POISONS[i]) then knowsNonLethal = true break end
         end
-        if knowsLethal and not anyPlayerAuraPresent(LETHAL_POISONS) then
-            push(spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal")
+        if knowsLethal then
+            push(spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal", anyPlayerAuraPresent(LETHAL_POISONS))
         end
-        if knowsNonLethal and not anyPlayerAuraPresent(NONLETHAL_POISONS) then
-            push(spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal")
+        if knowsNonLethal then
+            push(spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal", anyPlayerAuraPresent(NONLETHAL_POISONS))
         end
     end
 
@@ -427,12 +433,13 @@ local function evaluate(o)
         local roster = ClassReminders._rosterClasses or {}
         for i = 1, #RAID_BUFFS do
             local def = RAID_BUFFS[i]
-            if roster[def.class] and not anyPlayerAuraPresent(def.buffIDs) then
-                push(spellIcon(def.iconSpell, def.fallback), def.label)
+            if roster[def.class] then
+                push(spellIcon(def.iconSpell, def.fallback), def.label, anyPlayerAuraPresent(def.buffIDs))
             end
         end
     end
 
+    for i = 1, math.min(#activeEntries, MAX_SLOTS - #out) do out[#out + 1] = activeEntries[i] end
     return out
 end
 
@@ -478,6 +485,11 @@ local function buildSlot(f)
     label:SetJustifyH("CENTER")
     label:SetWordWrap(false)
     slot.label = label
+    local check = slot:CreateTexture(nil, "OVERLAY", nil, 4)
+    check:SetTexture([[Interface\Buttons\UI-CheckBox-Check]])
+    check:SetSize(18, 18)
+    check:SetPoint("BOTTOMRIGHT", slot, "BOTTOMRIGHT", 2, -2)
+    slot.check = check
 
     slot:Hide()
     return slot
@@ -543,7 +555,9 @@ local function render(entries)
             slot.glow:SetSize(size * 1.6, size * 1.6)
             slot.label:SetFont(fontPath, fontSz, "OUTLINE")
             slot.label:SetText(e.label or "")
-            if o.glow then
+            slot.label:SetTextColor(e.active and 0.5 or 1, 1, e.active and 0.5 or 1)
+            slot.check:SetShown(e.active == true)
+            if o.glow and not e.active then
                 slot.glow:Show()
                 if not slot.glowAnim:IsPlaying() then slot.glowAnim:Play() end
             else
@@ -570,7 +584,7 @@ local function buildTestEntries()
         { icon = spellIcon(EARTH_SHIELD, FALLBACK_SHIELD), label = "Shield" },
         { icon = FALLBACK_PET,     label = "Pet" },
         { icon = FALLBACK_PASSIVE, label = "Passive!" },
-        { icon = spellIcon(21562, 135987), label = "Fortitude" },
+        { icon = spellIcon(21562, 135987), label = "Fortitude", active = true },
     }
     return TEST_ENTRIES
 end

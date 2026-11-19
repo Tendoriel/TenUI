@@ -236,6 +236,25 @@ local function isSecret(v)
     return type(issecretvalue) == "function" and issecretvalue(v)
 end
 
+local function getDisplayCount(spellID, baseSpellID)
+    -- Display counts on an action slot follow temporary spell replacements.
+    if spellID ~= baseSpellID and C_ActionBar
+       and C_ActionBar.FindSpellActionButtons and C_ActionBar.GetActionDisplayCount then
+        local ok, slots = pcall(C_ActionBar.FindSpellActionButtons, baseSpellID)
+        local slot = ok and type(slots) == "table" and slots[1]
+        if slot then
+            local okCount, count = pcall(C_ActionBar.GetActionDisplayCount, slot)
+            if okCount and (isSecret(count) or (type(count) == "string" and count ~= "" and count ~= "0")) then
+                return count
+            end
+        end
+    end
+    if C_Spell and C_Spell.GetSpellDisplayCount then
+        local ok, count = pcall(C_Spell.GetSpellDisplayCount, spellID)
+        if ok then return count end
+    end
+end
+
 local function durationShowsCooldown(duration)
     if isSecret(duration) then return nil end
     if duration == nil then return false end
@@ -260,6 +279,7 @@ local MIRROR_VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer"
 local _mirrorMap = {}
 local _mirrorMapDirty = true
 local _mirrorHooked = {}
+local _spellOverrides = {}
 
 local function getMirrorViewer(name)
     local v = _G[name]
@@ -1218,9 +1238,11 @@ end
 
 local function activeSpellID(baseID)
     if not baseID then return baseID end
+    local override = _spellOverrides[baseID]
+    if override ~= nil then return override or baseID end
     if C_Spell and C_Spell.GetOverrideSpell then
         local ok, o = pcall(C_Spell.GetOverrideSpell, baseID)
-        if ok and type(o) == "number" and o ~= 0 then return o end
+        if ok and not isSecret(o) and type(o) == "number" and o > 0 then return o end
     end
     return baseID
 end
@@ -1233,7 +1255,7 @@ local function resolveCooldownSource(sid, activeSID, baseSID)
         if ok then cdInfo = info end
         activeCDInfo = cdInfo
         local primaryReal = cdInfo and cdInfo.isActive and not cdInfo.isOnGCD
-        if not primaryReal then
+        if not primaryReal and activeSID == (baseSID or sid) then
             local chosen
             local cand1 = (sid ~= activeSID) and sid or nil
             local cand2 = (baseSID and baseSID ~= activeSID and baseSID ~= sid)
@@ -1284,10 +1306,7 @@ end
 local function spellFamilyMatches(baseID, eventID)
     if not (baseID and eventID) then return false end
     if baseID == eventID then return true end
-    if C_Spell and C_Spell.GetOverrideSpell then
-        local ok, o = pcall(C_Spell.GetOverrideSpell, baseID)
-        if ok and o == eventID then return true end
-    end
+    if activeSpellID(baseID) == eventID then return true end
     if C_SpellBook and C_SpellBook.FindBaseSpellByID then
         local ok, b = pcall(C_SpellBook.FindBaseSpellByID, eventID)
         if ok and b == baseID then return true end
@@ -1542,11 +1561,15 @@ local function getTotemDurationFromMirror(sid, activeSID, baseSID)
     return durObj
 end
 
-local function getSpellTexture(spellID)
+local function getSpellTexture(spellID, activeID)
     if not (C_Spell and C_Spell.GetSpellTexture) then return nil end
-    local ok, tex = pcall(C_Spell.GetSpellTexture, spellID)
+    local ok, tex, _, conditional = pcall(C_Spell.GetSpellTexture, spellID)
+    if ok and (isSecret(conditional) or conditional) then return conditional end
+    if activeID and activeID ~= spellID then
+        local okOverride, texture = pcall(C_Spell.GetSpellTexture, activeID)
+        if okOverride and (isSecret(texture) or texture) then return texture end
+    end
     if ok then return tex end
-    return nil
 end
 
 local function getItemTexture(itemID)
@@ -1629,6 +1652,41 @@ local function countVisibleIcons(iconList)
     return n
 end
 
+local function abilityOptions(entry)
+    local profile = ns.savedVarsReady and ns:GetProfile()
+    return profile and profile.abilities and profile.abilities[entry.id]
+end
+
+local function hideSpellEntry(entry)
+    if entry.type ~= "spell" then return false end
+    local options = abilityOptions(entry)
+    if options and options.visibility and options.visibility.combatOnly and not InCombatLockdown() then
+        return true
+    end
+    return entry.hideWhileUnknown == true and not spellInActiveSpellbook(entry.id)
+end
+
+local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
+    local options = entry.type == "spell" and abilityOptions(entry)
+    local text = options and options.warnings and options.warnings.cooldownText or nil
+    local style = rowStyle
+    if text and (text.custom or text.font ~= "default" or text.size ~= 13
+        or text.anchor ~= "CENTER" or text.x ~= 0 or text.y ~= 0) then
+        style = text
+    end
+    showText = showText and not (text and text.enabled == false)
+    icon.frame.cooldown:SetHideCountdownNumbers(not showText)
+    icon:ApplyCooldownTextStyle(style)
+    if options and options.targetDebuffTimer and ns.TrackedAuras then
+        local ids = { [entry.id] = true }
+        local base = resolveBaseSpellID(entry.id)
+        if base then ids[base] = true end
+        ns.TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, style)
+    elseif ns.TrackedAuras then
+        ns.TrackedAuras:SyncCooldownDebuff(icon)
+    end
+end
+
 local function buildIconsForList(container, displayedList, showText, rowName)
     local out = {}
     local textStyle = rowName and getVisualProfileTextForRow(rowName) or nil
@@ -1656,9 +1714,7 @@ local function buildIconsForList(container, displayedList, showText, rowName)
         })
         icon._entry = entry
         out[i] = icon
-        local hideThis = entry.hideWhileUnknown == true
-                     and entry.type == "spell"
-                     and not spellInActiveSpellbook(entry.id)
+        local hideThis = hideSpellEntry(entry)
         icon._hiddenUnknown = hideThis
         if icon.SetShown then
             pcall(icon.SetShown, icon, not hideThis)
@@ -1667,9 +1723,7 @@ local function buildIconsForList(container, displayedList, showText, rowName)
         if textStyle and icon.ApplyTextStyle then
             icon:ApplyTextStyle(textStyle)
         end
-        if cdTextStyle and icon.ApplyCooldownTextStyle then
-            icon:ApplyCooldownTextStyle(cdTextStyle)
-        end
+        applyAbilityTimer(icon, entry, showText, drawSwipe, cdTextStyle)
         if entry.type == "item" and entry.consumable and icon.SetItemTooltip then
             local c = getConsumablesProfile()
             local wantTip = not (c and c.showTooltip == false)
@@ -1848,8 +1902,10 @@ function Row:ApplyVisualOptions()
         if icon and icon.ApplyTextStyle then
             icon:ApplyTextStyle(textStyle)
         end
-        if icon and icon.ApplyCooldownTextStyle then
-            icon:ApplyCooldownTextStyle(cdTextStyle)
+        if icon and icon._entry then
+            local profile = Bars.profileRef or {}
+            applyAbilityTimer(icon, icon._entry, profile.showCooldownText ~= false,
+                profile.showDurationSwipe ~= false, cdTextStyle)
         end
         if icon and icon.SetBorder then
             pcall(icon.SetBorder, icon, borderOn, borderColor)
@@ -1877,9 +1933,7 @@ function Row:UpdateHiddenVisibility()
         local icon = self.icons[i]
         local entry = icon and icon._entry
         if icon and entry then
-            local hideThis = entry.hideWhileUnknown == true
-                         and entry.type == "spell"
-                         and not spellInActiveSpellbook(entry.id)
+            local hideThis = hideSpellEntry(entry)
             if (icon._hiddenUnknown == true) ~= hideThis then
                 icon._hiddenUnknown = hideThis
                 if icon.SetShown then
@@ -1909,6 +1963,20 @@ function Row:MaybeRebuildForHidden()
     end
 end
 
+function Bars:ApplyAbilityOptions(spellID)
+    for _, row in pairs(self.rows) do
+        for _, icon in ipairs(row.icons) do
+            if icon._entry.type == "spell" and icon._entry.id == spellID then
+                if row:UpdateHiddenVisibility() then
+                    row.container:SetAlpha(countVisibleIcons(row.icons) > 0 and 1 or 0)
+                end
+                row:ApplyVisualOptions()
+                break
+            end
+        end
+    end
+end
+
 local SUMMON_BORDER_R, SUMMON_BORDER_G, SUMMON_BORDER_B, SUMMON_BORDER_A = 1, 0.7, 0, 1
 
 function Row:RefreshIcon(icon, entry, desat)
@@ -1916,10 +1984,14 @@ function Row:RefreshIcon(icon, entry, desat)
     if entry.type == "spell" then
         local sid = entry.id
         if not sid then return end
-        local activeSID = activeSpellID(sid)
+        local baseSID = resolveBaseSpellID(sid)
+        local activeSID = activeSpellID(baseSID or sid)
+        local options = abilityOptions(entry)
+        local tex = getSpellTexture(baseSID or sid, activeSID)
+        if isSecret(tex) or tex then icon:SetTexture(tex) end
 
         local summonDur = tonumber(entry.summonDuration) or 0
-        local totemDur = getTotemDurationFromMirror(sid, activeSID, resolveBaseSpellID(sid))
+        local totemDur = getTotemDurationFromMirror(sid, activeSID, baseSID)
         if totemDur then
             icon:SetCooldown(totemDur)
             icon._summonAppliedUntil = nil
@@ -1932,8 +2004,6 @@ function Row:RefreshIcon(icon, entry, desat)
                     colorA = SUMMON_BORDER_A,
                 })
             end
-            local tex = getSpellTexture(sid)
-            if isSecret(tex) or tex then icon:SetTexture(tex) end
             icon:SetDesaturated(false)
             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
             icon._lastTintKey = "normal"
@@ -1968,8 +2038,6 @@ function Row:RefreshIcon(icon, entry, desat)
                                     colorA = SUMMON_BORDER_A,
                                 })
                             end
-                            local tex = getSpellTexture(sid)
-                            if isSecret(tex) or tex then icon:SetTexture(tex) end
                             icon:SetDesaturated(false)
                             icon:SetVertexColor(TINT_NORMAL_R, TINT_NORMAL_G, TINT_NORMAL_B, 1)
                             icon._lastTintKey = "normal"
@@ -1989,9 +2057,6 @@ function Row:RefreshIcon(icon, entry, desat)
                 icon:ClearCooldown()
             end
         end
-        local tex = getSpellTexture(sid)
-        if isSecret(tex) or tex then icon:SetTexture(tex) end
-
         local known = spellIsKnown(sid)
         if not known and desat then
             icon:SetDesaturated(true)
@@ -2018,7 +2083,8 @@ function Row:RefreshIcon(icon, entry, desat)
         end
 
         local inRange
-        if C_Spell and C_Spell.IsSpellInRange and UnitExists and UnitExists("target") then
+        local rangeTint = not (options and options.range and options.range.enabled == false)
+        if rangeTint and C_Spell and C_Spell.IsSpellInRange and UnitExists and UnitExists("target") then
             local ok, r = pcall(C_Spell.IsSpellInRange, activeSID, "target")
             if ok and not isSecret(r) then inRange = r end
         end
@@ -2031,9 +2097,9 @@ function Row:RefreshIcon(icon, entry, desat)
         local isChargeSpell = chargesInfo and not isSecret(chargesInfo.maxCharges)
             and type(chargesInfo.maxCharges) == "number" and chargesInfo.maxCharges > 1
 
-        local baseSID = resolveBaseSpellID(sid)
         local holdKey = baseSID or sid
         local snap = _cdSnapshot[holdKey]
+        if snap and snap.activeSID ~= activeSID then snap = nil end
         local cdSpellID = (snap and snap.cdSpellID) or activeSID
 
         local cdInfo
@@ -2043,7 +2109,10 @@ function Row:RefreshIcon(icon, entry, desat)
         end
         local cdActive = (cdInfo and cdInfo.isActive) and true or false
 
-        local viewerReal, viewerSrc = viewerMirrorOnRealCD(sid, activeSID, baseSID)
+        local viewerReal, viewerSrc
+        if activeSID == (baseSID or sid) then
+            viewerReal, viewerSrc = viewerMirrorOnRealCD(sid, activeSID, baseSID)
+        end
 
         local onRealCooldown
         if viewerReal ~= nil then
@@ -2104,21 +2173,22 @@ function Row:RefreshIcon(icon, entry, desat)
                 icon:SetStackTextRaw(current)
             end
         else
-            local shown = false
-            if C_Spell and C_Spell.GetSpellCastCount
-               and (CAST_COUNT_SPELLS[activeSID] or CAST_COUNT_SPELLS[baseSID]) then
+            local displayCount = getDisplayCount(activeSID, baseSID or sid)
+            if isSecret(displayCount) then
+                icon:SetStackTextRaw(displayCount)
+            elseif type(displayCount) == "string" and displayCount ~= "" and displayCount ~= "0" then
+                icon:SetStackTextRaw(displayCount)
+            elseif C_Spell and C_Spell.GetSpellCastCount
+               and (activeSID ~= (baseSID or sid) or CAST_COUNT_SPELLS[activeSID] or CAST_COUNT_SPELLS[baseSID]) then
                 local ok, castCount = pcall(C_Spell.GetSpellCastCount, activeSID)
-                if ok then
-                    if isSecret(castCount) then
-                        icon:SetStackTextRaw(castCount)
-                        shown = true
-                    elseif type(castCount) == "number" and castCount > 0 then
-                        icon:SetStackTextRaw(castCount)
-                        shown = true
-                    end
+                if ok and (isSecret(castCount) or (type(castCount) == "number" and castCount > 0)) then
+                    icon:SetStackTextRaw(castCount)
+                else
+                    icon:SetStackTextRaw("")
                 end
+            else
+                icon:SetStackTextRaw("")
             end
-            if not shown then icon:SetStackTextRaw("") end
         end
 
         icon._effOnRealCD = onRealCooldown or nil
@@ -2137,7 +2207,8 @@ function Row:RefreshIcon(icon, entry, desat)
         elseif usable ~= false then
             tintKey = "normal"
         elseif noMana then
-            tintKey = "nomana"
+            tintKey = (options and options.resourceGating and options.resourceGating.enabled == false)
+                and "normal" or "nomana"
         else
             tintKey = "unusable"
         end
@@ -2350,8 +2421,8 @@ function Row:SnapshotCooldowns()
         if entry and entry.type == "spell" then
             local sid = tonumber(entry.id)
             if sid then
-                local activeSID = activeSpellID(sid)
                 local baseSID = resolveBaseSpellID(sid)
+                local activeSID = activeSpellID(baseSID or sid)
                 local cdSpellID, cdInfo = resolveCooldownSource(sid, activeSID, baseSID)
                 local snap = snapshotFor(baseSID or sid)
                 local onReal = (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) and true or false
@@ -2363,6 +2434,7 @@ function Row:SnapshotCooldowns()
                 snap.onReal = onReal
                 snap.onGCD = cdInfo and cdInfo.isOnGCD == true
                 snap.cdSpellID = cdSpellID
+                snap.activeSID = activeSID
                 snap.at = now
             end
         end
@@ -2381,6 +2453,7 @@ end
 local ROW_EVENTS_COMMON = {
     "SPELL_UPDATE_COOLDOWN",
     "SPELL_UPDATE_CHARGES",
+    "SPELL_UPDATE_USES",
     "BAG_UPDATE_COOLDOWN",
     "PLAYER_ENTERING_WORLD",
     "PLAYER_SPECIALIZATION_CHANGED",
@@ -2389,6 +2462,7 @@ local ROW_EVENTS_COMMON = {
     "SPELLS_CHANGED",
     "TRAIT_CONFIG_UPDATED",
     "PLAYER_REGEN_ENABLED",
+    "PLAYER_REGEN_DISABLED",
 }
 
 function Row:Enable()
@@ -2448,12 +2522,16 @@ function Row:Enable()
                 row:RequestRefresh()
                 return
             end
-            if event == "PLAYER_REGEN_ENABLED" then
-                if row.name == "Consumables" and next(_consumableLockout) then
+            if event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_REGEN_DISABLED" then
+                if event == "PLAYER_REGEN_ENABLED" and row.name == "Consumables" and next(_consumableLockout) then
                     wipe(_consumableLockout)
                     dlog("consumable lockout CLEARED (combat end)")
                 end
-                row:MaybeRebuildForHidden()
+                if row:UpdateHiddenVisibility() then
+                    row.container:SetAlpha(countVisibleIcons(row.icons) > 0 and 1 or 0)
+                    row:Layout()
+                end
+                if event == "PLAYER_REGEN_ENABLED" then row:ApplyVisualOptions() end
                 row:RequestRefresh()
                 return
             end
@@ -3090,8 +3168,23 @@ function Bars:OnEnable(_, profile)
     do
         local ef = self._mirrorEventFrame
         ef:UnregisterAllEvents()
-        ef:SetScript("OnEvent", function(_, event)
+        ef:SetScript("OnEvent", function(_, event, baseID, overrideID)
             _mirrorMapDirty = true
+            if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" then
+                if not isSecret(baseID) and type(baseID) == "number" then
+                    if not isSecret(overrideID) then
+                        _spellOverrides[baseID] = type(overrideID) == "number" and overrideID > 0 and overrideID or false
+                    else
+                        _spellOverrides[baseID] = nil
+                    end
+                    _cdSnapshot[baseID] = nil
+                end
+            elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+                wipe(_spellOverrides)
+            end
+            if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" or event == "SPELL_UPDATE_ICON" then
+                for _, row in pairs(self.rows) do row:RequestRefresh() end
+            end
             if event == "COOLDOWN_VIEWER_DATA_LOADED" or event == "PLAYER_REGEN_ENABLED" or event == "SPELLS_CHANGED" then
                 if self:_SeedScope() then
                     for _, row in pairs(self.rows) do row:Rebuild() end
@@ -3103,6 +3196,8 @@ function Bars:OnEnable(_, profile)
         ef:RegisterEvent("PLAYER_REGEN_ENABLED")
         ef:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         ef:RegisterEvent("SPELLS_CHANGED")
+        ef:RegisterEvent("SPELL_UPDATE_ICON")
+        ef:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
         pcall(ef.RegisterEvent, ef, "COOLDOWN_VIEWER_DATA_LOADED")
     end
 
@@ -3140,6 +3235,7 @@ function Bars:OnDisable()
         self._mirrorEventFrame:SetScript("OnEvent", nil)
     end
     wipe(_mirrorMap)
+    wipe(_spellOverrides)
     _mirrorMapDirty = true
     wipe(self._activeProcs)
     wipe(_cdSnapshot)

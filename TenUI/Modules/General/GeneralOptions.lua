@@ -141,9 +141,6 @@ local function buildQoLPage(sc)
 
     children[#children + 1] = C.CreateSection(sc, "Reminders")
 
-    children[#children + 1] = C.CreateHelpText(sc,
-        "Lightweight quality-of-life reminders. Everything is off by default.")
-
     local tabRow = CreateFrame("Frame", nil, sc)
     tabRow:SetHeight(28)
     children[#children + 1] = tabRow
@@ -406,6 +403,11 @@ local function buildQoLPage(sc)
     children[#children + 1] = C.CreateCheckBox(sc, "Shadow Priest: not in Shadowform",
         function() return getCR().shadowform == true end,
         function(v) getCR().shadowform = v applyCR() end
+    )
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show active buffs and pets with a check mark",
+        function() return getCR().showActive == true end,
+        function(v) getCR().showActive = v applyCR() end
     )
 
     children[#children + 1] = C.CreateCheckBox(sc, "Rogue: poison upkeep (lethal + non-lethal)",

@@ -70,10 +70,8 @@ local DEFAULT_INTENT_DEFS = {
 
 local PREVIEW_INTENTS = {
     { label = "Proc",       intent = "proc"       },
-    { label = "Pandemic",   intent = "pandemic"   },
     { label = "Max Stacks", intent = "maxStacks"  },
     { label = "Ready",      intent = "ready"      },
-    { label = "Active Aura",intent = "activeAura" },
 }
 
 local function buildGlowPage(sc)
@@ -84,7 +82,7 @@ local function buildGlowPage(sc)
 
     children[#children + 1] = C.CreateSection(sc, "Glow Effects")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Enable Glow Effects (Master Toggle)",
+    children[#children + 1] = C.CreateCheckBox(sc, "Enable Glow Effects",
         function()
             return getGlowProfile().globalEnabled ~= false
         end,
@@ -93,15 +91,11 @@ local function buildGlowPage(sc)
             if ns.Glow and ns.Glow.ResolveAll then
                 pcall(ns.Glow.ResolveAll, ns.Glow)
             end
+            if ns.Auras then ns.Auras:RequestRefresh() end
         end
     )
 
-    children[#children + 1] = C.CreateHelpText(sc,
-        "Priority: Proc > Pandemic > Ready > Active Aura. " ..
-        "Per-ability glow: CDM Bars > right-click an ability. " ..
-        "Per-aura glow: Auras > right-click an aura.")
-
-    children[#children + 1] = C.CreateSubSection(sc, "Global Glow Defaults")
+    children[#children + 1] = C.CreateSubSection(sc, "Cooldown Glow Defaults")
 
     for _, def in ipairs(DEFAULT_INTENT_DEFS) do
         local intent = def.intent
@@ -162,9 +156,7 @@ local function buildGlowPage(sc)
     end
 
     children[#children + 1] = C.CreateHelpText(sc,
-        "Defaults apply to abilities without their own style or color override. " ..
-        "The Blizzard style uses the game's animated proc art and ignores color. " ..
-        "Changes apply immediately.")
+        "Right-click an ability in CDM Bars to override these defaults. Set the Blizzard Pandemic warning on the Auras page.")
 
     children[#children + 1] = C.CreateSubSection(sc, "Preview")
 

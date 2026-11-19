@@ -69,6 +69,18 @@ local function buildAbilityPage(sc)
         return
     end
 
+    local function applyAbilityOptions()
+        if ns.Bars and ns.Bars.ApplyAbilityOptions then ns.Bars:ApplyAbilityOptions(spellID) end
+    end
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show your debuff time on the current target",
+        function() return getAbilityProfile(spellID).targetDebuffTimer == true end,
+        function(v)
+            getAbilityProfile(spellID).targetDebuffTimer = v and true or nil
+            applyAbilityOptions()
+        end
+    )
+
     local previewRow = CreateFrame("Frame", nil, sc)
     previewRow:SetHeight(60)
     C.SkinPanel(previewRow)
@@ -396,6 +408,7 @@ local function buildAbilityPage(sc)
             ap.warnings = ap.warnings or {}
             ap.warnings.cooldownText = ap.warnings.cooldownText or {}
             ap.warnings.cooldownText.enabled = v
+            applyAbilityOptions()
             restylePreview()
         end
     )
@@ -410,6 +423,8 @@ local function buildAbilityPage(sc)
             ap.warnings = ap.warnings or {}
             ap.warnings.cooldownText = ap.warnings.cooldownText or {}
             ap.warnings.cooldownText.size = math.floor(v + 0.5)
+            ap.warnings.cooldownText.custom = true
+            applyAbilityOptions()
             restylePreview()
         end
     )
@@ -424,6 +439,8 @@ local function buildAbilityPage(sc)
             ap.warnings = ap.warnings or {}
             ap.warnings.cooldownText = ap.warnings.cooldownText or {}
             ap.warnings.cooldownText.font = v
+            ap.warnings.cooldownText.custom = true
+            applyAbilityOptions()
             restylePreview()
         end
     )
@@ -438,6 +455,8 @@ local function buildAbilityPage(sc)
             ap.warnings = ap.warnings or {}
             ap.warnings.cooldownText = ap.warnings.cooldownText or {}
             ap.warnings.cooldownText.anchor = v
+            ap.warnings.cooldownText.custom = true
+            applyAbilityOptions()
             restylePreview()
         end
     )
@@ -452,6 +471,8 @@ local function buildAbilityPage(sc)
             ap.warnings = ap.warnings or {}
             ap.warnings.cooldownText = ap.warnings.cooldownText or {}
             ap.warnings.cooldownText.x = math.floor(v + 0.5)
+            ap.warnings.cooldownText.custom = true
+            applyAbilityOptions()
             restylePreview()
         end
     )
@@ -466,13 +487,15 @@ local function buildAbilityPage(sc)
             ap.warnings = ap.warnings or {}
             ap.warnings.cooldownText = ap.warnings.cooldownText or {}
             ap.warnings.cooldownText.y = math.floor(v + 0.5)
+            ap.warnings.cooldownText.custom = true
+            applyAbilityOptions()
             restylePreview()
         end
     )
 
     children[#children + 1] = C.CreateSubSection(sc, "Range Indicator")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Range Tint Out-of-Range",
+    children[#children + 1] = C.CreateCheckBox(sc, "Tint out-of-range abilities",
         function()
             local ap = getAbilityProfile(spellID)
             return ap.range and ap.range.enabled ~= false
@@ -481,12 +504,13 @@ local function buildAbilityPage(sc)
             local ap = getAbilityProfile(spellID)
             ap.range = ap.range or {}
             ap.range.enabled = v
+            applyAbilityOptions()
         end
     )
 
     children[#children + 1] = C.CreateSubSection(sc, "Resource Gating")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Desaturate When Insufficient Resources",
+    children[#children + 1] = C.CreateCheckBox(sc, "Tint abilities with insufficient resources",
         function()
             local ap = getAbilityProfile(spellID)
             return ap.resourceGating and ap.resourceGating.enabled ~= false
@@ -495,6 +519,7 @@ local function buildAbilityPage(sc)
             local ap = getAbilityProfile(spellID)
             ap.resourceGating = ap.resourceGating or {}
             ap.resourceGating.enabled = v
+            applyAbilityOptions()
         end
     )
 
@@ -533,6 +558,7 @@ local function buildAbilityPage(sc)
             local ap = getAbilityProfile(spellID)
             ap.visibility = ap.visibility or {}
             ap.visibility.combatOnly = v
+            applyAbilityOptions()
         end
     )
 

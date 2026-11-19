@@ -998,19 +998,17 @@ _lowTimeStats.pvTimerText = function(i)
     return tostring(math.ceil(rem))
 end
 
-_lowTimeStats.pvBuild = function()
-    local n = _lowTimeStats.preview.count
-    if type(n) ~= "number" or n < 1 then n = 1 elseif n > 3 then n = 3 end
+_lowTimeStats.pvBuild = function(entries)
+    local n = entries and math.max(#entries, 1) or _lowTimeStats.preview.count
     local items = {}
     for i = 1, n do
-        local dur = _lowTimeStats.pvDuration(i)
+        local entry = entries and entries[i]
         items[i] = {
             _preview     = true,
             _previewSlot = i,
-            _previewDur  = dur,
-            _barName     = "Preview " .. i,
-            _spellID     = nil,
-            _iconTexture = [[Interface\Icons\INV_Misc_QuestionMark]],
+            _previewDur  = _lowTimeStats.pvDuration(i),
+            _barName     = entry and (Auras._catalogDisplayName(entry) or entry.label) or ("Preview " .. i),
+            _iconTexture = entry and Auras._catalogDisplayTexture(entry) or Auras.PLACEHOLDER_ICON,
         }
     end
     return items
@@ -8355,7 +8353,8 @@ function Auras._NativeConfig(display, isBar)
     local visuals = (isBar and getTrackedBarsVisuals() or getTrackedIconVisuals()) or {}
     local width, height, spacing
     local point, vertical
-    local style = { pandemic = Auras:IsPandemicEnabled() }
+    local glowEnabled = not ns.Glow or not ns.Glow.IsGloballyEnabled or ns.Glow:IsGloballyEnabled()
+    local style = { pandemic = glowEnabled and Auras:IsPandemicEnabled() }
     if isBar then
         width, height, spacing = resolveTrackedBarsGeometry(opts.barHeight, opts.spacing)
         point, vertical = "BOTTOMLEFT", true
@@ -8374,7 +8373,9 @@ function Auras._NativeConfig(display, isBar)
         width, height, spacing = resolveTrackedIconSize(parent:GetHeight(), opts.spacing)
         vertical = visuals.orientation == "V"
         point = opts.align == "LEFT" and "LEFT" or opts.align == "RIGHT" and "RIGHT" or "CENTER"
-        if vertical then point = opts.align == "RIGHT" and "BOTTOM" or "TOP" end
+        if vertical then
+            point = point == "LEFT" and "TOP" or point == "RIGHT" and "BOTTOM" or "CENTER"
+        end
         style.showSwipe = opts.showDurationSwipe ~= false
         style.showTimer = true
         style.showCount = opts.showStackText ~= false
@@ -8385,7 +8386,7 @@ function Auras._NativeConfig(display, isBar)
         style.border = visuals.borderColor or { 0, 0, 0, 1 }
     end
     local glow = opts.activeGlow
-    if glow and glow.enabled then
+    if glowEnabled and glow and glow.enabled then
         style.border = glow.color or { glow.colorR or 1, glow.colorG or 0.85,
             glow.colorB or 0.3, glow.colorA or 0.85 }
     end
@@ -9500,6 +9501,20 @@ buildActiveFromCatalog = function(displayType, preview)
     end
     if type(cat) ~= "table" then cat = {} end
     local out = {}
+
+    if preview and displayType == "TrackedBars" and Auras._barPreviewAuto then
+        local entries = {}
+        for _, entry in ipairs(cat) do
+            if entryDisplayEnabled(entry) then entries[#entries + 1] = entry end
+        end
+        local rank = (_liveRenderCat.rankByCategory or {})[cdmCategoryFor("TrackedBars")] or {}
+        table.sort(entries, function(a, b)
+            local rankA, rankB = rank[a.cooldownID] or math.huge, rank[b.cooldownID] or math.huge
+            if rankA ~= rankB then return rankA < rankB end
+            return a.stableEntryID < b.stableEntryID
+        end)
+        return _lowTimeStats.pvBuild(entries)
+    end
 
     if preview then
         for i = 1, #cat do

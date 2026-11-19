@@ -482,7 +482,7 @@ local function buildCastBarPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateSubSection(sc, "Display")
+    children[#children + 1] = C.CreateSubSection(sc, "Spell Icon")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Spell Icon",
         function()
@@ -534,7 +534,7 @@ local function buildCastBarPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateSlider(sc, "Icon Size (px)", 8, 64, 1,
+    children[#children + 1] = C.CreateSlider(sc, "Custom Icon Size", 8, 64, 1,
         function()
             local cp = getCBProfile()
             if type(cp.iconSize) == "number" then return cp.iconSize end
@@ -568,6 +568,8 @@ local function buildCastBarPage(sc)
             applyOptions()
         end
     )
+
+    children[#children + 1] = C.CreateSubSection(sc, "Cast Information")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Spell Name",
         function()

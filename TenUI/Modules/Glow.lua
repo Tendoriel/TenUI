@@ -108,6 +108,10 @@ local function _isGlobalEnabled()
     return g.globalEnabled ~= false
 end
 
+function Glow:IsGloballyEnabled()
+    return _isGlobalEnabled()
+end
+
 local function _globalDefault(intent)
     if not ns.savedVarsReady then return nil end
     local ok, p = pcall(ns.GetProfile, ns)

@@ -19,28 +19,6 @@ local _currentAuraSpellID    = nil
 local _currentAuraContainer  = nil
 local _currentAuraCooldownID = nil
 
-local function auraSupportsPandemic(cooldownID)
-    if type(cooldownID) ~= "number" then return nil end
-    if not (C_CooldownViewer and C_CooldownViewer.GetValidAlertTypes) then
-        return nil
-    end
-    local pandemicType = Enum and Enum.CooldownViewerAlertEventType
-        and Enum.CooldownViewerAlertEventType.PandemicTime
-    if type(pandemicType) ~= "number" then return nil end
-    local ok, types = pcall(C_CooldownViewer.GetValidAlertTypes, cooldownID)
-    if not ok or type(types) ~= "table" then return nil end
-    for _, t in ipairs(types) do
-        if type(t) == "number" and t == pandemicType then return true end
-    end
-    return false
-end
-
-local function requestAurasRefresh()
-    if ns.Auras and ns.Auras.RequestRefresh then
-        pcall(ns.Auras.RequestRefresh, ns.Auras)
-    end
-end
-
 local function getAuraProfile(spellID)
     if not ns.savedVarsReady or not spellID then return {} end
     local p = ns:GetProfile()
@@ -88,22 +66,6 @@ local function getActiveAuras(containerKey)
     return result
 end
 
-local function getAuraDiagnostics()
-    if ns.Auras and ns.Auras.GetTrackedAuraDiagnostics then
-        local ok, lines = pcall(ns.Auras.GetTrackedAuraDiagnostics, ns.Auras, _selectedAuraContainer)
-        if ok and type(lines) == "table" then return lines end
-    end
-    local lines = {}
-    if not ns.Auras then
-        lines[#lines + 1] = "ns.Auras: nil (module not loaded)"
-        return lines
-    end
-    lines[#lines + 1] = "Auras module: " .. (ns.Auras._enabled and "enabled" or "disabled")
-    lines[#lines + 1] = "BuffIconCooldownViewer: " .. (_G["BuffIconCooldownViewer"] and "found" or "nil")
-    lines[#lines + 1] = "BuffBarCooldownViewer: "  .. (_G["BuffBarCooldownViewer"]  and "found" or "nil")
-    return lines
-end
-
 local _auraListFrame = nil
 local _relayoutAuraPage = nil
 
@@ -144,18 +106,10 @@ local function rebuildAuraList()
 
     local auras = getActiveAuras(_selectedAuraContainer)
     if #auras == 0 then
-        local diagLines = getAuraDiagnostics()
-        local y = -8
-        local ROW_D = 16
-        for _, line in ipairs(diagLines) do
-            local lbl = C.Text(_auraListFrame, C.Fonts.small, Theme.color.textDim, line)
-            lbl:SetPoint("TOPLEFT", _auraListFrame, "TOPLEFT", 8, y)
-            y = y - ROW_D
-        end
         local note = C.Text(_auraListFrame, C.Fonts.small, Theme.color.textDim,
-            "No tracked auras in this category. Add auras to Blizzard's Cooldown Manager, then click Refresh Aura List.")
-        note:SetPoint("TOPLEFT", _auraListFrame, "TOPLEFT", 8, y - 4)
-        _auraListFrame:SetHeight(math.abs(y) + 24)
+            "No auras in this category. Check the tracked lists in Blizzard Cooldown Manager.")
+        note:SetPoint("TOPLEFT", _auraListFrame, "TOPLEFT", 8, -8)
+        _auraListFrame:SetHeight(32)
         return
     end
 
@@ -414,7 +368,7 @@ local function buildAuraPage(sc)
     )
 
     children[#children + 1] = C.CreateCheckBox(sc,
-        "Respect Blizzard CDM hidden/disabled cooldowns",
+        "Hide auras disabled in Blizzard Cooldown Manager",
         function()
             if ns.Auras and ns.Auras.GetRespectCDMHidden then
                 return ns.Auras:GetRespectCDMHidden()
@@ -460,7 +414,7 @@ local function buildAuraPage(sc)
     )
 
     children[#children + 1] = C.CreateCheckBox(sc,
-        "Show Inactive Tracked Bars (dimmed spell-name rows)",
+        "Keep inactive bars visible",
         function()
             if ns.Auras and ns.Auras.GetBarShowInactive then
                 return ns.Auras:GetBarShowInactive()
@@ -474,52 +428,12 @@ local function buildAuraPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateCheckBox(sc,
-        "Color timer numbers + bar fill when low on time",
-        function()
-            if ns.Auras and ns.Auras.GetLowTimeTextEnabled then
-                return ns.Auras:GetLowTimeTextEnabled()
-            end
-            return false
-        end,
-        function(v)
-            if ns.Auras and ns.Auras.SetLowTimeTextEnabled then
-                ns.Auras:SetLowTimeTextEnabled(v)
-            end
-        end
+    children[#children + 1] = C.CreateCheckBox(sc, "Show Blizzard's Pandemic warning",
+        function() return ns.Auras and ns.Auras:IsPandemicEnabled() or false end,
+        function(v) if ns.Auras then ns.Auras:SetPandemicEnabled(v) end end
     )
 
-    children[#children + 1] = C.CreateSlider(sc, "Low-Time Threshold (sec)", 1, 60, 1,
-        function()
-            if ns.Auras and ns.Auras.GetLowTimeTextConfig then
-                local _, thr = ns.Auras:GetLowTimeTextConfig()
-                return thr
-            end
-            return 5
-        end,
-        function(v)
-            if ns.Auras and ns.Auras.SetLowTimeTextThreshold then
-                ns.Auras:SetLowTimeTextThreshold(v)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateColorSwatch(sc, "Low-Time Color (timer numbers)",
-        function()
-            if ns.Auras and ns.Auras.GetLowTimeTextConfig then
-                local _, _, _, _, _, _, lr, lg, lb = ns.Auras:GetLowTimeTextConfig()
-                return lr, lg, lb, 1
-            end
-            return 1, 0.15, 0.10, 1
-        end,
-        function(r, g, b)
-            if ns.Auras and ns.Auras.SetLowTimeTextLowRGB then
-                ns.Auras:SetLowTimeTextLowRGB(r, g, b)
-            end
-        end
-    )
-
-    children[#children + 1] = C.CreateSubSection(sc, "Tracked Auras (check = show, right-click = settings)")
+    children[#children + 1] = C.CreateSubSection(sc, "Tracked Auras")
 
     local auraContainer = CreateFrame("Frame", nil, sc)
     auraContainer:SetHeight(80)
@@ -539,7 +453,6 @@ end
 local function buildAuraSettingsPage(sc)
     local C = ns.UI
     if not C then return end
-    local Theme = C.Theme
     local children = {}
 
     local spellID   = _currentAuraSpellID
@@ -559,468 +472,25 @@ local function buildAuraSettingsPage(sc)
         return
     end
 
-    local previewRow = CreateFrame("Frame", nil, sc)
-    previewRow:SetHeight(60)
-    C.SkinPanel(previewRow)
-    children[#children + 1] = previewRow
-
-    local previewHolder = CreateFrame("Frame", nil, previewRow)
-    previewHolder:SetSize(40, 40)
-    previewHolder:SetPoint("LEFT", previewRow, "LEFT", 10, 0)
-
-    local previewTex
-    if C_Spell and C_Spell.GetSpellTexture then
-        local ok, t = pcall(C_Spell.GetSpellTexture, spellID)
-        if ok then previewTex = t end
-    end
-    if ns.Widgets and ns.Widgets.Icon then
-        pcall(ns.Widgets.Icon.New, ns.Widgets.Icon, previewHolder,
-            { texture = previewTex, cooldown = false, stackText = false })
-    end
-
-    local previewDurText = previewHolder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    previewDurText:SetTextColor(1, 1, 1, 1)
-
-    local previewStackText = previewHolder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    previewStackText:SetTextColor(1, 1, 1, 1)
-    previewStackText:SetPoint("BOTTOMRIGHT", previewHolder, "BOTTOMRIGHT", -1, 1)
-    previewStackText:SetJustifyH("RIGHT")
-
-    local previewHint = C.Text(previewRow, C.Fonts.small, Theme.color.textDim,
-        "Live sample: updates as you change settings.")
-    previewHint:SetPoint("LEFT", previewHolder, "RIGHT", 12, 0)
-
-    local function restylePreviewImpl()
-        local ap = getAuraProfile(spellID)
-
-        local dt = (ap.text and ap.text.duration) or {}
-        local fontPath = (C.ResolveFontPath and C.ResolveFontPath(dt.font))
-            or "Fonts\\FRIZQT__.TTF"
-        local fontSize = tonumber(dt.size) or 12
-        if fontSize < 6 then fontSize = 6 elseif fontSize > 64 then fontSize = 64 end
-        pcall(previewDurText.SetFont, previewDurText, fontPath, fontSize, "OUTLINE")
-
-        if dt.enabled == false then
-            previewDurText:SetText("")
-        else
-            previewDurText:SetText("12")
-        end
-        local anchor = dt.anchor or "BOTTOM"
-        local x = dt.x or 0
-        local y = (dt.y ~= nil) and dt.y or -2
-        previewDurText:ClearAllPoints()
-        if anchor == "BELOW_ICON" then
-            previewDurText:SetPoint("TOP", previewHolder, "BOTTOM", x, y)
-        elseif anchor == "ABOVE_ICON" then
-            previewDurText:SetPoint("BOTTOM", previewHolder, "TOP", x, y)
-        else
-            previewDurText:SetPoint(anchor, previewHolder, anchor, x, y)
-        end
-
-        local st = (ap.text and ap.text.stacks) or {}
-        local stackSize = tonumber(st.size) or 11
-        if stackSize < 6 then stackSize = 6 elseif stackSize > 64 then stackSize = 64 end
-        pcall(previewStackText.SetFont, previewStackText,
-            "Fonts\\FRIZQT__.TTF", stackSize, "OUTLINE")
-        if st.enabled == false then
-            previewStackText:SetText("")
-        else
-            previewStackText:SetText("x3")
-        end
-
-        if ns.Glow and ns.Glow.Set and ns.Glow.Clear then
-            local function glowOpts(rec)
-                local opts = {}
-                if rec and type(rec.style) == "string" then opts.style = rec.style end
-                local c = rec and rec.color
-                if type(c) == "table" then
-                    opts.colorR = tonumber(c[1])
-                    opts.colorG = tonumber(c[2])
-                    opts.colorB = tonumber(c[3])
-                    opts.colorA = tonumber(c[4])
-                end
-                return opts
-            end
-            local g = ap.glow or {}
-            if g.pandemic and g.pandemic.enabled == false then
-                pcall(ns.Glow.Clear, ns.Glow, previewHolder, "pandemic")
-            else
-                pcall(ns.Glow.Set, ns.Glow, previewHolder, "pandemic", glowOpts(g.pandemic))
-            end
-            if g.activeAura and g.activeAura.enabled == true then
-                pcall(ns.Glow.Set, ns.Glow, previewHolder, "activeAura", glowOpts(g.activeAura))
-            else
-                pcall(ns.Glow.Clear, ns.Glow, previewHolder, "activeAura")
-            end
-        end
-    end
-
-    local previewBroken = false
-    local function restylePreview()
-        if previewBroken then return end
-        local ok, err = pcall(restylePreviewImpl)
-        if not ok then
-            previewBroken = true
-            previewRow:Hide()
-            if ns.Debug and ns.Debug.Log then
-                ns.Debug:Log("[AuraPanel] sample preview failed (hidden): %s", tostring(err))
-            end
-        end
-    end
-    restylePreview()
-
-    children[#children + 1] = C.CreateSubSection(sc, "Pandemic Glow")
-
-    do
-        local support = auraSupportsPandemic(_currentAuraCooldownID)
-        local note
-        if support == true then
-            note = "This aura has a pandemic refresh window (auto-detected)."
-        elseif support == false then
-            note = "No pandemic window reported for this aura -- the glow may never trigger. Settings are kept anyway."
-        else
-            note = "Applies to refreshable damage-over-time effects (auto-detection unavailable here)."
-        end
-        children[#children + 1] = C.CreateHelpText(sc, note)
-    end
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Pandemic Glow Enabled",
+    local key = _currentAuraCooldownID and ("cdm:" .. _currentAuraCooldownID) or spellID
+    local category = _currentAuraContainer == "TrackedBars" and "Tracked Bars" or "Tracked Icons"
+    children[#children + 1] = C.CreateCheckBox(sc, "Show in " .. category,
         function()
-            local ap = getAuraProfile(spellID)
-            return ap.glow and ap.glow.pandemic and ap.glow.pandemic.enabled ~= false
+            local profile = ns.savedVarsReady and ns:GetProfile()
+            local auras = profile and profile.auras
+            local aura = auras and (auras[key] or auras[spellID])
+            return not (aura and aura.enabled == false)
         end,
         function(v)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.pandemic = ap.glow.pandemic or {}
-            ap.glow.pandemic.enabled = v
-            ap.glow.pandemic.userSet = true
-            if ns.Auras and ns.Auras.PrebuildPandemicCurves then
-                pcall(ns.Auras.PrebuildPandemicCurves, ns.Auras)
-            end
-            requestAurasRefresh()
-            restylePreview()
+            getAuraProfile(key).enabled = v
+            if ns.Auras then ns.Auras:OnAuraEnabledChanged(key, v) end
         end
     )
-
-    children[#children + 1] = C.CreateSlider(sc, "Pandemic Threshold (%)", 5, 50, 1,
-        function()
-            local ap = getAuraProfile(spellID)
-            local t = (ap.glow and ap.glow.pandemic and ap.glow.pandemic.threshold) or 0.30
-            return math.floor(t * 100 + 0.5)
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.pandemic = ap.glow.pandemic or {}
-            ap.glow.pandemic.threshold = v / 100
-            ap.glow.pandemic.userSet = true
-            if ns.Auras and ns.Auras.PrebuildPandemicCurves then
-                pcall(ns.Auras.PrebuildPandemicCurves, ns.Auras)
-            end
-            requestAurasRefresh()
-        end
-    )
-
-    local pandemicStyleValues = {}
-    do
-        local names
-        if ns.Glow and ns.Glow.GetRegisteredStyles then
-            names = ns.Glow:GetRegisteredStyles()
-        else
-            names = { "blizzard", "border", "overlay", "pixel", "solid" }
-        end
-        for i = 1, #names do
-            local k = names[i]
-            local label = (ns.Glow and ns.Glow.GetStyleLabel) and ns.Glow:GetStyleLabel(k) or k
-            if k == "pixel" then
-                label = label .. " (default)"
-            end
-            pandemicStyleValues[#pandemicStyleValues + 1] = { key = k, label = label }
-        end
-    end
-
-    children[#children + 1] = C.CreateDropdownLikeList(sc, "Pandemic Glow Style",
-        pandemicStyleValues,
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.glow and ap.glow.pandemic and ap.glow.pandemic.style) or "pixel"
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.pandemic = ap.glow.pandemic or {}
-            ap.glow.pandemic.style = v
-            ap.glow.pandemic.userSet = true
-            requestAurasRefresh()
-            restylePreview()
-        end
-    )
-
     children[#children + 1] = C.CreateHelpText(sc,
-        "FX styles (animated borders) play on the live tile when the aura is not " ..
-        "secret. The edge styles (Border, Pixel, Solid) and the pandemic two-zone " ..
-        "fade are always available.")
-
-    children[#children + 1] = C.CreateColorSwatch(sc, "Pandemic Glow Color",
-        function()
-            local ap = getAuraProfile(spellID)
-            local c = ap.glow and ap.glow.pandemic and ap.glow.pandemic.color
-            if c then return c[1], c[2], c[3], c[4] end
-            return 1, 0.35, 0.1, 1
-        end,
-        function(r, g, b, a)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.pandemic = ap.glow.pandemic or {}
-            ap.glow.pandemic.color = { r, g, b, a }
-            ap.glow.pandemic.userSet = true
-            requestAurasRefresh()
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSubSection(sc, "Active Aura Glow")
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Active Aura Glow Enabled",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.glow and ap.glow.activeAura and ap.glow.activeAura.enabled == true
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.activeAura = ap.glow.activeAura or {}
-            ap.glow.activeAura.enabled = v
-            if ns.Auras and ns.Auras.PrebuildPandemicCurves then
-                pcall(ns.Auras.PrebuildPandemicCurves, ns.Auras)
-            end
-            requestAurasRefresh()
-            restylePreview()
-        end
-    )
-
-    local activeStyleValues = {}
-    do
-        local names
-        if ns.Glow and ns.Glow.GetRegisteredStyles then
-            names = ns.Glow:GetRegisteredStyles()
-        else
-            names = { "blizzard", "border", "overlay", "pixel", "solid" }
-        end
-        for i = 1, #names do
-            local k = names[i]
-            local label = (ns.Glow and ns.Glow.GetStyleLabel) and ns.Glow:GetStyleLabel(k) or k
-            if k == "border" then
-                label = label .. " (default)"
-            end
-            activeStyleValues[#activeStyleValues + 1] = { key = k, label = label }
-        end
-    end
-
-    children[#children + 1] = C.CreateDropdownLikeList(sc, "Active Aura Glow Style",
-        activeStyleValues,
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.glow and ap.glow.activeAura and ap.glow.activeAura.style) or "border"
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.activeAura = ap.glow.activeAura or {}
-            ap.glow.activeAura.style = v
-            requestAurasRefresh()
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateColorSwatch(sc, "Active Aura Glow Color",
-        function()
-            local ap = getAuraProfile(spellID)
-            local c = ap.glow and ap.glow.activeAura and ap.glow.activeAura.color
-            if c then return c[1], c[2], c[3], c[4] end
-            return 0.4, 0.8, 1, 1
-        end,
-        function(r, g, b, a)
-            local ap = getAuraProfile(spellID)
-            ap.glow = ap.glow or {}
-            ap.glow.activeAura = ap.glow.activeAura or {}
-            ap.glow.activeAura.color = { r, g, b, a }
-            if ns.Auras and ns.Auras.PrebuildPandemicCurves then
-                pcall(ns.Auras.PrebuildPandemicCurves, ns.Auras)
-            end
-            requestAurasRefresh()
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSubSection(sc, "Display")
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Display as Icon",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.display and ap.display.asIcon ~= false
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.display = ap.display or {}
-            ap.display.asIcon = v
-        end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Display as Bar",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.display and ap.display.asBar ~= false
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.display = ap.display or {}
-            ap.display.asBar = v
-        end
-    )
-
-    children[#children + 1] = C.CreateSubSection(sc, "Duration Text")
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Show Duration Text",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.text and ap.text.duration and ap.text.duration.enabled ~= false
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.duration = ap.text.duration or {}
-            ap.text.duration.enabled = v
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateFontDropdown(sc, "Duration Font",
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.text and ap.text.duration and ap.text.duration.font) or "default"
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.duration = ap.text.duration or {}
-            ap.text.duration.font = v
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSlider(sc, "Duration Font Size", 8, 28, 1,
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.text and ap.text.duration and ap.text.duration.size) or 12
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.duration = ap.text.duration or {}
-            ap.text.duration.size = math.floor(v + 0.5)
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateTextAnchorDropdown(sc, "Duration Anchor",
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.text and ap.text.duration and ap.text.duration.anchor) or "BOTTOM"
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.duration = ap.text.duration or {}
-            ap.text.duration.anchor = v
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSlider(sc, "Duration X Offset", -30, 30, 1,
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.text and ap.text.duration and ap.text.duration.x) or 0
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.duration = ap.text.duration or {}
-            ap.text.duration.x = math.floor(v + 0.5)
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSlider(sc, "Duration Y Offset", -30, 30, 1,
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.text and ap.text.duration and ap.text.duration.y) or -2
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.duration = ap.text.duration or {}
-            ap.text.duration.y = math.floor(v + 0.5)
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSubSection(sc, "Stacks Text")
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Show Stack Count",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.text and ap.text.stacks and ap.text.stacks.enabled ~= false
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.stacks = ap.text.stacks or {}
-            ap.text.stacks.enabled = v
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSlider(sc, "Stacks Font Size", 8, 22, 1,
-        function()
-            local ap = getAuraProfile(spellID)
-            return (ap.text and ap.text.stacks and ap.text.stacks.size) or 11
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.text = ap.text or {}
-            ap.text.stacks = ap.text.stacks or {}
-            ap.text.stacks.size = math.floor(v + 0.5)
-            restylePreview()
-        end
-    )
-
-    children[#children + 1] = C.CreateSubSection(sc, "Visibility Conditions")
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Show Own Auras Only",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.visibility and ap.visibility.ownOnly ~= false
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.visibility = ap.visibility or {}
-            ap.visibility.ownOnly = v
-        end
-    )
-
-    children[#children + 1] = C.CreateCheckBox(sc, "Combat Only",
-        function()
-            local ap = getAuraProfile(spellID)
-            return ap.visibility and ap.visibility.combatOnly == true
-        end,
-        function(v)
-            local ap = getAuraProfile(spellID)
-            ap.visibility = ap.visibility or {}
-            ap.visibility.combatOnly = v
-        end
-    )
+        "Move the aura between Tracked Icons and Tracked Bars in Blizzard Cooldown Manager. Adjust the selected group's appearance in Layout.")
+    children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager", function()
+        if ns.Auras then ns.Auras:OpenBlizzardCDMSettings() end
+    end)
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math.max(totalH, 10))

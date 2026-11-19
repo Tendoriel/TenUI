@@ -7,7 +7,11 @@ local groups = {}
 local fixedBars
 local failures = {}
 local groupKey = "tracked"
+local maxTrackedIcons = 40
 local unitFilters = { player = "HELPFUL", target = "HARMFUL|PLAYER" }
+local cooldownDebuffs = setmetatable({}, { __mode = "k" })
+local iconAlignment
+local iconTimerOptions
 
 local function signature(value)
     if type(value) ~= "table" then return tostring(value) end
@@ -130,14 +134,31 @@ local function createContainer(parent, unit)
     return container
 end
 
+local function bindIconTimer(button, timer)
+    if not iconTimerOptions and C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+       and Enum.NumericRuleFormatRounding then
+        local formatter = C_StringUtil.CreateNumericRuleFormatter()
+        local up = Enum.NumericRuleFormatRounding.Up
+        formatter:SetBreakpoints({
+            { threshold = 0, format = "%d", step = 1, rounding = up },
+            { threshold = 90, format = "%dm", step = 60, rounding = up, components = { { div = 60 } } },
+            { threshold = 5401, format = "%dh", step = 3600, rounding = up, components = { { div = 3600 } } },
+            { threshold = 129601, format = "%dd", step = 86400, rounding = up, components = { { div = 86400 } } },
+        })
+        iconTimerOptions = { textFormatter = formatter }
+    end
+    button:SetDurationText(timer, iconTimerOptions)
+end
+
 local function bindRegions(button, regions, bindName)
     button:SetIcon(regions.icon)
     button:SetApplicationCount(regions.count)
-    button:SetDurationText(regions.timer)
     if regions.bar then
+        button:SetDurationText(regions.timer)
         if bindName then button:SetSpellName(regions.name) end
         button:SetDurationBar(regions.bar, { direction = Enum.StatusBarTimerDirection.RemainingTime })
     else
+        bindIconTimer(button, regions.timer)
         button:SetDurationCooldown(regions.cooldown)
     end
 end
@@ -148,7 +169,7 @@ local function createGroup(state, unit, config)
     container:Hide()
     container:SetSize(1, 1)
     container:AddAuraGroup(groupKey, unitFilters[unit], {
-        maxFrameCount = 40,
+        maxFrameCount = maxTrackedIcons,
         candidateFilters = { includeSpellIDs = config.ids },
         initializeFrame = function(button)
             local current = state.config
@@ -162,15 +183,46 @@ local function createGroup(state, unit, config)
     })
 end
 
-local function setLayout(frame, unit, config)
-    local point = config.point
-    local x, y = 0, 0
-    if unit == "target" then
+local function splitGroupPoint(unit, vertical)
+    if vertical then return unit == "player" and "BOTTOM" or "TOP" end
+    return unit == "player" and "RIGHT" or "LEFT"
+end
+
+local function positionGroup(frame, unit, config)
+    local point, x, y = config.point, 0, 0
+    local relative, relativePoint = config.parent, point
+    if config.splitIcons then
+        point = splitGroupPoint(unit, config.vertical)
+        local gap = config.spacing * 0.5
+        local displacement = unit == "player" and -gap or gap
+        if config.alignment then
+            relative = config.alignment
+            if relativePoint == "LEFT" or relativePoint == "TOP" then
+                relativePoint = config.vertical and "BOTTOM" or "RIGHT"
+                displacement = displacement - gap - 1
+            elseif relativePoint == "RIGHT" or relativePoint == "BOTTOM" then
+                relativePoint = config.vertical and "TOP" or "LEFT"
+                displacement = displacement + gap + 1
+            end
+        end
+        if config.vertical then y = -displacement else x = displacement end
+    elseif unit == "target" and config.isBar then
         if config.vertical then x = config.width + config.spacing
         else y = config.height + config.spacing end
     end
     frame:ClearAllPoints()
-    frame:SetPoint(point, config.parent, point, x, y)
+    frame:SetPoint(point, relative, relativePoint, x, y)
+end
+
+local function setLayout(frame, unit, config)
+    positionGroup(frame, unit, config)
+    local point = config.point
+    if config.splitIcons then
+        point = splitGroupPoint(unit, config.vertical)
+    elseif point == "CENTER" then
+        -- The native container resizes around its external center anchor.
+        point = config.vertical and "TOP" or "LEFT"
+    end
     local axes = AnchorUtil.FlowLayoutAxis
     local direction = AnchorUtil.FlowDirection
     frame:SetFlowLayoutAxis(config.vertical and axes.Vertical or axes.Horizontal)
@@ -184,6 +236,188 @@ local function setLayout(frame, unit, config)
         elementSpacing = config.spacing,
     })
 end
+
+local function hideIconAlignment()
+    if iconAlignment then
+        for _, frame in pairs(iconAlignment.measures) do frame:Hide() end
+    end
+end
+
+local function syncIconAlignment(config, units, key)
+    local state = iconAlignment
+    if state and state.key == key then
+        for _, frame in pairs(state.measures) do frame:Show() end
+        return state.anchor
+    end
+    if failures.alignment == key then return nil end
+    if TrackedAuras:IsRestricted() then
+        if state and state.key then
+            for _, frame in pairs(state.measures) do frame:Show() end
+            return state.anchor
+        end
+        return nil
+    end
+
+    -- Measure each group in the opposite direction to its visible row. The
+    -- midpoint between the two far edges places the junction of the visible
+    -- groups. Blizzard resolves those anchors without exposing aura counts.
+    local ok, err = pcall(function()
+        if not state then
+            state = {
+                anchor = CreateFrame("Frame", nil, config.parent, "DisableUntrustedLayoutScriptsTemplate"),
+                measures = {},
+            }
+            iconAlignment = state
+        end
+        local vertical = config.vertical
+        local axis, direction = AnchorUtil.FlowLayoutAxis, AnchorUtil.FlowDirection
+        for _, unit in ipairs({ "player", "target" }) do
+            local measure = state.measures[unit]
+            local filters = { includeSpellIDs = units[unit] }
+            if not measure then
+                measure = createContainer(config.parent, unit)
+                state.measures[unit] = measure
+                measure:SetAlpha(0)
+                measure:SetSize(1, 1)
+                measure:AddAuraGroup(groupKey, unitFilters[unit], {
+                    candidateFilters = filters,
+                    maxFrameCount = maxTrackedIcons,
+                    initializeFrame = function(button)
+                        button:SetMouseClickEnabled(false)
+                        button:SetMouseMotionEnabled(false)
+                    end,
+                })
+            else
+                measure:SetAuraGroupCandidateFilters(groupKey, filters)
+            end
+            local player = unit == "player"
+            local point = splitGroupPoint(player and "target" or "player", vertical)
+            measure:ClearAllPoints()
+            measure:SetPoint(point, config.parent, config.point)
+            measure:SetFlowLayoutAxis(vertical and axis.Vertical or axis.Horizontal)
+            measure:SetFlowLayoutAnchorPoint(point)
+            measure:SetFlowLayoutGrowthDirection(player and direction.Right or direction.Left,
+                player and direction.Down or direction.Up)
+            -- One unit of outer padding gives empty groups the same baseline.
+            if vertical then
+                measure:SetFlowLayoutPadding(0, 0, player and 0 or 1, player and 1 or 0)
+            else
+                measure:SetFlowLayoutPadding(player and 0 or 1, player and 1 or 0, 0, 0)
+            end
+            measure:SetAuraGroupLayout(groupKey, {
+                elementWidth = vertical and 1 or config.width + config.spacing,
+                elementHeight = vertical and config.height + config.spacing or 1,
+                elementSpacing = 0,
+            })
+            measure:Show()
+            measure:UpdateAllAuras()
+        end
+        local anchor = state.anchor
+        anchor:ClearAllPoints()
+        anchor:SetSize(1, 1)
+        local start = vertical and "TOP" or "LEFT"
+        local finish = vertical and "BOTTOM" or "RIGHT"
+        anchor:SetPoint(start, state.measures.target, start)
+        anchor:SetPoint(finish, state.measures.player, finish)
+    end)
+    if not ok then
+        hideIconAlignment()
+        iconAlignment = nil
+        failures.alignment = key
+        if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] icon alignment: %s", tostring(err)) end
+        return nil
+    end
+    state.key = key
+    failures.alignment = nil
+    return state.anchor
+end
+
+function TrackedAuras:SyncCooldownDebuff(icon, ids, showText, showSwipe, textStyle)
+    local frame = icon.frame
+    local state = cooldownDebuffs[frame]
+    if not ids then
+        if state then state.container:Hide() end
+        return
+    end
+    if self:IsRestricted() then
+        if state then state.container:Show() end
+        return
+    end
+    local idSignature = signature(ids)
+    local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe)
+    if state and state.ids == idSignature and state.style == styleSignature then
+        state.container:Show()
+        return
+    end
+    local function style(visual)
+        local fs = visual.timer
+        local styleOptions = textStyle or {}
+        local font, size, flags = GameFontNormal:GetFont()
+        if ns.Controls and ns.Controls.ResolveFontPath then
+            font = ns.Controls.ResolveFontPath(styleOptions.font) or font
+        end
+        fs:SetFont(font, styleOptions.size or size, styleOptions.flags or flags)
+        local point = styleOptions.anchor or "CENTER"
+        if point == "ABOVE_ICON" then point = "TOP" elseif point == "BELOW_ICON" then point = "BOTTOM" end
+        fs:ClearAllPoints()
+        fs:SetPoint(point, visual.cooldown, point, styleOptions.x or 0, styleOptions.y or 0)
+        fs:SetShown(showText)
+        visual.cooldown:SetDrawSwipe(showSwipe)
+        visual.cooldown:SetDrawEdge(showSwipe)
+    end
+    local ok, err = pcall(function()
+        if not state then
+            local container = createContainer(frame, "target")
+            state = { container = container }
+            cooldownDebuffs[frame] = state
+            container:SetAllPoints(frame)
+            local cooldown = frame.cooldown or frame
+            container:SetFrameLevel(cooldown:GetFrameLevel() + 5)
+            container:AddAuraSlot("debuff", unitFilters.target, {
+                candidateFilters = { includeSpellIDs = ids },
+                initializeFrame = function(button)
+                    button:SetAllPoints(container)
+                    if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) end
+                    if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(false) end
+                    local bg = button:CreateTexture(nil, "BACKGROUND")
+                    bg:SetAllPoints(button)
+                    bg:SetColorTexture(0.05, 0.05, 0.05, 1)
+                    local visual = makeRegions(button, false)
+                    state.visual = visual
+                    style(visual)
+                    button:SetIcon(visual.icon)
+                    bindIconTimer(button, visual.timer)
+                    button:SetDurationCooldown(visual.cooldown)
+                end,
+            })
+        else
+            if state.ids ~= idSignature then
+                state.container:SetAuraSlotCandidateFilters("debuff", { includeSpellIDs = ids })
+            end
+            style(state.visual)
+        end
+        state.ids, state.style = idSignature, styleSignature
+        state.container:Show()
+    end)
+    if not ok then
+        if state then state.container:Hide() end
+        if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[TrackedAuras] cooldown debuff: %s", tostring(err)) end
+    end
+end
+
+ns:RegisterEvent("PLAYER_TARGET_CHANGED", function()
+    for _, key in ipairs({ "iconstarget", "barstarget" }) do
+        local state = groups[key]
+        if state and state.ready then state.frame:UpdateAllAuras() end
+    end
+    local target = fixedBars and fixedBars.containers.target
+    if target then target:UpdateAllAuras() end
+    for _, state in pairs(cooldownDebuffs) do
+        if state.container:IsShown() then state.container:UpdateAllAuras() end
+    end
+    local measure = iconAlignment and iconAlignment.measures.target
+    if measure and measure:IsShown() then measure:UpdateAllAuras() end
+end)
 
 function TrackedAuras:IsRestricted()
     return InCombatLockdown() or (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret())
@@ -256,6 +490,7 @@ end
 
 function TrackedAuras:Hide(kind)
     hideGroups(kind)
+    if not kind or kind == "icons" then hideIconAlignment() end
     if fixedBars and (not kind or kind == "bars") then fixedBars.frame:Hide() end
 end
 
@@ -422,9 +657,10 @@ function TrackedAuras:SyncDisplay(kind, config, units, rows)
         return not (next(units.player) or next(units.target))
     end
     local styleSignature = signature(config.style) .. "/" .. config.width .. "/" .. config.height
+    local splitIcons = kind == "icons" and next(units.player) ~= nil and next(units.target) ~= nil
     local layoutSignature = table.concat({
         tostring(config.parent), config.point, config.width, config.height, config.spacing,
-        tostring(config.vertical),
+        tostring(config.vertical), tostring(splitIcons),
     }, "/")
     if rows then
         if #rows == 0 then
@@ -435,14 +671,22 @@ function TrackedAuras:SyncDisplay(kind, config, units, rows)
         return self:SyncFixedBars(config, rows, layoutSignature .. "/" .. styleSignature .. "/" .. signature(rows))
     end
     if kind == "bars" and fixedBars then fixedBars.frame:Hide() end
+    local alignment
+    if splitIcons then
+        alignment = syncIconAlignment(config, units, layoutSignature .. "/" .. signature(units))
+    elseif kind == "icons" then
+        hideIconAlignment()
+    end
     local ready = true
     for _, unit in ipairs({ "player", "target" }) do
         local entry = {}
         for key, value in pairs(config) do entry[key] = value end
+        entry.splitIcons = splitIcons
+        entry.alignment = alignment
         entry.ids = units[unit]
         entry.idSignature = signature(entry.ids)
         entry.styleSignature = styleSignature
-        entry.signature = layoutSignature .. "/" .. styleSignature .. "/" .. entry.idSignature
+        entry.signature = layoutSignature .. "/" .. styleSignature .. "/" .. entry.idSignature .. "/" .. tostring(alignment)
         if not self:Sync(kind, unit, entry) then ready = false end
     end
     if not ready then self:Hide(kind) end

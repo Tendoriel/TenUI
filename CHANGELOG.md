@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.1] - 2026-11-15
+
+### Added
+
+- CDM Settings can show the remaining time of your debuff on your current target directly on the ability icon.
+- Class Reminders can show a check mark on active buffs and present pets.
+
+### Fixed
+
+- CDM icons and timers follow temporary spell replacements such as Voidform into Void Volley and switch back on expiry. Void Volley shows its remaining uses and updates after each cast.
+- Tracked Icons centers player buffs and your current target's debuffs as one row, including in combat. Switching targets refreshes the tracked debuffs and CDM debuff timers.
+- Timers on Tracked Icons and CDM debuff overlays show seconds without the `s` suffix.
+- TenUI Edit Mode previews one bar per enabled Tracked Bars entry, including entries whose auras are currently inactive.
+- Specialization changes refresh the HUD even when both specializations use the same profile. Entering a dungeon rechecks specialization after the loading screen.
+- Per-ability cooldown text, range and resource tint, and combat-only settings now apply to CDM icons.
+
+### Changed
+
+- Simplified Aura Settings and Glow Effects to show options supported by the 12.1.5 renderer. The client provides the Pandemic warning.
+- Grouped the most relevant controls in Resources and Cast Bar.
+
 ## [0.5.0] - 2026-11-15
 
 ### Changed
@@ -14,10 +35,12 @@
 - Tracked Icons and Tracked Bars render at their configured size in and out of combat. Inactive bars keep their native timers when the aura becomes active.
 - The hidden cooldown filter follows the active Blizzard Cooldown Manager layout and refreshes when that layout changes.
 - Elements with visibility set to Never stay hidden in TenUI Edit Mode.
+- Mount visibility also accounts for skyriding forms, including Druid flight form.
 - Profile changes reapply the layout, aura settings, cast bar, resources, consumables, trinkets, and reminder settings. Profile imports keep the legacy v1 format and carry a layout for characters without an existing specialization override.
 - Essential and Utility timers use duration objects with the configured GCD behavior. The scanner includes specialization-independent cooldowns and eligible equipment slots.
 - Class Reminders recognizes active Shadowform and Voidform through the shapeshift state, including when the aura lookup has restricted visibility.
 - Cast Bar uses the player's cast bar ID when available and clears short casts after the grace period. Skyriding follows the selected Whirling Surge override and refreshes charges when the HUD appears.
+- Warlock Soul Shard pips render partial shards from restricted power values. Aura-based resources retain the last readable value while the client restricts aura data.
 
 ## [0.3.1] - 2026-06-28
 

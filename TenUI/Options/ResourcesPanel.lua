@@ -641,7 +641,7 @@ local function buildResourcesPage(sc)
 
     children[#children + 1] = C.CreateSection(sc, "Resources")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Hide Out of Combat",
+    children[#children + 1] = C.CreateCheckBox(sc, "Hide both resources out of combat",
         function()
             local rp = getResProfile()
             return rp.hideOutOfCombat == true
@@ -787,6 +787,8 @@ local function buildResourcesPage(sc)
         rp.primary.threshold = rp.primary.threshold or {}
         return rp.primary.threshold
     end
+
+    children[#children + 1] = C.CreateSubSection(sc, "Primary Resource Thresholds")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Recolor at Threshold",
         function()

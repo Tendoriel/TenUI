@@ -150,7 +150,13 @@ function Icon:New(parent, opts)
         local fontPath = resolveMedia("font", opts.font, Widgets.DEFAULT_FONT)
         local size = opts.fontSize or 12
         local flags = opts.fontFlags or "OUTLINE"
-        local fs = f:CreateFontString(nil, "OVERLAY")
+        local layer = f
+        if f.cooldown then
+            layer = CreateFrame("Frame", nil, f)
+            layer:SetAllPoints(f)
+            layer:SetFrameLevel(f.cooldown:GetFrameLevel() + 1)
+        end
+        local fs = layer:CreateFontString(nil, "OVERLAY")
         fs:SetFont(fontPath, size, flags)
         fs:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
         fs:SetJustifyH("RIGHT")

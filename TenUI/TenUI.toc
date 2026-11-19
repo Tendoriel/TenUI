@@ -2,7 +2,7 @@
 ## Title: TenUI
 ## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
 ## Author: tendoriel
-## Version: 0.5.0
+## Version: 0.5.1
 ## SavedVariables: TenUIDB, TendorHUDDB
 ## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
 ## OptionalDeps: SharedMedia
