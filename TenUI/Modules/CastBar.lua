@@ -25,6 +25,11 @@ local function hasCastInfo(value)
     return isSecret(value) or value ~= nil
 end
 
+local function castDisplayName(displayName, name)
+    if hasCastInfo(displayName) then return displayName end
+    return name
+end
+
 local INTERP_IMMEDIATE = Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate or 0
 local DIR_ELAPSED      = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.ElapsedTime or 0
 local DIR_REMAINING    = Enum and Enum.StatusBarTimerDirection and Enum.StatusBarTimerDirection.RemainingTime or 1
@@ -130,7 +135,7 @@ end
 
 local function withinGraceWindow()
     if not graceEnabled() then return false end
-    if not lastCast.name then return false end
+    if not hasCastInfo(lastCast.name) then return false end
     local now = GetTime()
     if now - (lastCast.seenAt or 0) > GRACE_WINDOW_SEC then return false end
     local endMs = lastCast.endTime
@@ -216,13 +221,13 @@ function CastBar:ApplyCastVisual(castType, spellName, iconTexture, notInterrupti
     applyColor(self.bar, profile.colors and profile.colors[colorKey])
 
     if profile.showSpellName then
-        self.bar:SetLeftText(spellName or "")
+        self.bar:SetLeftText(spellName)
     else
         self.bar:SetLeftText("")
     end
 
     if self.icon then
-        if profile.showIcon and iconTexture then
+        if profile.showIcon and hasCastInfo(iconTexture) then
             self.icon:SetTexture(iconTexture)
             self.icon:Show()
         else
@@ -451,12 +456,13 @@ function CastBar:LayoutStagePips()
                 tex = barFrame:CreateTexture(nil, "OVERLAY", nil, 2)
                 tex:SetColorTexture(STAGE_PIP_COLOR[1], STAGE_PIP_COLOR[2],
                     STAGE_PIP_COLOR[3], STAGE_PIP_COLOR[4])
+                ns.Pixel.Edge(tex, barFrame, false)
                 pips[used] = tex
             end
             tex:ClearAllPoints()
-            tex:SetWidth(1)
-            tex:SetPoint("TOP", barFrame, "TOPLEFT", w * frac, -1)
-            tex:SetPoint("BOTTOM", barFrame, "BOTTOMLEFT", w * frac, 1)
+            local x = ns.Pixel.Snap(barFrame, w * frac)
+            tex:SetPoint("TOP", barFrame, "TOPLEFT", x, -1)
+            tex:SetPoint("BOTTOM", barFrame, "BOTTOMLEFT", x, 1)
             tex:Show()
         end
     end
@@ -732,7 +738,7 @@ function CastBar:OnSpellcastStart(castGUID, castBarID)
     self._failedFlag    = false
     self._state = "casting"
 
-    self:ApplyCastVisual("cast", displayName or name, texture, notInterruptible)
+    self:ApplyCastVisual("cast", castDisplayName(displayName, name), texture, notInterruptible)
 
     local duration = UnitCastingDuration("player")
     if duration then
@@ -787,7 +793,7 @@ function CastBar:OnChannelStart(castGUID, castBarID, eventSpellID)
     self._succeededFlag = false
     self._failedFlag    = false
 
-    self:ApplyCastVisual("channel", displayName or name, texture, notInterruptible)
+    self:ApplyCastVisual("channel", castDisplayName(displayName, name), texture, notInterruptible)
     local channelStart, channelEnd = plainNumber(startMs), plainNumber(endMs)
     local channelLength = channelStart and channelEnd and (channelEnd - channelStart) / 1000
     self._channelTicks = self:GetChannelTickFractions(spellID, channelLength)
@@ -847,7 +853,7 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
     self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
     self._failedFlag    = false
-    self:ApplyCastVisual("empower", displayName or name, texture, notInterruptible)
+    self:ApplyCastVisual("empower", castDisplayName(displayName, name), texture, notInterruptible)
 
     local duration = nil
     if UnitEmpoweredChannelDuration then
@@ -884,16 +890,25 @@ function CastBar:OnEmpowerUpdate(castGUID, castBarID)
     self:SetupStagePips(numStages, startMs)
 end
 
-function CastBar:OnSpellcastStop(castGUID, castBarID)
-    if not castMatches(castGUID, castBarID) then return end
+function CastBar:OnSpellcastStop(castGUID, castBarID, interrupted)
+    if self._state ~= "casting" then return end
+    local matches = castMatches(castGUID, castBarID)
+    if matches == false then return end
 
-    local pending = {}
+    local previous = self._pendingNaturalStop
+    local pending = { interrupted = interrupted or (previous and previous.interrupted) }
     self._pendingNaturalStop = pending
     C_Timer.After(0, function()
         if CastBar._pendingNaturalStop ~= pending then
             return
         end
         CastBar._pendingNaturalStop = false
+
+        if matches == nil and playerHasLiveCast() then return end
+        if pending.interrupted then
+            CastBar:FinishInterruptedCast()
+            return
+        end
 
         if CastBar._succeededFlag then
             CastBar._succeededFlag = false
@@ -1035,7 +1050,11 @@ function CastBar:OnSpellcastInterrupted(castGUID, castBarID)
     if matches then
         self:FinishInterruptedCast()
     elseif matches == nil then
-        self:OnChannelStop(castGUID, false, castBarID)
+        if self._state == "casting" then
+            self:OnSpellcastStop(castGUID, castBarID, true)
+        else
+            self:OnChannelStop(castGUID, false, castBarID)
+        end
     end
 end
 

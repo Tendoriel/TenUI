@@ -57,16 +57,16 @@ local function makeBorder(parent, edgeColor)
     local top, bottom, left, right = side(), side(), side(), side()
     top:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     top:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
-    top:SetHeight(1)
+    ns.Pixel.Edge(top, parent, true)
     bottom:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
     bottom:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-    bottom:SetHeight(1)
+    ns.Pixel.Edge(bottom, parent, true)
     left:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     left:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
-    left:SetWidth(1)
+    ns.Pixel.Edge(left, parent, false)
     right:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     right:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-    right:SetWidth(1)
+    ns.Pixel.Edge(right, parent, false)
     return { top, bottom, left, right }
 end
 
@@ -343,6 +343,7 @@ end
 local function deselectOverlay(overlay)
     if not overlay then return end
     overlay._selected = false
+    overlay:SetFrameLevel(overlay.baseFrameLevel)
     if selectedOverlay == overlay then selectedOverlay = nil end
     applyDeselectedVisual(overlay)
     if not overlayFocused(overlay) then
@@ -365,8 +366,34 @@ local function selectOverlay(overlay)
     end
     selectedOverlay = overlay
     overlay._selected = true
+    local highest = overlay.baseFrameLevel
+    for _, candidate in pairs(overlays) do highest = math_max(highest, candidate.baseFrameLevel) end
+    overlay:SetFrameLevel(highest + 1)
     applySelectedVisual(overlay)
     showNudges(overlay)
+end
+
+local function cycleOverlay(self, delta)
+    if self._dragging or delta == 0 then return end
+    local candidates = {}
+    for _, overlay in pairs(overlays) do
+        if overlay:IsVisible() and overlay:IsMouseOver() then
+            candidates[#candidates + 1] = overlay
+        end
+    end
+    if #candidates < 2 then return end
+    table.sort(candidates, function(a, b)
+        return a.anchor.anchorName < b.anchor.anchorName
+    end)
+    local current = selectedOverlay or self
+    for index, overlay in ipairs(candidates) do
+        if overlay == current then
+            local step = delta < 0 and 1 or -1
+            selectOverlay(candidates[(index - 1 + step) % #candidates + 1])
+            return
+        end
+    end
+    selectOverlay(candidates[delta < 0 and 1 or #candidates])
 end
 
 local function nudge_OnEnter(self)
@@ -479,7 +506,8 @@ local function createOverlay(anchor)
     local f = CreateFrame("Frame", "TenUIAnchorOverlay_" .. anchor.anchorName, overlayParent)
     f:SetAllPoints(anchor)
     f:SetFrameStrata("HIGH")
-    f:SetFrameLevel((anchor:GetFrameLevel() or 0) + 5)
+    f.baseFrameLevel = (anchor:GetFrameLevel() or 0) + 5
+    f:SetFrameLevel(f.baseFrameLevel)
     f.anchor = anchor
 
     local bg = f:CreateTexture(nil, "BACKGROUND")
@@ -490,13 +518,15 @@ local function createOverlay(anchor)
     f.border = makeBorder(f, OVERLAY_EDGE)
 
     local label = f:CreateFontString(nil, "OVERLAY")
-    label:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    ns.Pixel.SetFont(label, "Fonts\\FRIZQT__.TTF", 11, "")
     label:SetPoint("CENTER", f, "CENTER", 0, 0)
     label:SetTextColor(LABEL_COLOR[1], LABEL_COLOR[2], LABEL_COLOR[3], 1)
     label:SetText(anchor.def and anchor.def.label or anchor.anchorName)
     f.label = label
 
     f:EnableMouse(true)
+    f:EnableMouseWheel(true)
+    f:SetScript("OnMouseWheel", cycleOverlay)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", overlay_OnDragStart)
     f:SetScript("OnDragStop", overlay_OnDragStop)

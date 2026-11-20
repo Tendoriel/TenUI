@@ -641,7 +641,7 @@ local function buildResourcesPage(sc)
 
     children[#children + 1] = C.CreateSection(sc, "Resources")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Hide both resources out of combat",
+    children[#children + 1] = C.CreateCheckBox(sc, "Hide resources out of combat",
         function()
             local rp = getResProfile()
             return rp.hideOutOfCombat == true
@@ -654,6 +654,14 @@ local function buildResourcesPage(sc)
     )
 
     children[#children + 1] = C.CreateSubSection(sc, "Primary Resource Bar")
+
+    children[#children + 1] = C.CreateCheckBox(sc, "Show cast mana cost",
+        function() return getResProfile().primary.showManaCost == true end,
+        function(v)
+            getResProfile().primary.showManaCost = v and true or nil
+            applyOptions()
+        end
+    )
 
     children[#children + 1] = C.CreateCheckBox(sc, "Fill the space of an unavailable secondary bar",
         function() return getResProfile().primary.expandIfNoSecondary == true end,
@@ -951,7 +959,27 @@ local function buildResourcesPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateSubSection(sc, "Secondary Resource (Pips / Runes)")
+    children[#children + 1] = C.CreateSubSection(sc, "Secondary Resource")
+
+    local resolver = ns.Resources_Resolver
+    local class, _, specID
+    if resolver then class, _, specID = resolver:GetPlayerInfo() end
+    children[#children + 1] = C.CreateCheckBox(sc, "Show cast resource prediction",
+        function() return getResProfile().secondary.showPrediction == true end,
+        function(v)
+            getResProfile().secondary.showPrediction = v and true or nil
+            applyOptions()
+        end
+    )
+    if class == "DRUID" then
+        children[#children + 1] = C.CreateCheckBox(sc, "Show mana in Cat and Bear Form",
+            function() return getResProfile().secondary.showManaInForms == true end,
+            function(v)
+                getResProfile().secondary.showManaInForms = v and true or nil
+                applyOptions()
+            end
+        )
+    end
 
     children[#children + 1] = C.CreateCheckBox(sc, "Enable Secondary Resource",
         function()
@@ -967,6 +995,16 @@ local function buildResourcesPage(sc)
             applyOptions()
         end
     )
+
+    if specID == 1473 then
+        children[#children + 1] = C.CreateCheckBox(sc, "Show Ebon Might bar",
+            function() return getResProfile().ebonMightEnabled ~= false end,
+            function(v)
+                getResProfile().ebonMightEnabled = v
+                applyOptions()
+            end
+        )
+    end
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Secondary Color",
         function()

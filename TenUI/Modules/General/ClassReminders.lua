@@ -5,6 +5,7 @@ local UIParent              = UIParent
 local UnitClass             = UnitClass
 local UnitExists            = UnitExists
 local UnitIsDead            = UnitIsDead
+local UnitIsHumanPlayer     = UnitIsHumanPlayer or UnitIsPlayer
 local UnitGUID              = UnitGUID
 local IsMounted             = IsMounted
 local IsResting             = IsResting
@@ -163,35 +164,50 @@ end
 local function spellIcon(spellID, fallback)
     if C_Spell and C_Spell.GetSpellTexture then
         local ok, tex = pcall(C_Spell.GetSpellTexture, spellID)
-        if ok and tex ~= nil then
+        if ok and ((issecretvalue and issecretvalue(tex)) or tex ~= nil) then
             return tex
         end
     end
     return fallback
 end
 
+local function auraMayBeSecret(spellID)
+    local check = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
+    if not check then
+        check = C_Secrets and C_Secrets.ShouldAurasBeSecret
+        spellID = nil
+    end
+    if not check then return false end
+    local ok, result
+    if spellID then ok, result = pcall(check, spellID) else ok, result = pcall(check) end
+    return not ok or (issecretvalue and issecretvalue(result)) or result == true
+end
+
 local function playerAuraPresent(spellID)
-    if not C_UnitAuras then return false end
+    if not C_UnitAuras then return nil end
+    local ok, aura
     if C_UnitAuras.GetPlayerAuraBySpellID then
-        local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
-        if ok then return aura ~= nil end
+        ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
     end
-    if C_UnitAuras.GetUnitAuraBySpellID then
-        local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, "player", spellID)
-        if ok then return aura ~= nil end
+    if not ok and C_UnitAuras.GetUnitAuraBySpellID then
+        ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, "player", spellID)
     end
-    if C_UnitAuras.GetAuraDataBySpellID then
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellID, "player", spellID, "HELPFUL")
-        if ok then return aura ~= nil end
+    if not ok and C_UnitAuras.GetAuraDataBySpellID then
+        ok, aura = pcall(C_UnitAuras.GetAuraDataBySpellID, "player", spellID, "HELPFUL")
     end
-    return false
+    if not ok or (issecretvalue and issecretvalue(aura)) then return nil end
+    if aura ~= nil then return true end
+    if not auraMayBeSecret(spellID) then return false end
 end
 
 local function anyPlayerAuraPresent(list)
+    local unknown = false
     for i = 1, #list do
-        if playerAuraPresent(list[i]) then return true end
+        local present = playerAuraPresent(list[i])
+        if present then return true end
+        if present == nil then unknown = true end
     end
-    return false
+    if not unknown then return false end
 end
 
 local function formState(forms)
@@ -214,7 +230,8 @@ local function shadowformMissing()
     if C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() then
         return nil
     end
-    return not anyPlayerAuraPresent(SHADOWFORM_AURAS)
+    local active = anyPlayerAuraPresent(SHADOWFORM_AURAS)
+    if active ~= nil then return not active end
 end
 
 local function unitAuraPresent(unit, spellID)
@@ -236,21 +253,28 @@ local function unitAuraPresent(unit, spellID)
     if C_UnitAuras.GetUnitAuraBySpellID then
         local ok, aura = pcall(C_UnitAuras.GetUnitAuraBySpellID, unit, spellID)
         if ok and not (issecretvalue and issecretvalue(aura)) then
-            if aura == nil then return false end
+            if aura == nil then
+                if not auraMayBeSecret(spellID) then return false end
+                return nil
+            end
             local own = aura.isFromPlayerOrPlayerPet
             if not (issecretvalue and issecretvalue(own)) and type(own) == "boolean" then
                 return own
             end
             local source = aura.sourceUnit
             if not (issecretvalue and issecretvalue(source)) and source then
-                return UnitIsUnit and UnitIsUnit(source, "player") or source == "player"
+                if source == "player" then return true end
+                if UnitIsUnit then
+                    local matched, same = pcall(UnitIsUnit, source, "player")
+                    if matched and not (issecretvalue and issecretvalue(same)) then return same end
+                end
             end
         end
     end
 end
 
 local function groupHasAura(spellID)
-    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret and C_Secrets.ShouldSpellAuraBeSecret(spellID) then
+    if auraMayBeSecret(spellID) then
         local overlay = C_SpellActivationOverlay and C_SpellActivationOverlay.IsSpellOverlayed
         if overlay then
             local ok, missing = pcall(overlay, spellID)
@@ -281,6 +305,10 @@ local function rebuildRoster()
     local classes = {}
     local function add(unit)
         if not UnitExists(unit) then return end
+        if unit ~= "player" then
+            local ok, human = pcall(UnitIsHumanPlayer, unit)
+            if not ok or (issecretvalue and issecretvalue(human)) or human ~= true then return end
+        end
         local ok, token = pcall(UnitClassBase, unit)
         if ok and type(token) == "string"
             and not (issecretvalue and issecretvalue(token)) then
@@ -344,8 +372,7 @@ end
 local function petIsFelguard()
     if not UnitExists("pet") then return nil end
     local ok, guid = pcall(UnitGUID, "pet")
-    if not ok or guid == nil then return nil end
-    if issecretvalue and issecretvalue(guid) then return nil end
+    if not ok or (issecretvalue and issecretvalue(guid)) then return nil end
     if type(guid) ~= "string" then return nil end
     local npcID = select(6, strsplit("-", guid))
     npcID = tonumber(npcID)
@@ -363,17 +390,21 @@ local function evaluate(o, preview)
             entries[#entries + 1] = { key = key, icon = icon, label = label, active = active }
         end
     end
+    local function pushAura(key, icon, label, active)
+        if active ~= nil then push(key, icon, label, active) end
+    end
 
     if class == "SHAMAN" and o.shamanShields then
         local knowsAny = spellKnown(EARTH_SHIELD) or spellKnown(LIGHTNING_SHIELD)
             or spellKnown(WATER_SHIELD)
         if knowsAny then
-            local activeShield = not preview and (anyPlayerAuraPresent(EARTH_SHIELD_SELF) and EARTH_SHIELD
-                or playerAuraPresent(LIGHTNING_SHIELD) and LIGHTNING_SHIELD
-                or playerAuraPresent(WATER_SHIELD) and WATER_SHIELD)
+            local earth = not preview and anyPlayerAuraPresent(EARTH_SHIELD_SELF)
+            local lightning = not preview and playerAuraPresent(LIGHTNING_SHIELD)
+            local water = not preview and playerAuraPresent(WATER_SHIELD)
+            local activeShield = earth and EARTH_SHIELD or lightning and LIGHTNING_SHIELD or water and WATER_SHIELD
             if activeShield then
                 push("shamanShields", spellIcon(activeShield, FALLBACK_SHIELD), "Shield", true)
-            else
+            elseif earth == false and lightning == false and water == false then
                 local spec = GetSpecialization and GetSpecialization()
                 local iconSpell
                 if spec == 3 and spellKnown(EARTH_SHIELD) then
@@ -397,11 +428,11 @@ local function evaluate(o, preview)
         and not spellKnown(BEACON_OF_VIRTUE) then
         if spellKnown(BEACON_OF_LIGHT) then
             local active = not preview and groupHasAura(BEACON_OF_LIGHT)
-            if active ~= nil then push("paladinBeacons", spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", active) end
+            pushAura("paladinBeacons", spellIcon(BEACON_OF_LIGHT, FALLBACK_BEACON), "Beacon", active)
         end
         if spellKnown(BEACON_OF_FAITH) then
             local active = not preview and groupHasAura(BEACON_OF_FAITH)
-            if active ~= nil then push("paladinBeacons", spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", active) end
+            pushAura("paladinBeacons", spellIcon(BEACON_OF_FAITH, FALLBACK_BEACON), "Faith", active)
         end
     end
 
@@ -420,7 +451,7 @@ local function evaluate(o, preview)
             for i = 1, #WARLOCK_SUMMONS do
                 if spellKnown(WARLOCK_SUMMONS[i]) then knowsSummon = true break end
             end
-            petExpected = knowsSummon and (preview or not playerAuraPresent(GRIM_SAC_BUFF))
+            petExpected = knowsSummon and (preview or petAlive() or playerAuraPresent(GRIM_SAC_BUFF) == false)
             missingIcon, missingLabel = spellIcon(688, FALLBACK_PET), "Pet"
         elseif class == "DEATHKNIGHT" then
             petExpected = currentSpecID() == UNHOLY_SPEC
@@ -459,7 +490,7 @@ local function evaluate(o, preview)
 
     if class == "DRUID" and o.moonkinForm and currentSpecID() == BALANCE_SPEC then
         local active = not preview and formState(MOONKIN_FORMS)
-        if active ~= nil then push("moonkinForm", spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active) end
+        pushAura("moonkinForm", spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active)
     end
 
     if class == "ROGUE" and o.roguePoisons then
@@ -471,11 +502,11 @@ local function evaluate(o, preview)
             if spellKnown(NONLETHAL_POISONS[i]) then knowsNonLethal = true break end
         end
         if knowsLethal then
-            push("roguePoisons", spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal",
+            pushAura("roguePoisons", spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal",
                 not preview and anyPlayerAuraPresent(LETHAL_POISONS))
         end
         if knowsNonLethal then
-            push("roguePoisons", spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal",
+            pushAura("roguePoisons", spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal",
                 not preview and anyPlayerAuraPresent(NONLETHAL_POISONS))
         end
     end
@@ -485,7 +516,7 @@ local function evaluate(o, preview)
         for i = 1, #RAID_BUFFS do
             local def = RAID_BUFFS[i]
             if roster[def.class] or (preview and def.class == class and spellKnown(def.iconSpell)) then
-                push("raidBuffs", spellIcon(def.iconSpell, def.fallback), def.label,
+                pushAura("raidBuffs", spellIcon(def.iconSpell, def.fallback), def.label,
                     not preview and anyPlayerAuraPresent(def.buffIDs))
             end
         end
@@ -814,6 +845,7 @@ local LIFECYCLE_EVENTS = {
     "PLAYER_ENTERING_WORLD",
     "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED",
+    "ADDON_RESTRICTION_STATE_CHANGED",
     "PLAYER_UPDATE_RESTING",
     "PLAYER_MOUNT_DISPLAY_CHANGED",
     "ZONE_CHANGED_NEW_AREA",

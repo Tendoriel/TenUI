@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.8] - 2026-11-20
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Resources
+
+- Augmentation Evoker has a separate, movable Ebon Might countdown bar alongside Mana and Essence. It follows the player’s aura duration, including extensions, and can be disabled under Resources.
+- Added optional cast prediction for secondary power bars and segmented resources. Amber shows the expected spend and green shows supported gains. The primary Mana bar keeps its separate prediction toggle.
+- Added Whirlwind stacks for Fury, Sweeping Strikes stacks for Arms, and six Soul Fragment segments for Vengeance. Improved Devourer Soul Fragment tracking under aura restrictions and corrected Enhancement’s Maelstrom Weapon cap for builds with and without Raging Maelstrom.
+- Druids can opt to show Mana on the secondary bar while in Cat or Bear Form.
+
+### HUD and cooldowns
+
+- Layout includes Consumables and Dragon Riding. The resource bars and Cast Bar can match the width of Essential Cooldowns.
+- Resetting an anchor restores its live opacity. In Edit Mode, scroll over overlapping anchors to select the one you want to move.
+- Centralized pixel snapping and HUD border thickness and enabled SLUG font rendering where supported.
+- Kept the configured CDM icon geometry when switching to a target debuff timer and reduced swipe restarts during aura refreshes.
+- Fixed the Expiring Aura Glow when a tracked slot becomes active after being empty. Added optional decimal seconds for Tracked Icons and Tracked Bars.
+- Reduced the number of native aura groups used to measure tracker layout. Improved Cast Bar handling of restricted spell names and interrupt events.
+- Group buff reminders skip NPC followers and guard against restricted aura data.
+
 ## [0.5.7] - 2026-11-19
 
 For WoW Retail 12.1.5 (Interface 120105).

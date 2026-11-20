@@ -42,16 +42,16 @@ local function makeBorder(parent, color)
     local top, bottom, left, right = side(), side(), side(), side()
     top:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     top:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
-    top:SetHeight(1)
+    ns.Pixel.Edge(top, parent, true)
     bottom:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
     bottom:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-    bottom:SetHeight(1)
+    ns.Pixel.Edge(bottom, parent, true)
     left:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
     left:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
-    left:SetWidth(1)
+    ns.Pixel.Edge(left, parent, false)
     right:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
     right:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
-    right:SetWidth(1)
+    ns.Pixel.Edge(right, parent, false)
     return { top = top, bottom = bottom, left = left, right = right }
 end
 
@@ -92,10 +92,16 @@ function Bar:New(parent, opts)
     local fontPath = resolveMedia("font", opts.font, Widgets.DEFAULT_FONT)
     local fontSize = opts.fontSize or DEFAULT_OPTS.fontSize
     local fontFlags = opts.fontFlags or DEFAULT_OPTS.fontFlags
+    local textLayer
+    if opts.leftText or opts.rightText then
+        textLayer = CreateFrame("Frame", nil, f)
+        textLayer:SetAllPoints(f)
+        textLayer:SetFrameLevel(f:GetFrameLevel() + 2)
+    end
 
     if opts.leftText then
-        local fs = f:CreateFontString(nil, "OVERLAY")
-        fs:SetFont(fontPath, fontSize, fontFlags)
+        local fs = textLayer:CreateFontString(nil, "OVERLAY")
+        ns.Pixel.SetFont(fs, fontPath, fontSize, fontFlags)
         fs:SetPoint("LEFT", f, "LEFT", 4, 0)
         fs:SetJustifyH("LEFT")
         fs:SetTextColor(1, 1, 1, 1)
@@ -103,8 +109,8 @@ function Bar:New(parent, opts)
     end
 
     if opts.rightText then
-        local fs = f:CreateFontString(nil, "OVERLAY")
-        fs:SetFont(fontPath, fontSize, fontFlags)
+        local fs = textLayer:CreateFontString(nil, "OVERLAY")
+        ns.Pixel.SetFont(fs, fontPath, fontSize, fontFlags)
         fs:SetPoint("RIGHT", f, "RIGHT", -4, 0)
         fs:SetJustifyH("RIGHT")
         fs:SetTextColor(1, 1, 1, 1)
@@ -171,12 +177,14 @@ end
 
 function Bar:SetLeftText(text)
     if not self.frame.leftText then return end
-    self.frame.leftText:SetText(text or "")
+    if not (issecretvalue and issecretvalue(text)) and text == nil then text = "" end
+    self.frame.leftText:SetText(text)
 end
 
 function Bar:SetRightText(text)
     if not self.frame.rightText then return end
-    self.frame.rightText:SetText(text or "")
+    if not (issecretvalue and issecretvalue(text)) and text == nil then text = "" end
+    self.frame.rightText:SetText(text)
 end
 
 function Bar:SetFont(fontKey, size, flags)
@@ -184,10 +192,10 @@ function Bar:SetFont(fontKey, size, flags)
     size = size or 12
     flags = flags or "OUTLINE"
     if self.frame.leftText then
-        self.frame.leftText:SetFont(fontPath, size, flags)
+        ns.Pixel.SetFont(self.frame.leftText, fontPath, size, flags)
     end
     if self.frame.rightText then
-        self.frame.rightText:SetFont(fontPath, size, flags)
+        ns.Pixel.SetFont(self.frame.rightText, fontPath, size, flags)
     end
 end
 

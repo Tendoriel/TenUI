@@ -15,8 +15,10 @@ local ANCHOR_KEYS = {
     { key = "UtilityCooldowns",   label = "Utility Cooldowns" },
     { key = "DefensiveCooldowns", label = "Defensive Cooldowns" },
     { key = "Trinkets",           label = "Trinkets" },
+    { key = "Consumables",        label = "Consumables" },
     { key = "TrackedIcon",        label = "Tracked Icons" },
     { key = "TrackedBars",        label = "Tracked Bars" },
+    { key = "DragonRiding",       label = "Dragon Riding" },
 }
 
 local BAR_ANCHOR_SET = {
@@ -24,6 +26,7 @@ local BAR_ANCHOR_SET = {
     UtilityCooldowns   = true,
     DefensiveCooldowns = true,
     Trinkets           = true,
+    Consumables        = true,
     TrackedIcon        = true,
 }
 
@@ -32,6 +35,7 @@ local ICON_VISUAL_SET = {
     UtilityCooldowns   = true,
     DefensiveCooldowns = true,
     Trinkets           = true,
+    Consumables        = true,
     TrackedIcon        = true,
 }
 local BAR_VISUAL_SET = {
@@ -55,6 +59,8 @@ local function buildAnchorKeyList()
     for i = 1, #ANCHOR_KEYS do
         out[#out + 1] = ANCHOR_KEYS[i]
     end
+    local ebon = ns:GetAnchor("EbonMight")
+    if ebon then out[#out + 1] = { key = "EbonMight", label = ebon.def.label } end
     if ns.Bars and ns.Bars.GetCustomBars and ns.Bars.CustomRowKey then
         for _, def in ipairs(ns.Bars:GetCustomBars()) do
             out[#out + 1] = {
@@ -348,6 +354,20 @@ local function buildLayoutPage(sc)
         children[#children + 1] = ysl
     end
 
+    if ns.Anchors and ns.Anchors:CanMatchEssentialWidth(_selectedAnchor) then
+        local anchorName = _selectedAnchor
+        children[#children + 1] = C.CreateCheckBox(sc, "Match width of Essential Cooldowns",
+            function()
+                local visuals = ns:GetLayoutVisuals(anchorName, false)
+                return visuals and visuals.matchEssentialWidth == true
+            end,
+            function(v)
+                ns:GetLayoutVisuals(anchorName, true).matchEssentialWidth = v and true or nil
+                if not InCombatLockdown() then ns.Anchors:Reapply(anchorName) end
+            end
+        )
+    end
+
     if isIconVisualAnchor(_selectedAnchor) then
         children[#children + 1] = C.CreateSlider(sc, "Icon Width", 8, 200, 1,
             function()
@@ -587,7 +607,8 @@ local function buildLayoutPage(sc)
                 if not InCombatLockdown() then
                     local rt = ns:GetAnchor(_selectedAnchor)
                     if rt and rt.frame then
-                        rt.frame:SetScale(v)
+                        ns.Anchors:Reapply(_selectedAnchor)
+                        ns.Pixel.RefreshEdges()
                     end
                 end
             end
@@ -638,7 +659,7 @@ local function buildLayoutPage(sc)
 
     children[#children + 1] = C.CreateSection(sc, "Visibility")
     children[#children + 1] = C.CreateHelpText(sc,
-        "Controls when this bar shows. The State dropdown is the base rule; each option below independently HIDES the bar when its condition is met. Module logic (cast bar idle, expired auras, empty rows) still applies on top.")
+        "State sets when the bar can appear. The options below hide it in specific situations.")
 
     do
         local stateItems

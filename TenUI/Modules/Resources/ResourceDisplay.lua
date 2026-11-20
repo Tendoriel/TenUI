@@ -275,19 +275,22 @@ local SECONDARY_SEED_BY_NAME = {
     Essence       = { kind = "shards", powerName = "Essence",  pipCount = 6, color = { 0.42, 0.80, 0.47, 1 } },
     Stagger       = { kind = "bar", valueSource = "stagger",       maxFallback = 1, color = { 0.85, 0.55, 0.10, 1 } },
     SoulFragments = { kind = "bar", valueSource = "soulfragments", maxFallback = 50, color = { 0.62, 0.20, 0.78, 1 } },
+    VengeanceFragments = { kind = "shards", valueSource = "vengeance", pipCount = 6, color = { 0.62, 0.20, 0.78, 1 } },
 }
 
 local AURA_SECONDARY_SEED_BY_KEY = {
     MAELSTROM_WEAPON = { kind = "shards", valueSource = "aura", color = { 0.00, 0.55, 1.00, 1 } },
     ICICLES          = { kind = "shards", valueSource = "aura", color = { 0.55, 0.85, 1.00, 1 } },
     TIP_OF_THE_SPEAR = { kind = "shards", valueSource = "aura", color = { 0.85, 0.45, 0.20, 1 } },
+    WHIRLWIND        = { color = { 0.75, 0.25, 0.18, 1 } },
+    SWEEPING_STRIKES = { color = { 0.85, 0.50, 0.18, 1 } },
 }
 
 local Primary
 local function getSpecDescriptor()
-    local class, specIdx = nil, nil
+    local class, specIdx, specID, name
     if Resolver and Resolver.GetPlayerInfo then
-        class, specIdx = Resolver:GetPlayerInfo()
+        class, specIdx, specID, name = Resolver:GetPlayerInfo()
     else
         local _, c = UnitClass("player")
         class = c
@@ -316,7 +319,14 @@ local function getSpecDescriptor()
     }
 
     local secondary
-    if Resolver.GetSecondaryResource then
+    local opts = Primary and Primary.profileRef and Primary.profileRef.secondary or {}
+    if class == "DRUID" and opts.showManaInForms and overrideName ~= "Mana" then
+        local form = GetShapeshiftFormID and GetShapeshiftFormID()
+        if (form == 1 or form == 5) and primName ~= "Mana" then
+            secondary = { kind = "bar", powerName = "Mana", color = { 0.24, 0.55, 1, 1 } }
+        end
+    end
+    if not secondary and Resolver.GetSecondaryResource then
         local secPT = Resolver:GetSecondaryResource()
         local secName = secPT and POWER_NAME_BY_ENUM[secPT]
         if (not secName) and type(secPT) == "string" and Resolver.GetPowerTypeName then
@@ -328,6 +338,7 @@ local function getSpecDescriptor()
                 secondary = {
                     kind      = "shards",
                     powerName = secSeed.powerName,
+                    valueSource = secSeed.valueSource,
                     pipCount  = secSeed.pipCount,
                     color     = secSeed.color,
                 }
@@ -350,27 +361,21 @@ local function getSpecDescriptor()
     end
 
     if (not secondary) and Resolver.GetAuraResource then
-        local auraInfo, auraKey = Resolver:GetAuraResource()
+        local auraInfo, auraKey, maximum = Resolver:GetAuraResource()
         if auraInfo and auraKey then
             local seed = AURA_SECONDARY_SEED_BY_KEY[auraKey] or {}
             secondary = {
                 kind        = "shards",
                 valueSource = "aura",
                 auraSpellId = auraInfo.spellId,
+                altAuraSpellId = auraInfo.altSpellId,
                 auraKey     = auraKey,
-                pipCount    = auraInfo.maxStacks,
+                pipCount    = maximum,
                 color       = seed.color,
             }
         end
     end
 
-    local name
-    if specIdx and specIdx > 0 and GetSpecializationInfo then
-        local ok, _specID, specName = pcall(GetSpecializationInfo, specIdx)
-        if ok and type(specName) == "string" and specName ~= "" then
-            name = specName
-        end
-    end
     if not name then
         name = tostring(class)
     end
@@ -512,6 +517,9 @@ local function primary_Layout()
         end
     end
     if thLines_Reposition then thLines_Reposition() end
+    local predict = not _previewActive and opts and opts.showManaCost
+        and Primary.desc and Primary.desc.powerName == "Mana" and resolvePrimaryEnabled(profile) ~= false
+    ns.PowerPrediction.Attach("primary", predict and bar or nil, POWER_TYPE_ENUM.Mana)
 end
 
 ns:RegisterMessage("ANCHOR_MOVED", function(_, name)
@@ -844,6 +852,7 @@ local function primary_Refresh()
 end
 
 local function primary_HideAll()
+    ns.PowerPrediction.Attach("primary")
     if Primary.bar then
         Primary.bar:Hide()
     end
@@ -977,7 +986,7 @@ local function thLines_AcquireFor(target, i)
     tex:SetColorTexture(1, 1, 1, 1)
 
     local label = f:CreateFontString(nil, "OVERLAY")
-    label:SetFont(resolveFontKey("default"), 9, "OUTLINE")
+    ns.Pixel.SetFont(label, resolveFontKey("default"), 9, "OUTLINE")
     label:SetPoint("BOTTOM", f, "TOP", 0, 1)
     label:SetJustifyH("CENTER")
     label:SetTextColor(1, 1, 1, 1)
@@ -1533,6 +1542,18 @@ local Secondary = {
 
 local SECONDARY_COUNT_MIN = 1
 local SECONDARY_COUNT_MAX = 10
+local NativeBar = ns.NativeResourceBar
+
+local function secondary_AttachPrediction(frame, segmented)
+    local power = Secondary.desc and POWER_TYPE_ENUM[Secondary.desc.powerName]
+    local mana = power == POWER_TYPE_ENUM.Mana
+    local primary, secondary = Primary.selfProfile or {}, Secondary.selfProfile or {}
+    local enabled = (mana and primary.showManaCost) or secondary.showPrediction
+    if _previewActive or not enabled or resolveSecondaryEnabled(Secondary.profileRef) == false then
+        frame = nil
+    end
+    ns.PowerPrediction.Attach("secondary", frame, power, segmented)
+end
 
 local buildShardPip
 local buildRune
@@ -1589,7 +1610,9 @@ local function secondary_ReleaseExtras(kind, n)
 end
 
 local function secondary_HideAllPooled()
+    ns.PowerPrediction.Attach("secondary")
     if Secondary.nativeAura then Secondary.nativeAura.frame:Hide() end
+    NativeBar.Hide(Secondary.barWidget)
     for i = 1, #Secondary.shardPool do
         local w = Secondary.shardPool[i]
         if w then w:Hide() end
@@ -1664,7 +1687,7 @@ local function secondary_EnsureCountText()
     overlay:SetFrameLevel(container:GetFrameLevel() + 10)
     local fs = overlay:CreateFontString(nil, "OVERLAY")
     fs:SetPoint("CENTER", overlay, "CENTER", 0, 0)
-    fs:SetFont("Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
+    ns.Pixel.SetFont(fs, "Fonts\\FRIZQT__.TTF", 12, "OUTLINE")
     fs:SetTextColor(1, 1, 1, 1)
     fs:SetText("")
     Secondary.countOverlay = overlay
@@ -1681,7 +1704,7 @@ local function secondary_ApplyCountFont(fs, overlay)
     local fontPath = resolveFontKey(t.font or sp.font)
     local size  = tonumber(t.fontSize) or sp.fontSize or 12
     local flags = t.fontFlags or sp.fontFlags or "OUTLINE"
-    pcall(fs.SetFont, fs, fontPath, size, flags)
+    ns.Pixel.SetFont(fs, fontPath, size, flags)
     local anchor = t.anchor
     if not (anchor and VALID_FONT_ANCHORS[anchor]) then anchor = "CENTER" end
     local ox = tonumber(t.x) or 0
@@ -1723,10 +1746,6 @@ end
 local function secondary_SetCountValue(value)
     local fs = Secondary.countText
     if not fs then return end
-    if value == nil then
-        fs:SetText("")
-        return
-    end
     if isSecret(value) then
         pcall(fs.SetText, fs, value)
     elseif type(value) == "number" then
@@ -1734,6 +1753,17 @@ local function secondary_SetCountValue(value)
     else
         fs:SetText("")
     end
+end
+
+local function secondary_RefreshVengeance()
+    local getCount = C_Spell and C_Spell.GetSpellCastCount
+    local ok, count = pcall(getCount, 228477)
+    if not ok or type(count) ~= "number" then count = 0 end
+    for index, pip in ipairs(Secondary.pips) do
+        pip:SetMinMaxValues(index - 1, index)
+        pip:SetValue(count)
+    end
+    if secondary_CountActive() then secondary_SetCountValue(count) end
 end
 
 local function secondary_UpdateCountFromPower(pt)
@@ -1854,16 +1884,16 @@ buildShardPip = function(parent, color)
     local top, bottom, left, right = side(), side(), side(), side()
     top:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     top:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
-    top:SetHeight(1)
+    ns.Pixel.Edge(top, f, true)
     bottom:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
     bottom:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
-    bottom:SetHeight(1)
+    ns.Pixel.Edge(bottom, f, true)
     left:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     left:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
-    left:SetWidth(1)
+    ns.Pixel.Edge(left, f, false)
     right:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
     right:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
-    right:SetWidth(1)
+    ns.Pixel.Edge(right, f, false)
     f.borderParts = { top, bottom, left, right }
     return f
 end
@@ -1891,21 +1921,21 @@ buildRune = function(parent, _color)
     local top, bottom, left, right = side(), side(), side(), side()
     top:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     top:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
-    top:SetHeight(1)
+    ns.Pixel.Edge(top, f, true)
     bottom:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
     bottom:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
-    bottom:SetHeight(1)
+    ns.Pixel.Edge(bottom, f, true)
     left:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     left:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
-    left:SetWidth(1)
+    ns.Pixel.Edge(left, f, false)
     right:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
     right:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
-    right:SetWidth(1)
+    ns.Pixel.Edge(right, f, false)
     f.borderParts = { top, bottom, left, right }
 
     local text = f:CreateFontString(nil, "OVERLAY")
     text:SetPoint("CENTER", f, "CENTER", 0, 0)
-    text:SetFont("Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
+    ns.Pixel.SetFont(text, "Fonts\\FRIZQT__.TTF", 11, "OUTLINE")
     text:SetTextColor(1, 1, 1, 1)
     text:SetText("")
     f.text = text
@@ -1919,6 +1949,7 @@ local function secondary_PopulateActive(kind, count, color)
     local otherKind = (kind == "shards") and "runes" or "shards"
     secondary_ReleaseExtras(otherKind, 0)
     if Secondary.barWidget then
+        ns.PowerPrediction.Attach("secondary")
         Secondary.barWidget:Hide()
     end
     Secondary._kind = kind
@@ -1955,6 +1986,8 @@ local function secondary_LayoutPips()
             p:Show()
         end
     end
+    local predictsPower = Secondary._kind == "shards" and not Secondary._valueSource
+    secondary_AttachPrediction(predictsPower and container or nil, true)
 end
 
 local SPEC_WARLOCK_DESTRUCTION = 267
@@ -1977,6 +2010,7 @@ local function secondary_RefreshShards()
     local pt = POWER_TYPE_ENUM[powerName]
     if not pt then return end
 
+    ns.PowerPrediction.UpdatePips()
     secondary_UpdateCountFromPower(pt)
 
     local modCur = UnitPower("player", pt)
@@ -2199,13 +2233,9 @@ local function secondary_ApplyBarFont()
         if oy == nil then oy = 0 end
         fs:ClearAllPoints()
         fs:SetPoint(anchor, bar.frame, anchor, ox, oy)
-        if anchor:find("LEFT") then
-            fs:SetJustifyH("LEFT")
-        elseif anchor:find("RIGHT") then
-            fs:SetJustifyH("RIGHT")
-        else
-            fs:SetJustifyH("CENTER")
-        end
+        local justify = anchor:find("LEFT") and "LEFT" or anchor:find("RIGHT") and "RIGHT" or "CENTER"
+        fs:SetJustifyH(justify)
+        Secondary.nativeBarFont = { fontPath, size, flags, anchor, ox, oy, justify }
     end
 end
 
@@ -2242,6 +2272,7 @@ local function secondary_LayoutBar()
     bar.frame:ClearAllPoints()
     bar.frame:SetAllPoints(container)
     bar:Show()
+    secondary_AttachPrediction(bar.frame, false)
     if thLines_Reposition then thLines_Reposition() end
 end
 
@@ -2361,16 +2392,44 @@ local function secondary_RefreshFragmentsBar()
         if ok then spellId = id end
     end
     spellId = spellId or (Resolver and Resolver.SOUL_FRAGMENTS_AURA_ID)
-    local cur = 0
+    local cur, known, raw
     if Engine and Engine.readAuraStacks and spellId then
-        cur = Engine.readAuraStacks("SOUL_FRAGMENTS", spellId)
+        cur, known, raw = Engine.readAuraStacks("SOUL_FRAGMENTS", spellId)
     end
     local max = desc.maxFallback or 50
     if Resolver and Resolver.GetSoulFragmentsMax then
         local ok, m = pcall(Resolver.GetSoulFragmentsMax, Resolver)
         if ok and type(m) == "number" and m > 0 then max = m end
     end
-    secondary_SetPseudoBar(cur, max, false)
+    if not known and not isSecret(raw) then
+        local powerType = Enum.PowerType.SoulFragments
+        if powerType then
+            local powerMax = UnitPowerMax("player", powerType)
+            if isSecret(powerMax) or (type(powerMax) == "number" and powerMax > 0) then
+                raw, max = UnitPower("player", powerType), powerMax
+            end
+        end
+    end
+    if isSecret(raw) or isSecret(max) or type(raw) == "number" then
+        NativeBar.Hide(bar)
+        bar:SetMinMaxValues(0, max)
+        bar:SetValue(raw)
+        bar:SetRightText("")
+        if secondary_TextEnabledForBar() then bar:SetRightText(raw) end
+        bar:Show()
+    elseif known then
+        NativeBar.Hide(bar)
+        secondary_SetPseudoBar(cur, max, false)
+    else
+        bar:SetMinMaxValues(0, max)
+        bar:SetValue(0)
+        bar:SetRightText("")
+        bar:Show()
+        if spellId then
+            NativeBar.Show(bar, spellId, max, secondary_ResolveTexture(), c,
+                secondary_TextEnabledForBar() and Secondary.nativeBarFont or nil)
+        end
+    end
 
     if Primary._thlEnabled then
         local inMeta = (Resolver and Resolver.IsInVoidMeta and Resolver:IsInVoidMeta()) and true or false
@@ -2425,6 +2484,9 @@ local function secondary_SyncNativeAuraPips()
         frame:EnableMouse(false)
         frame:SetUnit("player")
         local filters = { includeSpellIDs = { [spellID] = true } }
+        if Secondary.desc.altAuraSpellId then
+            filters.includeSpellIDs[Secondary.desc.altAuraSpellId] = true
+        end
         local formatter = C_StringUtil.CreateNumericRuleFormatter()
         formatter:SetBreakpoints({ { threshold = 0, format = "%d" } })
         for index, pip in ipairs(Secondary.pips) do
@@ -2432,7 +2494,8 @@ local function secondary_SyncNativeAuraPips()
                 candidateFilters = filters,
                 initializeFrame = function(button)
                     button:SetAllPoints(frame)
-                    button:EnableMouse(false)
+                    button:SetMouseClickEnabled(false)
+                    button:SetMouseMotionEnabled(false)
                     local fill = CreateFrame("StatusBar", nil, button)
                     fill:SetFrameLevel(pip:GetFrameLevel() + 1)
                     setFill(fill, pip)
@@ -2471,10 +2534,11 @@ local function secondary_RefreshAuraPips()
     local spellId = desc.auraSpellId
     local native = secondary_SyncNativeAuraPips()
     local count, known
-    if native then
-        if Engine and Engine.EnsureAuraTicker then Engine:EnsureAuraTicker(false) end
-    elseif Engine and Engine.readAuraStacks and spellId then
+    if not native and Engine and Engine.readAuraStacks and spellId then
         count, known = Engine.readAuraStacks(desc.auraKey or "AURA", spellId)
+        if count == 0 and desc.altAuraSpellId then
+            count, known = Engine.readAuraStacks(desc.auraKey, desc.altAuraSpellId)
+        end
     end
     if type(count) ~= "number" or count < 0 then count = 0 end
     for i = 1, #Secondary.pips do
@@ -2556,13 +2620,17 @@ local function secondary_Refresh()
         Secondary.nativeAura.frame:Hide()
     end
     if _previewActive then
+        NativeBar.Hide(Secondary.barWidget)
         secondary_PreviewRender()
         return
     end
     local vs = Secondary._valueSource
+    if vs ~= "soulfragments" then NativeBar.Hide(Secondary.barWidget) end
     if Secondary._kind == "shards" then
         if vs == "aura" then
             secondary_RefreshAuraPips()
+        elseif vs == "vengeance" then
+            secondary_RefreshVengeance()
         else
             secondary_RefreshShards()
         end
@@ -2591,7 +2659,8 @@ local function secondary_ApplyValueText()
     if secondary_UpdateCountVisibility() then
         secondary_ApplyCountFont()
     end
-    if Secondary._valueSource == "aura" or secondary_CountActive() then
+    local source = Secondary._valueSource
+    if source == "aura" or source == "soulfragments" or secondary_CountActive() then
         secondary_Refresh()
     end
 end
@@ -2633,23 +2702,24 @@ end
 
 local function secondary_UpdatePseudoLifecycle(vs)
     local ef = Secondary.eventFrame
-    local needsAura = (vs == "aura" or vs == "soulfragments")
+    local needsAura = (vs == "aura" or vs == "soulfragments" or vs == "vengeance")
 
     if vs ~= "soulfragments" then
         Secondary._csLastInMeta = nil
     end
 
-    if ef and Secondary._unitAuraRegistered then
-        pcall(ef.UnregisterEvent, ef, "UNIT_AURA")
-        Secondary._unitAuraRegistered = false
+    if ef and needsAura ~= Secondary._unitAuraRegistered then
+        if needsAura then
+            ef:RegisterUnitEvent("UNIT_AURA", "player")
+        else
+            ef:UnregisterEvent("UNIT_AURA")
+        end
+        Secondary._unitAuraRegistered = needsAura
     end
 
     if Engine then
         if Engine.EnsureStaggerTicker then
             Engine:EnsureStaggerTicker(vs == "stagger", secondary_Refresh)
-        end
-        if Engine.EnsureAuraTicker then
-            Engine:EnsureAuraTicker(needsAura, secondary_Refresh)
         end
     end
 end
@@ -2694,6 +2764,12 @@ local function secondary_Rebuild()
         Secondary._kind = "bar"
         secondary_BuildBar()
         secondary_LayoutBar()
+        if Secondary._valueSource == "soulfragments" and Secondary.barWidget then
+            local texture = secondary_ResolveTexture()
+            local font = secondary_TextEnabledForBar() and Secondary.nativeBarFont or nil
+            NativeBar.Prepare(Secondary.barWidget, Resolver.SOUL_FRAGMENTS_AURA_ID, Resolver:GetSoulFragmentsMax(false), texture, color, font)
+            NativeBar.Prepare(Secondary.barWidget, Resolver.COLLAPSING_STAR_AURA_ID, Resolver:GetSoulFragmentsMax(true), texture, color, font)
+        end
         secondary_UpdateCountVisibility()
         Secondary.lastSecondaryType = "bar"
         Secondary.lastSecondaryMax  = -1
@@ -2725,7 +2801,8 @@ local function secondary_Rebuild()
         if type(count) ~= "number" then count = 5 end
         count = math_floor(count + 0.5)
         if count < SECONDARY_COUNT_MIN then count = SECONDARY_COUNT_MIN end
-        if count > SECONDARY_COUNT_MAX then count = SECONDARY_COUNT_MAX end
+    elseif Secondary._valueSource == "vengeance" then
+        count = desc.secondary.pipCount
     else
         count = secondary_ResolveCount(kind)
     end
@@ -2776,7 +2853,7 @@ end
 
 local function secondary_OnEvent(_self, event, unit, arg2)
     if event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "PLAYER_REGEN_ENABLED" then
-        if Secondary._valueSource == "aura" then secondary_Refresh() end
+        if Secondary._valueSource then secondary_Refresh() end
         return
     end
     if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
@@ -2791,9 +2868,13 @@ local function secondary_OnEvent(_self, event, unit, arg2)
     if event == "UNIT_AURA" then
         if unit ~= "player" then return end
         local vs = Secondary._valueSource
-        if vs == "aura" or vs == "soulfragments" then
+        if vs == "aura" or vs == "soulfragments" or vs == "vengeance" then
             secondary_Refresh()
         end
+        return
+    end
+    if event == "SPELL_UPDATE_CHARGES" then
+        if Secondary._valueSource == "vengeance" then secondary_Refresh() end
         return
     end
     if event == "UNIT_MAXPOWER" then
@@ -2860,6 +2941,7 @@ function Secondary:Enable(parentProfile)
     ef:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     ef:RegisterEvent("PLAYER_REGEN_ENABLED")
     ef:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
+    ef:RegisterEvent("SPELL_UPDATE_CHARGES")
     pcall(ef.RegisterEvent, ef, "RUNE_POWER_UPDATE")
     pcall(ef.RegisterEvent, ef, "RUNE_TYPE_UPDATE")
     pcall(ef.RegisterEvent, ef, "PLAYER_TALENT_UPDATE")
@@ -2932,7 +3014,22 @@ local Display = {
     thLines_Rebuild          = thLines_Rebuild,
     thLines_DiagDump         = thLines_DiagDump,
     secondary_Refresh        = secondary_Refresh,
-    SetPreviewActive         = function(flag) _previewActive = flag and true or false end,
+    secondary_Rebuild        = secondary_Rebuild,
+    RefreshPowerPrediction  = function()
+        primary_Layout()
+        if Secondary._kind == "bar" then
+            secondary_LayoutBar()
+        else
+            secondary_LayoutPips()
+        end
+    end,
+    SetPreviewActive         = function(flag)
+        _previewActive = flag and true or false
+        if _previewActive then
+            ns.PowerPrediction.Attach("primary")
+            ns.PowerPrediction.Attach("secondary")
+        end
+    end,
     IsPreviewActive          = function() return _previewActive end,
 }
 

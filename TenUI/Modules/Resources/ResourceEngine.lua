@@ -215,7 +215,7 @@ local function readAuraStacks(_, spellId)
         return 0, true
     end
     local stacks = aura.applications
-    if isSecret(stacks) then return nil, false end
+    if isSecret(stacks) then return nil, false, stacks end
     return tonumber(stacks) or 1, true
 end
 Engine.readAuraStacks = readAuraStacks

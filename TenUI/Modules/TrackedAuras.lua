@@ -16,7 +16,7 @@ local cooldownDebuffFailures = setmetatable({}, { __mode = "k" })
 local cooldownBuffs = setmetatable({}, { __mode = "k" })
 local cooldownBuffFailures = setmetatable({}, { __mode = "k" })
 local iconAlignment
-local iconTimerOptions
+local timerFormatters = {}
 local auraCountFormatter
 local timerCurves = setmetatable({}, { __mode = "v" })
 local lowTimeGlows = setmetatable({}, { __mode = "k" })
@@ -40,11 +40,11 @@ local function applyBorder(button, regions, color)
             if i <= 2 then
                 edge:SetPoint(point .. "LEFT")
                 edge:SetPoint(point .. "RIGHT")
-                edge:SetHeight(1)
+                ns.Pixel.Edge(edge, button, true)
             else
                 edge:SetPoint("TOP" .. point)
                 edge:SetPoint("BOTTOM" .. point)
-                edge:SetWidth(1)
+                ns.Pixel.Edge(edge, button, false)
             end
             regions[i] = edge
         end
@@ -271,6 +271,10 @@ end
 local function updateLowTimeGlow(host, state)
     if not state.parent:IsVisible() then return end
     local duration = state.bar:GetTimerDuration()
+    if not duration then
+        host:SetAlpha(0)
+        return
+    end
     local alpha = duration:EvaluateRemainingDuration(state.curve).a
     host:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(duration:IsZero(), 0, alpha))
 end
@@ -310,9 +314,7 @@ local function applyLowTimeGlow(button, regions, config)
     local bar = regions.bar
     if not bar then
         if not regions.glowTimer then
-            regions.glowTimer = regions.hiddenGlowTimer or CreateFrame("StatusBar", nil, button)
-            regions.hiddenGlowTimer = regions.glowTimer
-            regions.glowTimer:SetAlpha(0)
+            regions.glowTimer = regions.hiddenGlowTimer
             button:SetDurationBar(regions.glowTimer, { direction = Enum.StatusBarTimerDirection.RemainingTime })
         end
         bar = regions.glowTimer
@@ -396,44 +398,55 @@ local function createContainer(parent, unit)
     return container
 end
 
-local function getIconTimerOptions()
-    if not iconTimerOptions and C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+local function getTimerFormatter(decimals)
+    if timerFormatters[decimals] == nil and C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
        and Enum.NumericRuleFormatRounding then
         local formatter = C_StringUtil.CreateNumericRuleFormatter()
-        local up = Enum.NumericRuleFormatRounding.Up
-        formatter:SetBreakpoints({
-            { threshold = 0, format = "%d", step = 1, rounding = up },
+        local rounding = Enum.NumericRuleFormatRounding
+        local up = rounding.Up
+        local points = {
+            { threshold = decimals, format = "%d", step = 1, rounding = up },
             { threshold = 90, format = "%dm", step = 60, rounding = up, components = { { div = 60 } } },
             { threshold = 5401, format = "%dh", step = 3600, rounding = up, components = { { div = 3600 } } },
             { threshold = 129601, format = "%dd", step = 86400, rounding = up, components = { { div = 86400 } } },
-        })
-        iconTimerOptions = { textFormatter = formatter }
+        }
+        if decimals > 0 then
+            table.insert(points, 1, { threshold = 0, format = "%.1f", rounding = rounding.Nearest })
+        end
+        local ok = pcall(formatter.SetBreakpoints, formatter, points)
+        timerFormatters[decimals] = ok and formatter or false
     end
-    return iconTimerOptions
+    return timerFormatters[decimals] or nil
 end
 
 local function bindDurationText(button, regions, style)
     local colors = style and style.timerColors
-    local key = colors and signature(colors) or false
-    if regions.timerColorKey == key then return end
-    local options = not regions.bar and getIconTimerOptions() or nil
+    local decimals = style and style.timerDecimals or 0
+    local colorKey = colors and signature(colors) or ""
+    local key = colorKey .. "/" .. decimals
+    if regions.timerKey == key then return end
+    local formatter
+    if not regions.bar or decimals > 0 then
+        formatter = getTimerFormatter(decimals)
+    end
+    local options = formatter and { textFormatter = formatter } or nil
     if colors and CreateColor and C_CurveUtil and C_CurveUtil.CreateColorCurve
        and Enum.DurationTextBindingProperty then
-        local curve = timerCurves[key]
+        local curve = timerCurves[colorKey]
         if not curve then
             curve = C_CurveUtil.CreateColorCurve()
             curve:SetType(Enum.LuaCurveType.Step)
             curve:AddPoint(0, CreateColor(unpack(colors.low)))
             curve:AddPoint(colors.threshold, CreateColor(unpack(colors.normal)))
-            timerCurves[key] = curve
+            timerCurves[colorKey] = curve
         end
         options = {
-            textFormatter = options and options.textFormatter,
+            textFormatter = formatter,
             textColor = { curve = curve, property = Enum.DurationTextBindingProperty.RemainingDuration },
         }
     end
     button:SetDurationText(regions.timer, options)
-    regions.timerColorKey = key
+    regions.timerKey = key
 end
 
 local function bindRegions(button, regions, bindName, style)
@@ -482,6 +495,10 @@ local function createGroup(frame, key, unit, group)
                 return
             end
             local regions = makeRegions(button, config.isBar)
+            if not config.isBar then
+                regions.hiddenGlowTimer = CreateFrame("StatusBar", nil, button)
+                regions.hiddenGlowTimer:SetAlpha(0)
+            end
             group.buttons[button] = regions
             applyStyle(button, regions, current)
             bindRegions(button, regions, true, current.style)
@@ -492,17 +509,34 @@ end
 local function getGroupDefinitions(config)
     local definitions, byKey = {}, {}
     local flip = config.reverseOrder
+    local rankCounts
+    if config.measure and config.order then
+        rankCounts = {}
+        for id in pairs(config.ids) do
+            local rank = config.order[id]
+            if rank then rankCounts[rank] = (rankCounts[rank] or 0) + 1 end
+        end
+    end
     for id in pairs(config.ids) do
         local rank = config.order and config.order[id]
         local override = config.overrides and config.overrides[id]
         local key = rank or signature(override)
+        -- The invisible rail only needs the total extent. Keep separate
+        -- one-frame groups for ranks with aliases so they still count once.
+        local measureTogether = rank and rankCounts and rankCounts[rank] == 1
+        if measureTogether then key = false end
         local group = byKey[key]
         if not group then
-            group = { ids = {}, rank = rank, styleKey = signature(override), override = override,
-                limit = rank and 1 or config.maxFrames or maxTrackedIcons }
+            if measureTogether then
+                group = { ids = {}, styleKey = "", limit = 0 }
+            else
+                group = { ids = {}, rank = rank, styleKey = signature(override), override = override,
+                    limit = rank and 1 or config.maxFrames or maxTrackedIcons }
+            end
             byKey[key] = group
             definitions[#definitions + 1] = group
         end
+        if measureTogether then group.limit = group.limit + 1 end
         group.ids[id] = true
     end
     table.sort(definitions, function(a, b)
@@ -846,7 +880,7 @@ local function syncOrdered(kind, config, units, key)
     return true
 end
 
-function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, textStyle, activeSpellID)
+function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, textStyle, activeSpellID, appearance)
     local overlays = unit == "player" and cooldownBuffs or cooldownDebuffs
     local failed = unit == "player" and cooldownBuffFailures or cooldownDebuffFailures
     local frame = icon.frame
@@ -858,13 +892,12 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
     local restricted = self:IsRestricted()
     local idSignature = signature(ids)
     if restricted and state then
-        if state then
-            local sameSpell = activeSpellID ~= nil and state.activeSpellID == activeSpellID
-            state.container:SetShown(sameSpell or state.ids == idSignature)
-        end
+        local sameSpell = activeSpellID ~= nil and state.activeSpellID == activeSpellID
+        local shown = sameSpell or state.ids == idSignature
+        if state.container:IsShown() ~= shown then state.container:SetShown(shown) end
         return
     end
-    local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe)
+    local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe) .. signature(appearance)
     local key = idSignature .. "/" .. styleSignature
     local failure = failed[frame]
     if failure and failure.signature == key and (not failure.restricted or restricted) then return end
@@ -880,14 +913,20 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
         if ns.Controls and ns.Controls.ResolveFontPath then
             font = ns.Controls.ResolveFontPath(styleOptions.font) or font
         end
-        fs:SetFont(font, styleOptions.size or size, styleOptions.flags or flags)
+        ns.Pixel.SetFont(fs, font, styleOptions.size or size, styleOptions.flags or flags)
         local point = styleOptions.anchor or "CENTER"
         if point == "ABOVE_ICON" then point = "TOP" elseif point == "BELOW_ICON" then point = "BOTTOM" end
         fs:ClearAllPoints()
         fs:SetPoint(point, visual.cooldown, point, styleOptions.x or 0, styleOptions.y or 0)
         fs:SetShown(showText)
         visual.cooldown:SetDrawSwipe(showSwipe)
-        visual.cooldown:SetDrawEdge(showSwipe)
+        visual.cooldown:SetDrawEdge(unit == "player" and showSwipe)
+        if appearance then
+            ns.Widgets.Icon.ApplyCropTexCoord(visual.icon, appearance.width, appearance.height)
+            if appearance.border or visual.border then
+                visual.border = applyBorder(visual.effects, visual.border, appearance.border)
+            end
+        end
     end
     local ok, err = pcall(function()
         if not state then
@@ -908,6 +947,10 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
                     bg:SetColorTexture(0.05, 0.05, 0.05, 1)
                     local visual = makeRegions(button, false)
                     state.visual = visual
+                    if unit == "target" then
+                        visual.cooldown:SetSwipeTexture([[Interface\Buttons\WHITE8X8]])
+                        visual.cooldown:SetSwipeColor(0, 0, 0, 0.8)
+                    end
                     style(visual)
                     button:SetIcon(visual.icon)
                     bindDurationText(button, visual)
@@ -918,7 +961,7 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
             if state.ids ~= idSignature then
                 state.container:SetAuraSlotCandidateFilters("aura", { includeSpellIDs = ids })
             end
-            style(state.visual)
+            if state.style ~= styleSignature then style(state.visual) end
         end
         state.ids, state.style, state.activeSpellID = idSignature, styleSignature, activeSpellID
         state.container:Show()

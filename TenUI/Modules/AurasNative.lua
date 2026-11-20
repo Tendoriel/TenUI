@@ -250,7 +250,8 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
         local point, vertical
         local glowEnabled = not ns.Glow or not ns.Glow.IsGloballyEnabled or ns.Glow:IsGloballyEnabled()
         local style = { pandemic = glowEnabled and Auras:IsPandemicEnabled(), glowsEnabled = glowEnabled,
-            tooltipMode = Auras.profileRef and Auras.profileRef.tooltipMode }
+            tooltipMode = Auras.profileRef and Auras.profileRef.tooltipMode,
+            timerDecimals = math.max(0, math.min(15, tonumber(Auras.profileRef and Auras.profileRef.timerDecimals) or 0)) }
         local colorTimers, threshold, nr, ng, nb, na, lr, lg, lb, la = Auras:GetLowTimeTextConfig()
         if colorTimers then
             style.timerColors = { threshold = threshold, normal = { nr, ng, nb, na }, low = { lr, lg, lb, la } }

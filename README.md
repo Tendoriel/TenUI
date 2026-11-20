@@ -2,7 +2,7 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
-TenUI 0.5.7 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
+TenUI 0.5.8 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
 
 [![Website](https://img.shields.io/badge/Website-tenuiaddon.com-08979c?style=flat)](https://tenuiaddon.com/) [![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.1.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
@@ -114,7 +114,7 @@ The options window is organized by module:
 - **Cooldown Manager** groups **Cooldowns**, **Tracked Icons** and **Tracked Bars**. Drag in the preview to reorder entries and right-click for **CDM Settings** or **Aura Settings**.
 - **Reminders** contains Class Reminders, Stealth and related alerts. Use **Test on HUD** to check reminder placement.
 - **Glow Effects** — choose glow styles per purpose and preview them live.
-- **Resources** — resource bar appearance and visibility.
+- **Resources** — appearance, visibility, and cast cost and gain previews. Augmentation can move its separate Ebon Might bar in Layout or Edit Mode.
 - **Cast Bar** — cast bar appearance and behavior.
 - **Dragon Riding** — skyriding speed bar, charge pips and Whirling Surge cooldown.
 - **Profiles** — manage, rename, copy, export and import profiles, and set up per-spec swapping.

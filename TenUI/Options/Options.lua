@@ -734,6 +734,7 @@ local function buildGeneralPage(sc)
                 ns.db.globalScale = v
                 if ns.anchorParent then
                     ns.anchorParent:SetScale(v)
+                    ns.Pixel.RefreshEdges()
                 end
             end
         end

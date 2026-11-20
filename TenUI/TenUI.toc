@@ -2,7 +2,7 @@
 ## Title: TenUI
 ## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
 ## Author: tendoriel
-## Version: 0.5.7
+## Version: 0.5.8
 ## SavedVariables: TenUIDB, TendorHUDDB
 ## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
 ## OptionalDeps: SharedMedia
@@ -21,6 +21,7 @@ Core\ModuleSystem.lua
 Core\SavedVars.lua
 Core\Profile.lua
 Core\Events.lua
+Core\PixelPerfect.lua
 Core\Visibility.lua
 Core\SpecSwap.lua
 Core\Anchors.lua
@@ -36,6 +37,9 @@ Widgets\Text.lua
 Modules\CastBar.lua
 Modules\Resources\ResourceResolver.lua
 Modules\Resources\ResourceEngine.lua
+Modules\Resources\NativeResourceBar.lua
+Modules\Resources\PowerPrediction.lua
+Modules\Resources\EbonMight.lua
 Modules\Resources\ResourceDisplay.lua
 Modules\Resources\ResourceModule.lua
 Modules\Glow.lua

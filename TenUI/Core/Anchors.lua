@@ -309,15 +309,50 @@ local function clampToScreen(pos)
     return false
 end
 
+local widthMatchAnchors = { Resources = true, ResourceSecondary = true, CastBar = true }
+local widthMatchQueued
+
+function Anchors:CanMatchEssentialWidth(name)
+    return widthMatchAnchors[name] == true
+end
+
+local function matchesEssentialWidth(name)
+    local visuals = widthMatchAnchors[name] and ns:GetLayoutVisuals(name, false)
+    return visuals and visuals.matchEssentialWidth == true
+end
+
+local function refreshWidthMatches()
+    widthMatchQueued = nil
+    if InCombatLockdown() then return end
+    for name in pairs(widthMatchAnchors) do
+        if matchesEssentialWidth(name) then Anchors:Reapply(name) end
+    end
+end
+
 local function applyPosition(anchor, pos)
     local scale = pos.scale or 1
     if anchor:GetScale() ~= scale then anchor:SetScale(scale) end
     local w = pos.width or anchor:GetWidth() or 200
     local h = pos.height or anchor:GetHeight() or 32
+    local oldWidth = anchor:GetWidth()
+    local name = anchor.anchorName
+    if matchesEssentialWidth(name) then
+        local source = registry.EssentialCooldowns
+        local frame = source and source.frame
+        if frame and frame:GetWidth() > 0 then
+            w = frame:GetWidth() * frame:GetEffectiveScale() / anchor:GetEffectiveScale()
+        end
+    end
     anchor:SetSize(w, h)
-    local setX, setY = originToSetPoint(pos.point, pos.x, pos.y, w, h, anchor.anchorName)
+    local setX, setY = originToSetPoint(pos.point, pos.x, pos.y, w, h, name)
     anchor:ClearAllPoints()
-    anchor:SetPoint(pos.point, parent, pos.point, setX, setY)
+    anchor:SetPoint(pos.point, parent, pos.point, ns.Pixel.Snap(parent, setX), ns.Pixel.Snap(parent, setY))
+    if name == "EssentialCooldowns" and not widthMatchQueued then
+        widthMatchQueued = true
+        C_Timer.After(0, refreshWidthMatches)
+    elseif widthMatchAnchors[name] and w ~= oldWidth then
+        ns:Fire("ANCHOR_RESIZED", name, w, h)
+    end
 end
 
 local function anchor_OnDragStart(self)
@@ -562,7 +597,7 @@ function Anchors:SaveSize(anchor)
     local w, h = anchor:GetSize()
     if not isFiniteNumber(w) or w <= 0 then w = entry.width end
     if not isFiniteNumber(h) or h <= 0 then h = entry.height end
-    entry.width  = math_floor(w + 0.5)
+    if not matchesEssentialWidth(anchor.anchorName) then entry.width = math_floor(w + 0.5) end
     entry.height = math_floor(h + 0.5)
     writeOverlayEntry(anchor.anchorName, entry)
     applyPosition(anchor, entry)
@@ -570,7 +605,7 @@ function Anchors:SaveSize(anchor)
         point = entry.point, x = entry.x, y = entry.y,
         w = entry.width, h = entry.height,
     })
-    ns:Fire("ANCHOR_RESIZED", anchor.anchorName, entry.width, entry.height)
+    ns:Fire("ANCHOR_RESIZED", anchor.anchorName, anchor:GetWidth(), entry.height)
     vlog("Anchor resized: %s -> %s (%d,%d) %dx%d",
         anchor.anchorName, tostring(entry.point), entry.x or 0, entry.y or 0,
         entry.width, entry.height)
@@ -975,6 +1010,7 @@ function Anchors:Reset(name)
         migrateEntryToOriginModel(pos, name)
         writeOverlayEntry(name, pos)
         applyPosition(runtime.frame, pos)
+        self:ApplyAlpha(name, 1)
         if ns.EditMode and ns.EditMode.RefreshOne then
             ns.EditMode:RefreshOne(runtime.frame)
         end
@@ -985,6 +1021,7 @@ function Anchors:Reset(name)
         migrateEntryToOriginModel(pos, n)
         writeOverlayEntry(n, pos)
         applyPosition(runtime.frame, pos)
+        self:ApplyAlpha(n, 1)
     end
     if ns.EditMode and ns.EditMode.Refresh then
         ns.EditMode:Refresh()
@@ -1485,6 +1522,7 @@ ns:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", function(event, unit)
 end)
 
 ns:RegisterEvent("PLAYER_REGEN_ENABLED", function()
+    refreshWidthMatches()
     if _pendingSpecReapply and ns.savedVarsReady then
         _pendingSpecReapply = false
         Anchors:ApplyProfile()

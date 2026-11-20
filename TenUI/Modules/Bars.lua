@@ -1694,7 +1694,8 @@ local function syncAbilityDebuff(icon, entry, timer)
                 for _, id in ipairs(info.linkedSpellIDs) do addID(id) end
             end
         end
-        ns.TrackedAuras:SyncCooldownAura(icon, "target", ids, timer.showText, timer.showSwipe, timer.style, active or entry.id)
+        ns.TrackedAuras:SyncCooldownAura(icon, "target", ids, timer.showText, timer.showSwipe,
+            timer.style, active or entry.id, timer.appearance)
     else
         ns.TrackedAuras:SyncCooldownAura(icon, "target")
     end
@@ -1720,7 +1721,7 @@ ns:RegisterMessage("AURA_LIST_UPDATED", function()
     end
 end)
 
-local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
+local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle, rowName)
     local options = entry.type == "spell" and abilityOptions(entry)
     local text = options and options.warnings and options.warnings.cooldownText or nil
     local style = rowStyle
@@ -1735,8 +1736,15 @@ local function applyAbilityTimer(icon, entry, showText, showSwipe, rowStyle)
        (entry.id == VOIDFORM_SPELL_ID or entry.id == VOIDFORM_CDM_SPELL_ID or entry.id == VOID_VOLLEY_SPELL_ID) then
         ns.TrackedAuras:SetupPlayerAuraCount(icon, VOID_VOLLEY_AURA_ID)
     end
-    icon._debuffTimer = options and options.targetDebuffTimer
-        and { showText = showText, showSwipe = showSwipe, style = style } or nil
+    icon._debuffTimer = nil
+    if options and options.targetDebuffTimer then
+        local width, height = getVisualProfileForRow(rowName)
+        local border, color = rowIconBorderStyle(rowName)
+        icon._debuffTimer = {
+            showText = showText, showSwipe = showSwipe, style = style,
+            appearance = { width = width, height = height, border = border and (color or { 0, 0, 0, 1 }) or nil },
+        }
+    end
     syncAbilityDebuff(icon, entry, icon._debuffTimer)
     icon._buffTimer = options and options.replaceWithBuff
         and { key = options.replaceWithBuff, showText = showText, showSwipe = showSwipe, style = style } or nil
@@ -1788,7 +1796,7 @@ local function buildIconsForList(container, displayedList, showText, rowName, av
         if textStyle and icon.ApplyTextStyle then
             icon:ApplyTextStyle(textStyle)
         end
-        applyAbilityTimer(icon, entry, showText, drawSwipe, cdTextStyle)
+        applyAbilityTimer(icon, entry, showText, drawSwipe, cdTextStyle, rowName)
         if entry.type == "item" and entry.consumable and icon.SetItemTooltip then
             local c = getConsumablesProfile()
             local wantTip = not (c and c.showTooltip == false)
@@ -1982,7 +1990,7 @@ function Row:ApplyVisualOptions()
         if icon and icon._entry then
             local profile = Bars.profileRef or {}
             applyAbilityTimer(icon, icon._entry, profile.showCooldownText ~= false,
-                profile.showDurationSwipe ~= false, cdTextStyle)
+                profile.showDurationSwipe ~= false, cdTextStyle, self.name)
         end
         if icon and icon.SetBorder then
             pcall(icon.SetBorder, icon, borderOn, borderColor)

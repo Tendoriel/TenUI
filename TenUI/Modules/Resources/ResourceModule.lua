@@ -149,14 +149,22 @@ local DEFAULTS = {
 }
 
 local _lastCombatState = false
+local function resourceAlpha(profile, inCombat)
+    return profile.hideOutOfCombat and not inCombat and not Resources._previewActive and 0 or 1
+end
+
+local function updateEbonMight()
+    local profile = Resources.profileRef
+    if profile then
+        ns.EbonMight.Update(profile, Resources._previewActive, resourceAlpha(profile, InCombatLockdown()))
+    end
+end
+
 local function applyCombatVisibility(inCombat)
     _lastCombatState = inCombat and true or false
     local profile = Resources.profileRef
     if not profile then return end
-    local alpha = 1
-    if profile.hideOutOfCombat and not inCombat and not Resources._previewActive then
-        alpha = 0
-    end
+    local alpha = resourceAlpha(profile, inCombat)
     if Primary.bar and Primary.bar.frame then
         Primary.bar.frame:SetAlpha(alpha)
     end
@@ -197,10 +205,14 @@ function Resources:OnEnable(_, profile)
             Resources:SetPreview(false)
         end
         applyCombatVisibility(true)
+        ns.EbonMight.SetAlpha(1)
     end)
     self._leaveCB = ns:RegisterEvent("PLAYER_REGEN_ENABLED", function()
         applyCombatVisibility(false)
+        updateEbonMight()
     end)
+    self._restrictionCB = ns:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED", updateEbonMight)
+    self._editCB = ns:RegisterMessage("EDIT_MODE_CHANGED", updateEbonMight)
 
     self._specCB = ns:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", function(_, unit)
         if unit and unit ~= "player" then return end
@@ -226,6 +238,15 @@ end
 function Resources:OnDisable()
     Primary:Disable()
     Secondary:Disable()
+    ns.EbonMight.Hide()
+    if self._editCB then
+        ns:UnregisterMessage("EDIT_MODE_CHANGED", self._editCB)
+        self._editCB = nil
+    end
+    if self._restrictionCB then
+        ns:UnregisterEvent("ADDON_RESTRICTION_STATE_CHANGED", self._restrictionCB)
+        self._restrictionCB = nil
+    end
     if self._enterCB then
         ns:UnregisterEvent("PLAYER_REGEN_DISABLED", self._enterCB)
         self._enterCB = nil
@@ -327,6 +348,8 @@ function Resources:ApplyOptions()
     end
 
     local ss = profile.secondary or {}
+    Secondary.selfProfile = ss
+    if Secondary._enabled then Display.secondary_Rebuild() end
     if Secondary.container then
         if resolveSecondaryEnabled(profile) == false then
             Secondary.container:Hide()
@@ -372,6 +395,8 @@ function Resources:ApplyOptions()
     secondary_LayoutPips()
     secondary_ApplyStyle()
     secondary_ApplyValueText()
+    Display.RefreshPowerPrediction()
+    updateEbonMight()
 
     local InCombatLockdown = InCombatLockdown
     applyCombatVisibility(InCombatLockdown and InCombatLockdown() or false)
@@ -395,6 +420,7 @@ function Resources:SetPreview(flag)
     local inCombat = InCombatLockdown and InCombatLockdown() or false
     if flag then
         applyCombatVisibility(inCombat)
+        updateEbonMight()
         if Display and Display.primary_Refresh then Display.primary_Refresh() end
         if Display and Display.secondary_Refresh then Display.secondary_Refresh() end
         dlog("SetPreview: ON")

@@ -415,6 +415,20 @@ local function buildAuraPage(sc)
         )
     end
 
+    children[#children + 1] = C.CreateSlider(sc, "Timer decimals below (0 = off)", 0, 15, 1,
+        function()
+            local profile = ns.Auras and ns.Auras.profileRef
+            return tonumber(profile and profile.timerDecimals) or 0
+        end,
+        function(v)
+            local auras = ns.Auras
+            if auras and auras.profileRef then
+                auras.profileRef.timerDecimals = v > 0 and math.floor(v + 0.5) or nil
+                auras:RequestRefresh()
+            end
+        end
+    )
+
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Tracked aura tooltips", {
         { key = "always", label = "Always" },
         { key = "outOfCombat", label = "Out of combat" },

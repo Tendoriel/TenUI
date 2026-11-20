@@ -26,11 +26,13 @@ local POWER_ESSENCE    = PT.Essence    or 19
 
 local POWER_STAGGER        = "STAGGER"
 local POWER_SOUL_FRAGMENTS = "SOUL_FRAGMENTS"
+local POWER_VENGEANCE_FRAGMENTS = "VENGEANCE_FRAGMENTS"
 
 local VOID_META_AURA_ID       = 1217607
 local SOUL_FRAGMENTS_AURA_ID  = 1225789
 local COLLAPSING_STAR_AURA_ID = 1227702
 local SOUL_GLUTTON_SPELL_ID   = 1247534
+local SURRENDER_TO_VOID       = 1261423
 
 local SPEC = {
     BLOOD           = 250,
@@ -157,18 +159,23 @@ local SECONDARY_BY_SPEC = {
     [SPEC.BALANCE]          = POWER_LUNAR,
     [SPEC.BREWMASTER]       = POWER_STAGGER,
     [SPEC.DEVOURER]         = POWER_SOUL_FRAGMENTS,
+    [SPEC.VENGEANCE]        = POWER_VENGEANCE_FRAGMENTS,
 }
 
 local AURA_RESOURCES = {
-    MAELSTROM_WEAPON = { spellId = 344179, maxStacks = 10, label = "MaelstromWeapon" },
+    MAELSTROM_WEAPON = { spellId = 344179, maxStacks = 5, talent = 384143, talentedMax = 10 },
     ICICLES          = { spellId = 205473, maxStacks = 5,  label = "Icicles" },
     TIP_OF_THE_SPEAR = { spellId = 260286, maxStacks = 3,  label = "TipOfTheSpear" },
+    WHIRLWIND        = { spellId = 85739, altSpellId = 190411, maxStacks = 4 },
+    SWEEPING_STRIKES = { spellId = 260708, maxStacks = 12, talent = 1261049, talentedMax = 18 },
 }
 
 local AURA_SECONDARY_BY_SPEC = {
     [SPEC.ENHANCEMENT]   = "MAELSTROM_WEAPON",
     [SPEC.FROST_M]       = "ICICLES",
     [SPEC.SURVIVAL]      = "TIP_OF_THE_SPEAR",
+    [SPEC.WARRIOR_FURY]  = "WHIRLWIND",
+    [SPEC.ARMS]          = "SWEEPING_STRIKES",
 }
 
 local POWER_TYPE_NAMES = {
@@ -221,18 +228,20 @@ local function getDruidPrimary(specId)
     return PRIMARY_BY_SPEC[specId] or POWER_MANA
 end
 
-function Resolver:GetPlayerInfo()
-    local _, playerClass = UnitClass("player")
-    local specIndex = GetSpecialization and GetSpecialization() or 0
-    return playerClass or "UNKNOWN", specIndex or 0
-end
+local playerClass, cachedIndex, cachedSpec, cachedName
 
-local function resolveSpecId(specIndex)
-    if not specIndex or specIndex <= 0 then return 0 end
-    if not GetSpecializationInfo then return 0 end
-    local ok, specId = pcall(GetSpecializationInfo, specIndex)
-    if ok and specId then return specId end
-    return 0
+function Resolver:GetPlayerInfo()
+    if not playerClass then playerClass = select(2, UnitClass("player")) end
+    local specIndex = (GetSpecialization and GetSpecialization()) or 0
+    if specIndex ~= cachedIndex or not cachedSpec then
+        cachedIndex = specIndex
+        if specIndex > 0 and GetSpecializationInfo then
+            cachedSpec, cachedName = GetSpecializationInfo(specIndex)
+        else
+            cachedSpec, cachedName = nil, nil
+        end
+    end
+    return playerClass or "UNKNOWN", specIndex, cachedSpec or 0, cachedName
 end
 
 function Resolver:GetPrimaryResource(overrideName)
@@ -241,8 +250,7 @@ function Resolver:GetPrimaryResource(overrideName)
         return overridePT
     end
 
-    local playerClass, specIndex = self:GetPlayerInfo()
-    local specId = resolveSpecId(specIndex)
+    local playerClass, _, specId = self:GetPlayerInfo()
 
     if playerClass == "DRUID" then
         return getDruidPrimary(specId)
@@ -256,7 +264,7 @@ function Resolver:GetPrimaryResource(overrideName)
 end
 
 function Resolver:GetSecondaryResource()
-    local playerClass, specIndex = self:GetPlayerInfo()
+    local playerClass, _, specId = self:GetPlayerInfo()
 
     if playerClass == "DRUID" then
         local formId = GetShapeshiftFormID and GetShapeshiftFormID() or nil
@@ -266,14 +274,12 @@ function Resolver:GetSecondaryResource()
         if formId == 5 then
             return nil
         end
-        local specId = resolveSpecId(specIndex)
         if specId == SPEC.BALANCE then
             return SECONDARY_BY_SPEC[SPEC.BALANCE]
         end
         return nil
     end
 
-    local specId = resolveSpecId(specIndex)
     if specId > 0 and SECONDARY_BY_SPEC[specId] then
         return SECONDARY_BY_SPEC[specId]
     end
@@ -283,9 +289,9 @@ end
 function Resolver:GetSecondaryMax()
     local secondary = self:GetSecondaryResource()
     if secondary == nil then
-        local auraInfo = self:GetAuraResource()
+        local auraInfo, _, maximum = self:GetAuraResource()
         if auraInfo then
-            return auraInfo.maxStacks or 0
+            return maximum or 0
         end
         return 0
     end
@@ -297,6 +303,7 @@ function Resolver:GetSecondaryMax()
     if secondary == POWER_SOUL_FRAGMENTS then
         return self:GetSoulFragmentsMax()
     end
+    if secondary == POWER_VENGEANCE_FRAGMENTS then return 6 end
     if not UnitPowerMax then
         return 0
     end
@@ -307,24 +314,30 @@ function Resolver:GetSecondaryMax()
     return 0
 end
 
+local function spellKnown(spellID)
+    local getKnown = C_SpellBook and C_SpellBook.IsSpellKnown
+    return getKnown and getKnown(spellID) == true
+end
+
 function Resolver:GetAuraResource()
-    local _, specIndex = self:GetPlayerInfo()
-    local specId = resolveSpecId(specIndex)
+    local _, _, specId = self:GetPlayerInfo()
     local key = specId > 0 and AURA_SECONDARY_BY_SPEC[specId] or nil
-    if key and AURA_RESOURCES[key] then
-        return AURA_RESOURCES[key], key
+    local resource = key and AURA_RESOURCES[key]
+    if resource then
+        local maximum = resource.talent and spellKnown(resource.talent) and resource.talentedMax or resource.maxStacks
+        return resource, key, maximum
     end
     return nil, nil
 end
 
-function Resolver:GetSoulFragmentsMax()
-    if self:IsInVoidMeta() then
+function Resolver:GetSoulFragmentsMax(inMeta)
+    if inMeta == nil then inMeta = self:IsInVoidMeta() end
+    if inMeta then
         return 40
     end
-    if self:HasSoulGlutton() then
-        return 35
-    end
-    return 50
+    local max = self:HasSoulGlutton() and 35 or 50
+    if spellKnown(SURRENDER_TO_VOID) then max = max + 50 end
+    return max
 end
 
 function Resolver:IsInVoidMeta()
@@ -357,6 +370,7 @@ function Resolver:GetPowerTypeName(powerType)
     if powerType == nil then return "none" end
     if powerType == POWER_STAGGER then return "Stagger" end
     if powerType == POWER_SOUL_FRAGMENTS then return "SoulFragments" end
+    if powerType == POWER_VENGEANCE_FRAGMENTS then return "VengeanceFragments" end
     return POWER_TYPE_NAMES[powerType] or "Unknown"
 end
 
