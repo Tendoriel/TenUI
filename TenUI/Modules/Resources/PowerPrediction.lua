@@ -8,9 +8,19 @@ local hosts = {}
 local visuals = setmetatable({}, { __mode = "k" })
 local driver, cast
 
--- These generators grant a fixed amount on cast completion in 12.1.5.
+-- Base single-target gains, in displayed resource units (one Soul Shard = ten fragments).
 -- Other gains use signed power metadata when the client provides it.
 local fixedGains = {
+    [102] = { [190984] = { Power.LunarPower, 6 }, [194153] = { Power.LunarPower, 8 },
+        [202347] = { Power.LunarPower, 12 } },
+    [262] = { [188196] = { Power.Maelstrom, 6 }, [51505] = { Power.Maelstrom, 8 },
+        [188443] = { Power.Maelstrom, 2 }, [462818] = { Power.Maelstrom, 10 } },
+    [266] = { [686] = { Power.SoulShards, 1 }, [264178] = { Power.SoulShards, 2 },
+        [434506] = { Power.SoulShards, 3 } },
+    [267] = { [29722] = { Power.SoulShards, 0.2 }, [6353] = { Power.SoulShards, 1 },
+        [434506] = { Power.SoulShards, 2 } },
+    [254] = { [56641] = { Power.Focus, 20 } },
+    [1480] = { [473662] = { Power.Fury, 8 } },
     [258] = { [8092] = { Power.Insanity, 6 }, [34914] = { Power.Insanity, 4 } },
     [62] = { [30451] = { Power.ArcaneCharges, 1 } },
 }
@@ -42,96 +52,124 @@ local function readChanges(spellID)
         local spells = fixedGains[spec]
         local gain = spells and spells[spellID]
         if gain and not secret(changes[gain[1]]) and (changes[gain[1]] or 0) == 0 then
-            changes[gain[1]] = -gain[2]
+            local amount = gain[2]
+            if spellID == 56641 and C_SpellBook.IsSpellKnown(450379) then amount = amount + 5 end
+            if spellID == 473662 and C_SpellBook.IsSpellKnown(1253415) then amount = amount + 2 end
+            if spellID == 29722 and C_SpellBook.IsSpellKnown(387173) then amount = amount + 0.2 end
+            if (spellID == 190984 or spellID == 194153) and C_SpellBook.IsSpellKnown(406890) then amount = amount + 2 end
+            if spellID == 194153 and C_SpellBook.IsSpellKnown(429520) then amount = amount + 2 end
+            changes[gain[1]] = -amount
         end
     end
     return changes
 end
 
+local WHITE = "Interface\\Buttons\\WHITE8X8"
+
 local function hide(frame)
     local display = visuals[frame]
-    if display then display.segment:Hide() end
+    if not display then return end
+    for _, layer in ipairs(display.layers) do layer.clip:Hide() end
+    if display.ruler then display.ruler:Hide() end
 end
 
-local function makeVisual(frame, segmented)
-    local clip = CreateFrame("Frame", nil, frame)
-    if segmented then
-        -- A thin band leaves the real pip fills, recharge swipes and count visible.
-        clip:SetPoint("BOTTOMLEFT", frame)
-        clip:SetPoint("BOTTOMRIGHT", frame)
-        clip:SetHeight(5)
+local function paintLayer(display, index, frame, ruler, offset, gain, amount, maximum)
+    local layer = display.layers[index]
+    if not layer then
+        local clip = CreateFrame("Frame", nil, frame)
+        clip:SetClipsChildren(true)
+        clip:SetFrameLevel(frame:GetFrameLevel() + 1)
+        local segment = CreateFrame("StatusBar", nil, clip)
+        segment:SetFrameLevel(clip:GetFrameLevel())
+        layer = { clip = clip, segment = segment }
+        display.layers[index] = layer
+    end
+
+    local clip, segment = layer.clip, layer.segment
+    local texture = frame:GetStatusBarTexture()
+    local fill = ruler:GetStatusBarTexture()
+    if not texture or not fill then clip:Hide() return end
+    local border = frame.borderParts and frame.borderParts[1] or frame.border and frame.border.top
+    local inset = border and border:IsShown() and ns.Pixel.Size(frame, 1) or 0
+    clip:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -inset)
+    clip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
+
+    local path = texture:GetTexture() or WHITE
+    if layer.path ~= path then
+        segment:SetStatusBarTexture(path)
+        layer.path = path
+    end
+    segment:ClearAllPoints()
+    local reverse = ruler:GetReverseFill()
+    if ruler:GetOrientation() == "VERTICAL" then
+        local edge = reverse and "BOTTOM" or "TOP"
+        local anchor = gain and (reverse and "TOP" or "BOTTOM") or edge
+        segment:SetPoint(anchor .. "LEFT", fill, edge .. "LEFT")
+        segment:SetPoint(anchor .. "RIGHT", fill, edge .. "RIGHT")
+        segment:SetHeight(ruler:GetHeight())
+        segment:SetOrientation("VERTICAL")
     else
-        clip:SetAllPoints(frame)
+        local edge = reverse and "LEFT" or "RIGHT"
+        local anchor = gain and (reverse and "RIGHT" or "LEFT") or edge
+        segment:SetPoint("TOP" .. anchor, fill, "TOP" .. edge, offset, 0)
+        segment:SetPoint("BOTTOM" .. anchor, fill, "BOTTOM" .. edge, offset, 0)
+        segment:SetWidth(ruler:GetWidth())
+        segment:SetOrientation("HORIZONTAL")
     end
-    clip:SetClipsChildren(true)
-    clip:SetFrameLevel(frame:GetFrameLevel() + (segmented and 3 or 1))
-    local segment = CreateFrame("StatusBar", nil, clip)
-    segment:SetFrameLevel(clip:GetFrameLevel())
-    local display = { segment = segment, clip = clip }
-    if segmented then
-        local ruler = CreateFrame("StatusBar", nil, clip)
-        ruler:SetAllPoints(clip)
-        ruler:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-        ruler:SetStatusBarColor(1, 1, 1, 0.001)
-        display.ruler = ruler
+    segment:SetReverseFill(gain and reverse or not gain and not reverse)
+    segment:SetRotatesTexture(frame:GetRotatesTexture())
+    if gain then
+        segment:SetStatusBarColor(0.36, 0.90, 0.48)
+    else
+        segment:SetStatusBarColor(0.96, 0.32, 0.24)
     end
-    visuals[frame] = display
-    return display
+    segment:SetMinMaxValues(0, maximum)
+    segment:SetValue(amount)
+    clip:Show()
 end
 
 local function draw(host)
     local frame, power = host.frame, host.power
     local value = cast and cast.changes[power]
-    local gain = not secret(value) and type(value) == "number" and value < 0
     if not secret(value) and (type(value) ~= "number" or value == 0) then hide(frame) return end
     local maximum = UnitPowerMax("player", power)
     if not secret(maximum) and maximum <= 0 then hide(frame) return end
-
-    local display = visuals[frame] or makeVisual(frame, host.segmented)
-    local bar, segment = display.ruler or frame, display.segment
-    if display.ruler then
-        bar:SetMinMaxValues(0, maximum)
-        bar:SetValue(UnitPower("player", power))
-    end
-    local fill = bar:GetStatusBarTexture()
-    if not fill then hide(frame) return end
-    local texture = fill:GetTexture() or "Interface\\Buttons\\WHITE8X8"
-    if texture ~= display.texture then
-        display.texture = texture
-        segment:SetStatusBarTexture(texture)
+    local gain = not secret(value) and value < 0
+    local amount = gain and -value or value
+    local display = visuals[frame]
+    if not display then
+        display = { layers = {} }
+        visuals[frame] = display
     end
 
-    local reverse = bar:GetReverseFill()
-    segment:ClearAllPoints()
-    if bar:GetOrientation() == "VERTICAL" then
-        local edge = reverse and "BOTTOM" or "TOP"
-        local anchor = gain and (reverse and "TOP" or "BOTTOM") or edge
-        segment:SetPoint(anchor .. "LEFT", fill, edge .. "LEFT")
-        segment:SetPoint(anchor .. "RIGHT", fill, edge .. "RIGHT")
-        segment:SetHeight(display.clip:GetHeight())
-        segment:SetOrientation("VERTICAL")
+    local pips = host.pips
+    if pips then
+        if #pips == 0 then hide(frame) return end
+        -- The ruler measures only the fillable widths. Shift its edge by the
+        -- preceding gaps for each pip, then clip to that pip's own borders.
+        local length = pips[1]:GetWidth() * #pips
+        local ruler = display.ruler
+        if not ruler then
+            ruler = CreateFrame("StatusBar", nil, frame)
+            ruler:SetStatusBarTexture(WHITE)
+            ruler:SetAlpha(0)
+            display.ruler = ruler
+        end
+        ruler:SetPoint("TOPLEFT", pips[1], "TOPLEFT")
+        ruler:SetPoint("BOTTOMLEFT", pips[1], "BOTTOMLEFT")
+        ruler:SetWidth(length)
+        local rulerMaximum = maximum
+        if host.rawRuler then rulerMaximum = UnitPowerMax("player", power, true) end
+        ruler:SetMinMaxValues(0, rulerMaximum)
+        ruler:SetValue(UnitPower("player", power, host.rawRuler))
+        ruler:Show()
+        for i, pip in ipairs(pips) do
+            paintLayer(display, i, pip, ruler, (i - 1) * host.spacing, gain, amount, maximum)
+        end
+        for i = #pips + 1, #display.layers do display.layers[i].clip:Hide() end
     else
-        local edge = reverse and "LEFT" or "RIGHT"
-        local anchor = gain and (reverse and "RIGHT" or "LEFT") or edge
-        segment:SetPoint("TOP" .. anchor, fill, "TOP" .. edge)
-        segment:SetPoint("BOTTOM" .. anchor, fill, "BOTTOM" .. edge)
-        segment:SetWidth(display.clip:GetWidth())
-        segment:SetOrientation("HORIZONTAL")
+        paintLayer(display, 1, frame, frame, 0, gain, amount, maximum)
     end
-    segment:SetReverseFill(gain and reverse or not gain and not reverse)
-    segment:SetRotatesTexture(bar:GetRotatesTexture())
-    if gain then
-        segment:SetStatusBarColor(0.43, 0.92, 0.63)
-    elseif power ~= Power.Mana then
-        segment:SetStatusBarColor(1, 0.68, 0.24)
-    elseif POWERBAR_PREDICTION_COLOR_MANA then
-        segment:SetStatusBarColor(POWERBAR_PREDICTION_COLOR_MANA:GetRGB())
-    else
-        segment:SetStatusBarColor(0.56, 0.8, 1)
-    end
-    segment:SetMinMaxValues(0, maximum)
-    segment:SetValue(gain and -value or value)
-    segment:Show()
 end
 
 local function refresh()
@@ -183,18 +221,22 @@ end
 
 function Prediction.UpdatePips()
     local host = hosts.secondary
-    if not (cast and host and host.segmented) then return end
+    if not (cast and host and host.pips) then return end
     local display = visuals[host.frame]
-    if display and display.segment:IsShown() then
-        display.ruler:SetValue(UnitPower("player", host.power))
+    if display and display.ruler and display.ruler:IsShown() then
+        display.ruler:SetValue(UnitPower("player", host.power, host.rawRuler))
     end
 end
 
-function Prediction.Attach(key, frame, power, segmented)
+function Prediction.Attach(key, frame, power, pips, spacing)
     local old = hosts[key]
     if old and old.frame ~= frame then hide(old.frame) end
     local wasListening = next(hosts) ~= nil
-    local host = frame and power and { frame = frame, power = power, segmented = segmented } or nil
+    local host = frame and power and { frame = frame, power = power, pips = pips, spacing = spacing } or nil
+    if host and pips and power == Power.SoulShards then
+        local _, _, spec = ns.Resources_Resolver:GetPlayerInfo()
+        host.rawRuler = spec == 267
+    end
     hosts[key] = host
     if not next(hosts) then
         if driver then driver:UnregisterAllEvents() end

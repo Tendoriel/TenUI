@@ -88,6 +88,7 @@ local automaticPhaseCount = #PREVIEW_PHASES - 1
 local PREVIEW_SCENARIOS = {
     { key = 0, label = "Automatic" },
     { key = 3, label = "Channel" },
+    { key = 5, label = "Empower" },
     { key = 4, label = "Interrupted" },
     { key = 8, label = "Cancelled" },
 }
@@ -259,6 +260,10 @@ local function buildEmbeddedPreview(block)
         timerProfile = cp
         empowerBase  = phaseColor(cp, "empower")
 
+        local queue = cp.showQueueWindow and not phase.stages and (phase.mode == "fill" or phase.mode == "drain")
+        ns.CastBar:LayoutQueueWindow(bar, queue, phase.dur, phase.mode == "drain")
+        ns.CastBar:LayoutEmpowerColors(bar, cp.colorEmpowerStages and phase.stages and PREVIEW_STAGE_FRACS, empowerBase)
+
         if phase.mode == "instant" then
             bar:Hide()
             icon:Hide()
@@ -298,9 +303,11 @@ local function buildEmbeddedPreview(block)
         if phase.mode == "hold" then
             bar:SetValue(phase.fill or 1)
             bar:SetRightText("")
-        elseif previewScenario ~= 0 and phase.mode == "drain" then
-            bar:SetValue(0.5)
-            bar:SetRightText(ns.CastBar:FormatTimerText(cp, phase.dur / 2, phase.dur))
+        elseif previewScenario ~= 0 then
+            local fill = phase.stages and 0.85 or 0.5
+            bar:SetValue(fill)
+            local remaining = phase.dur * (phase.mode == "drain" and fill or 1 - fill)
+            bar:SetRightText(ns.CastBar:FormatTimerText(cp, remaining, phase.dur))
         else
             bar:SetRightText(ns.CastBar:FormatTimerText(cp, phase.dur - phaseElapsed, phase.dur))
             lastTenths = nil
@@ -352,7 +359,7 @@ local function buildEmbeddedPreview(block)
             end
         end
 
-        if phase.stages then
+        if phase.stages and not timerProfile.colorEmpowerStages then
             local stage = 0
             for i = 1, #PREVIEW_STAGE_FRACS do
                 if frac >= PREVIEW_STAGE_FRACS[i] then stage = i else break end
@@ -629,6 +636,19 @@ local function buildCastBarPage(sc)
             applyOptions()
         end
     )
+
+    for _, option in ipairs({
+        { "showQueueWindow", "Show spell queue window on casts and channels" },
+        { "colorEmpowerStages", "Shade each Empower stage separately" },
+    }) do
+        local key = option[1]
+        children[#children + 1] = C.CreateCheckBox(sc, option[2],
+            function() return getCBProfile()[key] == true end,
+            function(value)
+                getCBProfile()[key] = value == true
+                applyOptions()
+            end)
+    end
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show channel tick marks",
         function() return getCBProfile().showChannelTicks == true end,

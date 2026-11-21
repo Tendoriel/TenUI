@@ -846,6 +846,10 @@ local function buildScannerPage(sc)
         )
     end
 
+    children[#children + 1] = C.CreateCheckBox(sc, "Flash cooldown icon on action button press",
+        function() return ns:GetProfile().modules.Bars.flashOnPress == true end,
+        function(value) ns:GetProfile().modules.Bars.flashOnPress = value == true end)
+
     children[#children + 1] = C.CreateCheckBox(sc, "Show GCD Swipe",
         function()
             if not ns.savedVarsReady then return true end

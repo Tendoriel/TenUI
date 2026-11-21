@@ -51,6 +51,7 @@ tools/
 /scripts/*
 !/scripts/build-release.py
 !/scripts/check-warlock.lua
+!/scripts/check-power-prediction.lua
 site/
 RULES.md
 *.jsx

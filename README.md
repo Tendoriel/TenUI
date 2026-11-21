@@ -2,7 +2,7 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
-TenUI 0.5.8 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
+TenUI 0.5.9 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
 
 [![Website](https://img.shields.io/badge/Website-tenuiaddon.com-08979c?style=flat)](https://tenuiaddon.com/) [![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.1.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
@@ -38,10 +38,11 @@ Cooldown Manager settings in an earlier release:
 ### Cast Bar
 - Replacement player cast bar with support for casts, channels and empowered spells.
 - Configurable size, textures, fonts and position.
-- Optional tick marks for supported channels and elapsed / total cast time. Preview casts, channels and cancelled or interrupted casts in settings.
+- Optional tick marks for supported channels and elapsed / total cast time. The bar can show the spell queue window and color empowered stages. Preview casts, channels, empowers, interruptions and cancellations in settings.
 
 ### Resources
 - Primary and secondary resource bars for every class and spec, including discrete pips for combo points, holy power, chi and similar resources.
+- Optional cast prediction highlights the expected gain in green or spend in red directly inside the bar or affected segments. Primary and secondary bars have separate controls. When the secondary bar displays Mana, it also honors the primary Mana prediction setting.
 - Combat-aware visibility options.
 
 ### Glow Effects

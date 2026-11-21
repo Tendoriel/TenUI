@@ -1,6 +1,6 @@
 local addonName, ns = ...
 
-ns.SCHEMA_VERSION = 8
+ns.SCHEMA_VERSION = 9
 
 ns.dbDefaults = {
     schema = ns.SCHEMA_VERSION,
@@ -187,6 +187,21 @@ local function migrate(db)
         migrateSpecProfilesFromLegacy(db)
         db.defaultProfile = db.profiles[db.activeProfile] and db.activeProfile or "Default"
     end
+    if (db.schema or 0) < 9 then
+        for _, profile in pairs(db.profiles or {}) do
+            local modules = type(profile) == "table" and profile.modules
+            if type(modules) == "table" then
+                if type(modules.Bars) == "table" and modules.Bars.flashOnPress == nil then
+                    modules.Bars.flashOnPress = false
+                end
+                local cast = modules.CastBar
+                if type(cast) == "table" then
+                    if cast.showQueueWindow == nil then cast.showQueueWindow = false end
+                    if cast.colorEmpowerStages == nil then cast.colorEmpowerStages = false end
+                end
+            end
+        end
+    end
     db.schema = ns.SCHEMA_VERSION
 end
 
@@ -295,6 +310,8 @@ local SUBKEY_DEFAULTS = {
         },
     },
     CastBar = {
+        showQueueWindow = false,
+        colorEmpowerStages = false,
         text = {
             spellName = { enabled = true, font = "default", size = 12, anchor = "LEFT",  x =  4, y = 0 },
             timer     = { enabled = true, font = "default", size = 12, anchor = "RIGHT", x = -4, y = 0 },

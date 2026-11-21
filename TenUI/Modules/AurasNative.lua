@@ -1,5 +1,20 @@
 local _, ns = ...
 
+-- These identifiers denote the hostile aura itself. Linked aura IDs are
+-- classified individually, since a single CDM entry can also own a player buff.
+local targetDebuffIDs = {
+    [589] = true,       -- Shadow Word: Pain
+    [34914] = true,     -- Vampiric Touch
+    [980] = true,       -- Agony
+    [146739] = true,    -- Corruption
+    [157736] = true,    -- Immolate
+    [445474] = true,    -- Wither
+}
+
+local function includesPlayer(entry, id)
+    return entry.selfAura or not targetDebuffIDs[id]
+end
+
 function ns.InstallNativeAuraDisplay(Auras, runtime)
     local _auraCatalog = runtime._auraCatalog
     local _liveRenderCat = runtime._liveRenderCat
@@ -48,7 +63,7 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
         for _, entry in ipairs(_auraCatalog[kind]) do
             if entryDisplayEnabled(entry) and not Auras._summonSpellForEntry(entry) then
                 for _, id in ipairs(entry.matchSpellIDs) do
-                    units.player[id] = true
+                    if includesPlayer(entry, id) then units.player[id] = true end
                     if not entry.selfAura then units.target[id] = true end
                 end
             end
@@ -228,7 +243,7 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
                 end
                 local rank = (custom and custom[entry.stableEntryID]) or offset + (ranks[entry.cooldownID] or lastRank + index)
                 for _, id in ipairs(entry.matchSpellIDs) do
-                    if units.player[id] and (not order.player[id] or rank < order.player[id]) then
+                    if includesPlayer(entry, id) and units.player[id] and (not order.player[id] or rank < order.player[id]) then
                         order.player[id], overrides.player[id] = rank, style
                     end
                     if not entry.selfAura and units.target[id] and (not order.target[id] or rank < order.target[id]) then
@@ -357,7 +372,7 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
                         player = {}, target = {},
                     }
                     for _, id in ipairs(entry.matchSpellIDs) do
-                        if barIDs.player[id] then row.player[id] = true end
+                        if includesPlayer(entry, id) and barIDs.player[id] then row.player[id] = true end
                         if not entry.selfAura and barIDs.target[id] then row.target[id] = true end
                     end
                     if next(row.player) or next(row.target) or self._summonSpellForEntry(entry) then

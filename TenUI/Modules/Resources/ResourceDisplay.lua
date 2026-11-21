@@ -518,8 +518,9 @@ local function primary_Layout()
     end
     if thLines_Reposition then thLines_Reposition() end
     local predict = not _previewActive and opts and opts.showManaCost
-        and Primary.desc and Primary.desc.powerName == "Mana" and resolvePrimaryEnabled(profile) ~= false
-    ns.PowerPrediction.Attach("primary", predict and bar or nil, POWER_TYPE_ENUM.Mana)
+        and Primary.desc and resolvePrimaryEnabled(profile) ~= false
+    local power = Primary.desc and POWER_TYPE_ENUM[Primary.desc.powerName]
+    ns.PowerPrediction.Attach("primary", predict and bar or nil, power)
 end
 
 ns:RegisterMessage("ANCHOR_MOVED", function(_, name)
@@ -1544,7 +1545,7 @@ local SECONDARY_COUNT_MIN = 1
 local SECONDARY_COUNT_MAX = 10
 local NativeBar = ns.NativeResourceBar
 
-local function secondary_AttachPrediction(frame, segmented)
+local function secondary_AttachPrediction(frame, pips, spacing)
     local power = Secondary.desc and POWER_TYPE_ENUM[Secondary.desc.powerName]
     local mana = power == POWER_TYPE_ENUM.Mana
     local primary, secondary = Primary.selfProfile or {}, Secondary.selfProfile or {}
@@ -1552,7 +1553,7 @@ local function secondary_AttachPrediction(frame, segmented)
     if _previewActive or not enabled or resolveSecondaryEnabled(Secondary.profileRef) == false then
         frame = nil
     end
-    ns.PowerPrediction.Attach("secondary", frame, power, segmented)
+    ns.PowerPrediction.Attach("secondary", frame, power, pips, spacing)
 end
 
 local buildShardPip
@@ -1987,7 +1988,7 @@ local function secondary_LayoutPips()
         end
     end
     local predictsPower = Secondary._kind == "shards" and not Secondary._valueSource
-    secondary_AttachPrediction(predictsPower and container or nil, true)
+    secondary_AttachPrediction(predictsPower and container or nil, Secondary.pips, spacing)
 end
 
 local SPEC_WARLOCK_DESTRUCTION = 267
@@ -2272,7 +2273,7 @@ local function secondary_LayoutBar()
     bar.frame:ClearAllPoints()
     bar.frame:SetAllPoints(container)
     bar:Show()
-    secondary_AttachPrediction(bar.frame, false)
+    secondary_AttachPrediction(bar.frame)
     if thLines_Reposition then thLines_Reposition() end
 end
 

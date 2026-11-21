@@ -213,6 +213,7 @@ function CastBar:ApplyCastVisual(castType, spellName, iconTexture, notInterrupti
     if not profile then return end
     if profile.enabled == false then return end
 
+    self._visualCastType = castType
     local colorKey = castType
     if not isSecret(notInterruptible) and notInterruptible
        and (castType == "cast" or castType == "channel" or castType == "empower") then
@@ -238,9 +239,72 @@ function CastBar:ApplyCastVisual(castType, spellName, iconTexture, notInterrupti
     self.bar:Show()
 end
 
+-- Both the settings preview and the HUD use the same duration and fill geometry.
+function CastBar:LayoutQueueWindow(bar, enabled, seconds, drain)
+    local frame = bar.frame
+    local queue = enabled and C_Spell.GetSpellQueueWindow and C_Spell.GetSpellQueueWindow()
+    if type(queue) ~= "number" or queue <= 0 or isSecret(seconds) or type(seconds) ~= "number" or seconds <= 0 then
+        if bar.queueZone then bar.queueZone:Hide() end
+        return
+    end
+    local zone = bar.queueZone
+    if not zone then
+        zone = frame:CreateTexture(nil, "OVERLAY", nil, 1)
+        zone:SetColorTexture(1, 1, 1, 0.32)
+        bar.queueZone = zone
+    end
+    local edge = drain and "LEFT" or "RIGHT"
+    zone:ClearAllPoints()
+    zone:SetPoint("TOP" .. edge, frame, "TOP" .. edge)
+    zone:SetPoint("BOTTOM" .. edge, frame, "BOTTOM" .. edge)
+    zone:SetWidth(math.max(1, frame:GetWidth() * math.min(1, queue / (1000 * seconds))))
+    zone:Show()
+end
+
+function CastBar:LayoutEmpowerColors(bar, fractions, color)
+    local clip = bar.stageClip
+    if not fractions or not color then
+        if clip then clip:Hide() end
+        return
+    end
+    local frame = bar.frame
+    if not clip then
+        clip = CreateFrame("Frame", nil, frame)
+        clip:SetClipsChildren(true)
+        local holder = CreateFrame("Frame", nil, clip)
+        holder:SetFrameLevel(clip:GetFrameLevel())
+        holder:SetAllPoints(frame)
+        clip.holder, clip.bands = holder, {}
+        bar.stageClip = clip
+    end
+    clip:SetAllPoints(frame:GetStatusBarTexture())
+    local width, left = frame:GetWidth(), 0
+    for i = 1, #fractions + 1 do
+        local right = fractions[i] or 1
+        local band = clip.bands[i]
+        if not band then
+            band = clip.holder:CreateTexture(nil, "ARTWORK")
+            clip.bands[i] = band
+        end
+        local tint = (i - 1) / math.max(1, #fractions) * 0.75
+        band:SetColorTexture(color[1] + (1 - color[1]) * tint,
+            color[2] + (1 - color[2]) * tint, color[3] + (1 - color[3]) * tint, 0.8)
+        band:ClearAllPoints()
+        band:SetPoint("TOPLEFT", frame, "TOPLEFT", left * width, -1)
+        band:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", right * width, 1)
+        band:SetShown(right > left)
+        left = right
+    end
+    for i = #fractions + 2, #clip.bands do clip.bands[i]:Hide() end
+    clip:Show()
+end
+
 function CastBar:ArmTimer(durationObject, drain)
     if not self.bar or not durationObject then return end
     local direction = drain and DIR_REMAINING or DIR_ELAPSED
+    local profile = getProfile()
+    local queue = profile and profile.showQueueWindow and self._visualCastType ~= "empower"
+    self:LayoutQueueWindow(self.bar, queue, queue and durationObject:GetTotalDuration(), drain)
     local ok = self.bar:SetTimerDuration(durationObject, INTERP_IMMEDIATE, direction)
     if not ok then
         dlog("ArmTimer: SetTimerDuration failed (durationObject malformed?)")
@@ -308,6 +372,7 @@ function CastBar:StartLiveTimer(durationObject)
 end
 
 function CastBar:StopLiveTimer()
+    if self.bar and self.bar.queueZone then self.bar.queueZone:Hide() end
     self._activeDuration = nil
     self._lastDisplayedTenths = nil
     if self._tickFrame then
@@ -424,6 +489,7 @@ local function computeStageData(numStages)
 end
 
 function CastBar:ClearStagePips()
+    if self.bar and self.bar.stageClip then self.bar.stageClip:Hide() end
     local pips = self._stagePips
     if pips then
         for i = 1, #pips do pips[i]:Hide() end
@@ -442,6 +508,8 @@ function CastBar:LayoutStagePips()
     if not fracs and profile and profile.showChannelTicks then fracs = self._channelTicks end
     local barFrame = self.bar and self.bar.frame
     if not barFrame then return end
+    self:LayoutEmpowerColors(self.bar, profile and profile.colorEmpowerStages and not self._stageNotInterruptible and self._stageFracs,
+        profile and profile.colors and profile.colors.empower)
     local w = barFrame:GetWidth()
     if not w or w <= 0 then return end
     self._stagePips = self._stagePips or {}
@@ -469,8 +537,9 @@ function CastBar:LayoutStagePips()
     for i = used + 1, #pips do pips[i]:Hide() end
 end
 
-function CastBar:SetupStagePips(numStages, startMs)
+function CastBar:SetupStagePips(numStages, startMs, notInterruptible)
     self:ClearStagePips()
+    self._stageNotInterruptible = not isSecret(notInterruptible) and notInterruptible == true
     numStages = plainNumber(numStages)
     if not numStages or numStages < 1 then
         dlog("SetupStagePips: numStages unusable (nil/secret) -- no markers")
@@ -505,7 +574,7 @@ function CastBar:UpdateEmpowerStageTint()
     local bounds = self._stageBoundsSec
     if not bounds or not self._stageStartSec then return end
     if self._state ~= "empowering" and self._state ~= "test" then return end
-    if self._stageNotInterruptible then return end
+    if self._stageNotInterruptible or (self.profileRef and self.profileRef.colorEmpowerStages) then return end
     local elapsed = GetTime() - self._stageStartSec
     local stage = 0
     for i = 1, #bounds do
@@ -867,8 +936,7 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
         self:StartLiveTimer(duration)
     end
 
-    self._stageNotInterruptible = not isSecret(notInterruptible) and notInterruptible == true
-    self:SetupStagePips(numStages, startMs)
+    self:SetupStagePips(numStages, startMs, notInterruptible)
 
     local totalSec = computeRemainingSec(startMs, endMs)
     self:SetStartTimeText(totalSec)
@@ -887,7 +955,7 @@ function CastBar:OnEmpowerUpdate(castGUID, castBarID)
         self:ArmTimer(duration, false)
         self:StartLiveTimer(duration)
     end
-    self:SetupStagePips(numStages, startMs)
+    self:SetupStagePips(numStages, startMs, _ni)
 end
 
 function CastBar:OnSpellcastStop(castGUID, castBarID, interrupted)
@@ -1128,6 +1196,7 @@ function CastBar:OnInterruptibleChanged(notInterruptible)
     if self._state == "empowering" then
         self._stageNotInterruptible = notInterruptible and true or false
         self._stageCurrent = nil
+        self:LayoutStagePips()
     end
 end
 
@@ -1618,6 +1687,11 @@ function CastBar:ApplyOptions()
     end
 
     self:Relayout()
+    if self._activeDuration then
+        local queue = profile.showQueueWindow and self._visualCastType ~= "empower"
+        self:LayoutQueueWindow(self.bar, queue, queue and self._activeDuration:GetTotalDuration(), self._visualCastType == "channel")
+        self:LayoutStagePips()
+    end
 
     dlog("ApplyOptions applied")
 end

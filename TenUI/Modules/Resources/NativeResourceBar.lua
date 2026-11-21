@@ -32,7 +32,8 @@ function Native.Prepare(bar, auraID, maxApplications, texture, color, fontStyle,
 
     local key = auraID .. "/" .. (maxApplications or "duration")
     local slot = state.slots[key]
-    if InCombatLockdown() or (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()) then
+    local restricted = C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret()
+    if InCombatLockdown() or (slot and slot.container and restricted) then
         return slot and slot.container
     end
 
@@ -43,7 +44,8 @@ function Native.Prepare(bar, auraID, maxApplications, texture, color, fontStyle,
     if fontStyle then appearance = appearance .. "/" .. table.concat(fontStyle, "/") end
     if label then appearance = appearance .. "/" .. label end
     if slot and slot.appearance == appearance then return slot.container end
-    if slot and slot.failedAppearance == appearance then return slot.container end
+    if slot and slot.failedAppearance == appearance and slot.failedRestricted == restricted
+        and GetTime() < slot.retryAfter then return slot.container end
 
     local container
     local ok, err = pcall(function()
@@ -102,6 +104,8 @@ function Native.Prepare(bar, auraID, maxApplications, texture, color, fontStyle,
         if container then container:Hide() end
         slot = slot or {}
         slot.failedAppearance = appearance
+        slot.failedRestricted = restricted
+        slot.retryAfter = GetTime() + 5
         state.slots[key] = slot
         if ns.Debug and ns.Debug.Warn then ns.Debug:Warn("[Resources] native aura bar: %s", tostring(err)) end
         return slot.container

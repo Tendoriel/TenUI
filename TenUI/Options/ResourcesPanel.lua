@@ -655,7 +655,7 @@ local function buildResourcesPage(sc)
 
     children[#children + 1] = C.CreateSubSection(sc, "Primary Resource Bar")
 
-    children[#children + 1] = C.CreateCheckBox(sc, "Show cast mana cost",
+    children[#children + 1] = C.CreateCheckBox(sc, "Show cast prediction (green gain, red spend)",
         function() return getResProfile().primary.showManaCost == true end,
         function(v)
             getResProfile().primary.showManaCost = v and true or nil
@@ -964,7 +964,7 @@ local function buildResourcesPage(sc)
     local resolver = ns.Resources_Resolver
     local class, _, specID
     if resolver then class, _, specID = resolver:GetPlayerInfo() end
-    children[#children + 1] = C.CreateCheckBox(sc, "Show cast resource prediction",
+    children[#children + 1] = C.CreateCheckBox(sc, "Show cast prediction (green gain, red spend)",
         function() return getResProfile().secondary.showPrediction == true end,
         function(v)
             getResProfile().secondary.showPrediction = v and true or nil

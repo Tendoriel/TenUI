@@ -380,6 +380,36 @@ local function petIsFelguard()
     return FELGUARD_NPC_IDS[npcID] == true
 end
 
+-- A brief, labelled fallback for personal maintenance buffs. A snapshot
+-- cannot establish the current state of another player's group buff.
+local personalStates = {}
+local scheduleUpdate
+local function rememberedPersonalState(key, active, icon, preview)
+    if preview then return false, icon, "" end
+    if active ~= nil then
+        local state = personalStates[key] or {}
+        state.active, state.icon = active, icon
+        state.observed = GetTime()
+        personalStates[key] = state
+        return active, icon, ""
+    end
+    local state = personalStates[key]
+    if not state then return nil end
+    local remaining = state.observed + 30 - GetTime()
+    if remaining <= 0 then
+        personalStates[key] = nil
+        return nil
+    end
+    if not state.pending then
+        state.pending = true
+        C_Timer.After(remaining, function()
+            state.pending = false
+            if personalStates[key] == state and ClassReminders._handlers then scheduleUpdate() end
+        end)
+    end
+    return state.active, state.icon, " (last seen)"
+end
+
 local function evaluate(o, preview)
     local out = {}
     local activeEntries = {}
@@ -402,9 +432,14 @@ local function evaluate(o, preview)
             local lightning = not preview and playerAuraPresent(LIGHTNING_SHIELD)
             local water = not preview and playerAuraPresent(WATER_SHIELD)
             local activeShield = earth and EARTH_SHIELD or lightning and LIGHTNING_SHIELD or water and WATER_SHIELD
-            if activeShield then
-                push("shamanShields", spellIcon(activeShield, FALLBACK_SHIELD), "Shield", true)
-            elseif earth == false and lightning == false and water == false then
+            local active
+            if activeShield then active = true
+            elseif earth == false and lightning == false and water == false then active = false end
+            local lastSeen
+            active, activeShield, lastSeen = rememberedPersonalState("shield", active, activeShield, preview)
+            if active then
+                push("shamanShields", spellIcon(activeShield, FALLBACK_SHIELD), "Shield" .. lastSeen, true)
+            elseif active == false then
                 local spec = GetSpecialization and GetSpecialization()
                 local iconSpell
                 if spec == 3 and spellKnown(EARTH_SHIELD) then
@@ -418,7 +453,7 @@ local function evaluate(o, preview)
                 else
                     iconSpell = WATER_SHIELD
                 end
-                push("shamanShields", spellIcon(iconSpell, FALLBACK_SHIELD), "Shield")
+                push("shamanShields", spellIcon(iconSpell, FALLBACK_SHIELD), "Shield" .. lastSeen)
             end
         end
     end
@@ -502,12 +537,14 @@ local function evaluate(o, preview)
             if spellKnown(NONLETHAL_POISONS[i]) then knowsNonLethal = true break end
         end
         if knowsLethal then
-            pushAura("roguePoisons", spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal",
-                not preview and anyPlayerAuraPresent(LETHAL_POISONS))
+            local active, _, suffix = rememberedPersonalState("lethal",
+                not preview and anyPlayerAuraPresent(LETHAL_POISONS), nil, preview)
+            if active ~= nil then push("roguePoisons", spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal" .. suffix, active) end
         end
         if knowsNonLethal then
-            pushAura("roguePoisons", spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal",
-                not preview and anyPlayerAuraPresent(NONLETHAL_POISONS))
+            local active, _, suffix = rememberedPersonalState("nonlethal",
+                not preview and anyPlayerAuraPresent(NONLETHAL_POISONS), nil, preview)
+            if active ~= nil then push("roguePoisons", spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal" .. suffix, active) end
         end
     end
 
@@ -754,7 +791,7 @@ local function update()
     render(evaluate(o))
 end
 
-local function scheduleUpdate()
+scheduleUpdate = function()
     if ClassReminders._updateQueued then return end
     ClassReminders._updateQueued = true
     if C_Timer and C_Timer.After then
@@ -842,6 +879,7 @@ function ClassReminders:CenterHorizontally()
 end
 
 local LIFECYCLE_EVENTS = {
+    "PLAYER_DEAD",
     "PLAYER_ENTERING_WORLD",
     "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED",
@@ -858,6 +896,9 @@ local LIFECYCLE_EVENTS = {
 }
 
 local function onLifecycleEvent(event)
+    if event == "PLAYER_DEAD" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        wipe(personalStates)
+    end
     if event == "PLAYER_ENTERING_WORLD" then
         scheduleRosterRebuild()
     end
@@ -930,6 +971,7 @@ function ClassReminders:OnEnable()
 end
 
 function ClassReminders:OnDisable()
+    wipe(personalStates)
     if self._handlers then
         for i = 1, #self._handlers do
             local h = self._handlers[i]

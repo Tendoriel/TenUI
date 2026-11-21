@@ -101,6 +101,7 @@ local DEFAULTS = {
     iconSpacing          = 2,
     iconAnchor           = "CENTER",
     showCooldownText     = true,
+    flashOnPress         = false,
     desaturateUnlearned  = true,
     iconSize             = 36,
     autoTrinkets         = true,
@@ -1292,7 +1293,7 @@ end
 local function resolveBaseSpellID(sid)
     if C_SpellBook and C_SpellBook.FindBaseSpellByID then
         local okB, b = pcall(C_SpellBook.FindBaseSpellByID, sid)
-        if okB and type(b) == "number" and b ~= 0 then return b end
+        if okB and not isSecret(b) and type(b) == "number" and b ~= 0 then return b end
     end
     return nil
 end
@@ -3172,11 +3173,62 @@ function Bars:_ResyncScope()
     end
 end
 
+-- Follow the active action page so the flash also follows forms and spell replacements.
+local function mirrorButtonPress(button)
+    if not (Bars._enabled and Bars.profileRef.flashOnPress and button) then return end
+    local slot = button.action
+    if isSecret(slot) or type(slot) ~= "number" then return end
+    local ok, spell = pcall(C_ActionBar.GetSpell, slot)
+    if not ok or isSecret(spell) or type(spell) ~= "number" or spell <= 0 then return end
+    local base = resolveBaseSpellID(spell) or spell
+    for _, row in pairs(Bars.rows) do
+        for _, icon in ipairs(row.icons) do
+            local entry = icon._entry
+            if entry and entry.type == "spell" and icon.frame:IsVisible()
+                and (entry.id == spell or entry.id == base or activeSpellID(entry.id) == spell) then
+                local flash = icon.pressFlash
+                if not flash then
+                    flash = icon.frame:CreateTexture(nil, "OVERLAY", nil, 3)
+                    flash:SetAllPoints(icon.frame.icon)
+                    flash:SetColorTexture(1, 1, 1, 0.4)
+                    local group = flash:CreateAnimationGroup()
+                    local fade = group:CreateAnimation("Alpha")
+                    fade:SetFromAlpha(1)
+                    fade:SetToAlpha(0)
+                    fade:SetDuration(0.15)
+                    group:SetScript("OnFinished", function() flash:Hide() end)
+                    flash.animation = group
+                    icon.pressFlash = flash
+                end
+                flash.animation:Stop()
+                flash:Show()
+                flash.animation:Play()
+            end
+        end
+    end
+end
+
+local function installPressHooks()
+    if Bars._pressHooks or not (C_ActionBar and C_ActionBar.GetSpell) then return end
+    Bars._pressHooks = true
+    if ActionButtonDown then
+        hooksecurefunc("ActionButtonDown", function(id)
+            if Bars._enabled and Bars.profileRef.flashOnPress then mirrorButtonPress(GetActionButtonForID(id)) end
+        end)
+    end
+    if MultiActionButtonDown then
+        hooksecurefunc("MultiActionButtonDown", function(bar, id)
+            if Bars._enabled and Bars.profileRef.flashOnPress then mirrorButtonPress(_G[bar .. "Button" .. id]) end
+        end)
+    end
+end
+
 function Bars:OnEnable(_, profile)
     if self._enabled then return end
     self.profileRef = profile
     self._enabled = true
 
+    installPressHooks()
     migrateLegacyRows()
 
     backfillSummonDurations()

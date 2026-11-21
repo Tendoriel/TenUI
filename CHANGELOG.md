@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.9] - 2026-11-21
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Resources
+
+- Cast prediction now shows the expected change inside the resource bar. Green marks a gain and red marks a cost. On segmented bars, the highlight follows the affected portions of each segment and preserves the gaps between them.
+- Primary and secondary bars have separate prediction toggles. A secondary Mana bar also honors the primary Mana prediction setting. TenUI reads cast costs for the displayed power type across classes. It also predicts base gains for selected casts in Balance, Elemental, Demonology, Destruction, Marksmanship, Devourer, Shadow and Arcane. Destruction predictions account for partial Soul Shards.
+- Fixed initialization of the native resource display after a reload outside combat when aura data is restricted. This affects Augmentation’s Ebon Might and Devourer’s Soul Fragments.
+
+### Cooldowns and auras
+
+- Added an optional flash on a matching cooldown icon when its action button is pressed.
+- Consecutive known target debuffs can share a native tracker group. This reduces the number of groups used by Tracked Icons and Tracked Bars while preserving the configured order of buffs and debuffs.
+
+### Cast Bar and reminders
+
+- Added an optional spell queue window to the Cast Bar for casts and channels. Its width follows the client’s spell queue setting and the cast duration.
+- Empowered casts can display a different color for each stage. Select the Empower preview to adjust the display between casts.
+- During temporary aura restrictions, personal shield and Rogue poison reminders can display their last known state for up to 30 seconds, labeled `(last seen)`. Group buff reminders continue to use current data.
+
 ## [0.5.8] - 2026-11-20
 
 For WoW Retail 12.1.5 (Interface 120105).
