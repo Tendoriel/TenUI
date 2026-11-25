@@ -40,7 +40,8 @@ function Native.Prepare(bar, auraID, maxApplications, texture, color, fontStyle,
     -- Widget getters can return secret values even when the aura container can
     -- be built. Use the same plain settings as the resource bar.
     local r, g, b, a = color[1] or 1, color[2] or 1, color[3] or 1, color[4] or 1
-    local appearance = texture .. "/" .. table.concat({ r, g, b, a }, "/")
+    local inset = frame.border and frame.border.top:IsShown() and ns.Pixel.Size(frame, 1) or 0
+    local appearance = inset .. "/" .. texture .. "/" .. table.concat({ r, g, b, a }, "/")
     if fontStyle then appearance = appearance .. "/" .. table.concat(fontStyle, "/") end
     if label then appearance = appearance .. "/" .. label end
     if slot and slot.appearance == appearance then return slot.container end
@@ -53,7 +54,8 @@ function Native.Prepare(bar, auraID, maxApplications, texture, color, fontStyle,
             C_AddOns.LoadAddOn("Blizzard_AuraContainer")
         end
         container = CreateFrame("AuraContainer", nil, frame, "CustomAuraContainerTemplate")
-        container:SetAllPoints(frame)
+        container:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -inset)
+        container:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
         container:SetFrameLevel(frame:GetFrameLevel() + 1)
         container:SetUnit("player")
         container:Hide()

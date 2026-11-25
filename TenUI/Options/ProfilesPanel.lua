@@ -473,6 +473,8 @@ local function buildProfilesPage(sc)
         { key = "cdm", label = "CDM" },
         { key = "auras", label = "Auras" },
         { key = "layout", label = "Layout" },
+        { key = "resources", label = "Resources" },
+        { key = "castbar", label = "Cast Bar" },
     }, function() return exportSection end, function(key) exportSection = key end)
 
     local exportEBFrame, exportEB = makeTextArea(C, sc, 60)

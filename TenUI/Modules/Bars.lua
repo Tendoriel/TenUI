@@ -3179,16 +3179,32 @@ local function mirrorButtonPress(button)
     local slot = button.action
     if isSecret(slot) or type(slot) ~= "number" then return end
     local ok, spell = pcall(C_ActionBar.GetSpell, slot)
-    if not ok or isSecret(spell) or type(spell) ~= "number" or spell <= 0 then return end
-    local base = resolveBaseSpellID(spell) or spell
+    if not ok or isSecret(spell) or type(spell) ~= "number" or spell <= 0 then spell = nil end
+    local item
+    if GetActionInfo then
+        local readable, kind, id, subType = pcall(GetActionInfo, slot)
+        if readable and not isSecret(kind) and not isSecret(id) and not isSecret(subType) then
+            if kind == "item" or (kind == "macro" and subType == "item") then
+                item = tonumber(id)
+            elseif kind == "macro" and subType == "spell" then
+                spell = spell or tonumber(id)
+            end
+        end
+    end
+    if not (spell or item) then return end
+    local base = spell and (resolveBaseSpellID(spell) or spell)
     for _, row in pairs(Bars.rows) do
         for _, icon in ipairs(row.icons) do
             local entry = icon._entry
-            if entry and entry.type == "spell" and icon.frame:IsVisible()
-                and (entry.id == spell or entry.id == base or activeSpellID(entry.id) == spell) then
+            if entry and icon.frame:IsVisible() and
+                ((entry.type == "spell" and spell and (entry.id == spell or entry.id == base or activeSpellID(entry.id) == spell))
+                or (entry.type == "item" and item and entry.id == item)) then
                 local flash = icon.pressFlash
                 if not flash then
-                    flash = icon.frame:CreateTexture(nil, "OVERLAY", nil, 3)
+                    local overlay = CreateFrame("Frame", nil, icon.frame)
+                    overlay:SetFrameLevel(icon.frame.cooldown:GetFrameLevel() + 15)
+                    overlay:SetAllPoints(icon.frame)
+                    flash = overlay:CreateTexture(nil, "OVERLAY")
                     flash:SetAllPoints(icon.frame.icon)
                     flash:SetColorTexture(1, 1, 1, 0.4)
                     local group = flash:CreateAnimationGroup()

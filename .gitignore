@@ -52,6 +52,7 @@ tools/
 !/scripts/build-release.py
 !/scripts/check-warlock.lua
 !/scripts/check-power-prediction.lua
+!/scripts/check-reminder-death.lua
 site/
 RULES.md
 *.jsx

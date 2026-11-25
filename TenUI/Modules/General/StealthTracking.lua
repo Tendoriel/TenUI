@@ -223,7 +223,7 @@ local function update()
     end
 
     if not testing then
-        if o.hideWhileMounted and IsMounted() then
+        if o.hideWhileMounted and (IsMounted() or (ns.DragonRiding and ns.DragonRiding:IsOnSkyridingMount())) then
             f:Hide()
             return
         end
@@ -337,6 +337,7 @@ local LIFECYCLE_EVENTS = {
     "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED",
     "PLAYER_MOUNT_DISPLAY_CHANGED",
+    "PLAYER_CAN_GLIDE_CHANGED",
     "PLAYER_UPDATE_RESTING",
     "PLAYER_SPECIALIZATION_CHANGED",
     "TRAIT_CONFIG_UPDATED",

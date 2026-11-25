@@ -1,0 +1,54 @@
+-- Exercise the registered event handlers and the normal HUD render path.
+local dead, ghost = false, false
+UnitIsDeadOrGhost = function(unit)
+    assert(unit == "player")
+    return dead or ghost
+end
+GetTime = function() return 100 end
+IsInRaid = function() return true end
+IsInGroup = IsInRaid
+GetNumGroupMembers = function() return 1 end
+UnitClass = function() return "Priest", "PRIEST" end
+UnitClassBase = function() return "PRIEST" end
+UnitExists = function(unit) return unit == "player" end
+C_UnitAuras = { GetPlayerAuraBySpellID = function() return nil end }
+wipe = function(t) for k in pairs(t) do t[k] = nil end end
+
+local function noop() end
+local region = setmetatable({ GetStringWidth = function() return 36 end }, { __index = function() return noop end })
+local frame = {
+    _locked = true, slots = {}, ClearAllPoints = noop, SetPoint = noop, SetSize = noop, SetAlpha = noop,
+    Show = function(self) self.visible = true end, Hide = function(self) self.visible = false end,
+}
+for i = 1, 8 do
+    frame.slots[i] = setmetatable({ label = region, icon = region, glow = region, check = region, glowAnim = region }, { __index = region })
+end
+CreateFrame = function() return { SetScript = noop, RegisterUnitEvent = noop } end
+local handlers = {}
+local options = { enabled = true, raidBuffs = true, showInRaid = true }
+local profile = { modules = { General = { classReminders = options } } }
+local ns = { RegisterModule = noop, GetProfile = function() return profile end,
+    RegisterEvent = function(_, event, callback) handlers[event] = callback return callback end }
+assert(loadfile("TenUI/Modules/General/ClassReminders.lua"))("TenUI", ns)
+local reminders = ns.ClassReminders
+reminders.frame = frame
+reminders:OnEnable()
+assert(frame.visible and frame.slots[1].entry.label == "Fortitude")
+dead = true
+handlers.PLAYER_DEAD("PLAYER_DEAD")
+assert(not frame.visible)
+reminders:ApplyOptions()
+assert(not frame.visible)
+dead, ghost = false, true
+handlers.PLAYER_ALIVE("PLAYER_ALIVE")
+assert(not frame.visible)
+reminders:Test(1)
+assert(not frame.visible)
+reminders._testUntil = 0
+ghost = false
+handlers.PLAYER_UNGHOST("PLAYER_UNGHOST")
+assert(frame.visible and frame.slots[1].entry.label == "Fortitude")
+options.showInRaid = false
+reminders:ApplyOptions()
+assert(not frame.visible)
+print("PASS raid buff reminder, death, ghost, test preview, resurrection and raid visibility")

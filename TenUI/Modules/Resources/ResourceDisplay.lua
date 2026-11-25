@@ -1400,6 +1400,7 @@ local function primary_Rebuild()
     local desc = getSpecDescriptor()
     if not desc or not desc.primary then
         dlog("Primary.Rebuild: no descriptor for current spec -- hiding")
+        ns.PowerPrediction.Attach("primary")
         Primary.desc = nil
         primary_HideAll()
         return false
@@ -1503,6 +1504,7 @@ end
 
 function Primary:Disable()
     if not self._enabled then return end
+    ns.PowerPrediction.Attach("primary")
     self._enabled = false
     if self.eventFrame then
         self.eventFrame:UnregisterAllEvents()
@@ -2030,8 +2032,9 @@ local function secondary_RefreshShards()
             end
             shardFillCurves[count] = curves
         end
+        local raw = powerName == "SoulShards" and secondary_ShardsIsDestruction()
         for i, pip in ipairs(Secondary.pips) do
-            local ok, fill = pcall(UnitPowerPercent, "player", pt, true, curves[i])
+            local ok, fill = pcall(UnitPowerPercent, "player", pt, raw, curves[i])
             if ok then pip:SetValue(fill) end
         end
         return
@@ -2455,7 +2458,7 @@ local function secondary_SyncNativeAuraPips()
     if type(border) ~= "boolean" then border = (Primary.selfProfile or {}).showBorder ~= false end
     local textEnabled = secondary_CountEnabled()
     local function setFill(fill, pip)
-        local inset = border and 1 or 0
+        local inset = border and ns.Pixel.Size(pip, 1) or 0
         fill:ClearAllPoints()
         fill:SetPoint("TOPLEFT", pip, "TOPLEFT", inset, -inset)
         fill:SetPoint("BOTTOMRIGHT", pip, "BOTTOMRIGHT", -inset, inset)
@@ -2728,6 +2731,7 @@ end
 local function secondary_Rebuild()
     local desc = getSpecDescriptor()
     if not (desc and desc.secondary) then
+        ns.PowerPrediction.Attach("secondary")
         secondary_HideAllPooled()
         Secondary.desc = nil
         Secondary._valueSource = nil
@@ -2742,6 +2746,7 @@ local function secondary_Rebuild()
     Secondary._valueSource = desc.secondary.valueSource
     secondary_UpdatePseudoLifecycle(Secondary._valueSource)
     if kind ~= "shards" and kind ~= "runes" and kind ~= "bar" then
+        ns.PowerPrediction.Attach("secondary")
         secondary_HideAllPooled()
         Secondary._valueSource = nil
         Secondary.lastSecondaryType = nil
@@ -2967,6 +2972,7 @@ end
 
 function Secondary:Disable()
     if not self._enabled then return end
+    ns.PowerPrediction.Attach("secondary")
     self._enabled = false
     if self.eventFrame then
         self.eventFrame:UnregisterAllEvents()

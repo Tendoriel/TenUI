@@ -764,6 +764,11 @@ local function update()
     local o = getOpts()
     if not o then return end
 
+    if UnitIsDeadOrGhost("player") then
+        f:Hide()
+        return
+    end
+
     if f._locked == false then
         render(buildTestEntries(o))
         return
@@ -782,7 +787,7 @@ local function update()
         return
     end
 
-    if o.hideWhileMounted and IsMounted() then f:Hide() return end
+    if o.hideWhileMounted and (IsMounted() or (ns.DragonRiding and ns.DragonRiding:IsOnSkyridingMount())) then f:Hide() return end
     if o.hideInRested and IsResting() then f:Hide() return end
     if o.onlyOutOfCombat and InCombatLockdown() then f:Hide() return end
     if o.instanceOnly and not IsInInstance() then f:Hide() return end
@@ -880,12 +885,15 @@ end
 
 local LIFECYCLE_EVENTS = {
     "PLAYER_DEAD",
+    "PLAYER_ALIVE",
+    "PLAYER_UNGHOST",
     "PLAYER_ENTERING_WORLD",
     "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED",
     "ADDON_RESTRICTION_STATE_CHANGED",
     "PLAYER_UPDATE_RESTING",
     "PLAYER_MOUNT_DISPLAY_CHANGED",
+    "PLAYER_CAN_GLIDE_CHANGED",
     "ZONE_CHANGED_NEW_AREA",
     "SPELLS_CHANGED",
     "UPDATE_SHAPESHIFT_FORM",
@@ -895,9 +903,14 @@ local LIFECYCLE_EVENTS = {
     "TRAIT_CONFIG_UPDATED",
 }
 
-local function onLifecycleEvent(event)
+local function onLifecycleEvent(event, unit)
+    if event == "PLAYER_SPECIALIZATION_CHANGED" and unit and unit ~= "player" then return end
     if event == "PLAYER_DEAD" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         wipe(personalStates)
+    end
+    if event == "PLAYER_DEAD" then
+        if ClassReminders.frame then ClassReminders.frame:Hide() end
+        return
     end
     if event == "PLAYER_ENTERING_WORLD" then
         scheduleRosterRebuild()
@@ -913,13 +926,20 @@ local function syncUnitEvents()
     local uf = ClassReminders._unitFrame
     if not uf then
         uf = CreateFrame("Frame")
-        uf:SetScript("OnEvent", function()
-            scheduleUpdate()
+        uf:SetScript("OnEvent", function(_, _, unit)
+            if unit == "player" or unit == "pet" or (currentSpecID() == HOLY_PALADIN_SPEC
+                and (unit:match("^party%d+$") or unit:match("^raid%d+$"))) then
+                scheduleUpdate()
+            end
         end)
         ClassReminders._unitFrame = uf
     end
     if not uf._registered then
-        uf:RegisterUnitEvent("UNIT_AURA", "player", "pet")
+        if playerClass() == "PALADIN" then
+            uf:RegisterEvent("UNIT_AURA")
+        else
+            uf:RegisterUnitEvent("UNIT_AURA", "player", "pet")
+        end
         uf:RegisterUnitEvent("UNIT_PET", "player")
         uf._registered = true
     end

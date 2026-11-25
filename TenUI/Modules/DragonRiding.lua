@@ -382,7 +382,7 @@ function DragonRiding:Redraw()
     self.speedBar.tick:SetColorTexture(p.tickColor.r, p.tickColor.g, p.tickColor.b, p.tickColor.a)
 
     local stFont, stSize = resolveFontPath("default", p.speedText.size)
-    self.speedBar.text:SetFont(stFont, stSize, "OUTLINE")
+    ns.Pixel.SetFont(self.speedBar.text, stFont, stSize, "OUTLINE")
     self.speedBar.text:ClearAllPoints()
     self.speedBar.text:SetPoint(p.speedText.justify or "CENTER", self.speedBar,
         p.speedText.justify or "CENTER", p.speedText.offsetX or 0, p.speedText.offsetY or 0)
@@ -401,14 +401,15 @@ function DragonRiding:Redraw()
     end
 
     local wsFont, wsSize = resolveFontPath("default", p.whirlingSurgeText.size)
-    self.wsIcon.text:SetFont(wsFont, wsSize, "OUTLINE")
+    ns.Pixel.SetFont(self.wsIcon.text, wsFont, wsSize, "OUTLINE")
     self.wsIcon.text:ClearAllPoints()
     self.wsIcon.text:SetPoint(p.whirlingSurgeText.justify or "CENTER", self.wsIcon,
         p.whirlingSurgeText.justify or "CENTER", p.whirlingSurgeText.offsetX or 0, p.whirlingSurgeText.offsetY or 0)
     self.wsIcon.text:SetJustifyH(p.whirlingSurgeText.justify or "CENTER")
     self.wsIcon.text:SetShown(p.whirlingSurgeText.enabled ~= false)
+    self.wsIcon.cd:SetHideCountdownNumbers(true)
 
-    local thick = p.borderThickness or 0
+    local thick = ns.Pixel.Size(self.speedBar, p.borderThickness or 0)
     applyBorder(self.speedBar, thick, p.borderColor)
     for i = 1, SKYRIDING_PIPS do applyBorder(self.skyFrame.pips[i], thick, p.borderColor) end
     for i = 1, SECONDWIND_PIPS do applyBorder(self.swFrame.pips[i], thick, p.borderColor) end
@@ -592,7 +593,12 @@ function DragonRiding:UpdateWhirlingText()
     if not ok or type(info) ~= "table" then return end
     local start = info.startTime
     local dur   = info.duration
-    if isSecret(start) or isSecret(dur) then return end
+    if isSecret(start) or isSecret(dur) then
+        self.wsIcon.text:SetText("")
+        self.wsIcon.cd:SetHideCountdownNumbers(false)
+        return
+    end
+    self.wsIcon.cd:SetHideCountdownNumbers(true)
     start = start or 0
     dur   = dur or 0
     if dur <= 0 then self.wsIcon.text:SetText("") return end

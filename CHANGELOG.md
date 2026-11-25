@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.0] - 2026-11-25
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Class reminders
+
+- Buff, form and pet reminders disappear as soon as the player dies, including in raids. They stay hidden after releasing spirit and are evaluated again on resurrection.
+- Holy Paladin Beacon reminders refresh when a party or raid member gains or loses an aura. Another group member changing specialization no longer clears the player's last known shield or poison state.
+- The mounted visibility setting for Class Reminders and Stealth Tracking also recognizes skyriding.
+
+### Cast Bar and cooldowns
+
+- Fixed two Lua errors that could occur when WoW restricts channel and empower data.
+- Empower stage colors preserve the border and stage dividers. The spell queue window stays inside the border, follows mid-cast resizing and uses readable cast timestamps when available.
+- Interrupted and failed casts hold a full bar during their feedback animation.
+- CDM press flashes appear above the cooldown swipe and support item actions and macros when WoW exposes the resolved spell or item.
+- Player buff stack overlays, including Void Volley, let mouse input pass through to the underlying icon or game world.
+- Tracked Icons and Tracked Bars group six additional target debuffs: Moonfire, Sunfire, Rake, Rip, Garrote and Rupture.
+
+### Resources, skyriding and profiles
+
+- Affliction and Demonology display whole Soul Shards when power values are restricted. Destruction retains partial shards.
+- Disabling a resource bar or switching away from its resource detaches cast prediction. Native aura fills respect the resource border.
+- Skyriding bars use the shared font rendering and pixel-scaled borders. Whirling Surge can use the native cooldown countdown when its remaining time is restricted.
+- Profiles can export Resources or Cast Bar separately, including specialization overrides. Both import through the existing profile import screen.
+
 ## [0.5.9] - 2026-11-21
 
 For WoW Retail 12.1.5 (Interface 120105).

@@ -153,16 +153,17 @@ local function buildEmbeddedPreview(block)
         for i, frac in ipairs(pipFractions) do
             local tex = pips[i]
             if not tex then
-                tex = bar.frame:CreateTexture(nil, "OVERLAY", nil, 2)
+                tex = (bar.textLayer or bar.frame):CreateTexture(nil, "ARTWORK")
                 tex:SetColorTexture(PREVIEW_PIP_COLOR[1], PREVIEW_PIP_COLOR[2],
                     PREVIEW_PIP_COLOR[3], PREVIEW_PIP_COLOR[4])
                 tex:Hide()
                 pips[i] = tex
             end
             tex:ClearAllPoints()
-            tex:SetWidth(1)
-            tex:SetPoint("TOP",    bar.frame, "TOPLEFT",    w * frac, -1)
-            tex:SetPoint("BOTTOM", bar.frame, "BOTTOMLEFT", w * frac, 1)
+            local px, x = ns.Pixel.Size(bar.frame, 1), ns.Pixel.Snap(bar.frame, w * frac)
+            tex:SetWidth(px)
+            tex:SetPoint("TOP", bar.frame, "TOPLEFT", x, -px)
+            tex:SetPoint("BOTTOM", bar.frame, "BOTTOMLEFT", x, px)
             tex:Show()
         end
         for i = #pipFractions + 1, #pips do pips[i]:Hide() end

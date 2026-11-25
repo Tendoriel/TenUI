@@ -1008,6 +1008,8 @@ function TrackedAuras:SetupPlayerAuraCount(icon, auraSpellID)
                 candidateFilters = { includeSpellIDs = { [auraSpellID] = true } },
                 initializeFrame = function(button)
                     button:SetAllPoints(container)
+                    button:SetMouseClickEnabled(false)
+                    button:SetMouseMotionEnabled(false)
                     local text = button:CreateFontString(nil, "OVERLAY")
                     text:SetFont(frame.stack:GetFont())
                     button:SetApplicationCount(text, { formatter = auraCountFormatter })

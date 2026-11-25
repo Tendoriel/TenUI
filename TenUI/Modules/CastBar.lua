@@ -62,6 +62,8 @@ local CastBar = {
 
 local DEFAULTS = {
     enabled       = true,
+    showQueueWindow = false,
+    colorEmpowerStages = false,
     showIcon      = true,
     iconSide      = "LEFT",
     iconSize      = "auto",
@@ -255,9 +257,11 @@ function CastBar:LayoutQueueWindow(bar, enabled, seconds, drain)
     end
     local edge = drain and "LEFT" or "RIGHT"
     zone:ClearAllPoints()
-    zone:SetPoint("TOP" .. edge, frame, "TOP" .. edge)
-    zone:SetPoint("BOTTOM" .. edge, frame, "BOTTOM" .. edge)
-    zone:SetWidth(math.max(1, frame:GetWidth() * math.min(1, queue / (1000 * seconds))))
+    local inset = frame.border and ns.Pixel.Size(frame, 1) or 0
+    local x = drain and inset or -inset
+    zone:SetPoint("TOP" .. edge, frame, "TOP" .. edge, x, -inset)
+    zone:SetPoint("BOTTOM" .. edge, frame, "BOTTOM" .. edge, x, inset)
+    zone:SetWidth(math.max(0.01, (frame:GetWidth() - 2 * inset) * math.min(1, queue / (1000 * seconds))))
     zone:Show()
 end
 
@@ -278,6 +282,7 @@ function CastBar:LayoutEmpowerColors(bar, fractions, color)
         bar.stageClip = clip
     end
     clip:SetAllPoints(frame:GetStatusBarTexture())
+    local inset = frame.border and ns.Pixel.Size(frame, 1) or 0
     local width, left = frame:GetWidth(), 0
     for i = 1, #fractions + 1 do
         local right = fractions[i] or 1
@@ -290,8 +295,8 @@ function CastBar:LayoutEmpowerColors(bar, fractions, color)
         band:SetColorTexture(color[1] + (1 - color[1]) * tint,
             color[2] + (1 - color[2]) * tint, color[3] + (1 - color[3]) * tint, 0.8)
         band:ClearAllPoints()
-        band:SetPoint("TOPLEFT", frame, "TOPLEFT", left * width, -1)
-        band:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", right * width, 1)
+        band:SetPoint("TOPLEFT", frame, "TOPLEFT", math.max(inset, left * width), -inset)
+        band:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", math.min(width - inset, right * width), inset)
         band:SetShown(right > left)
         left = right
     end
@@ -299,12 +304,22 @@ function CastBar:LayoutEmpowerColors(bar, fractions, color)
     clip:Show()
 end
 
-function CastBar:ArmTimer(durationObject, drain)
+function CastBar:RefreshTimerLayout()
+    if not self._activeDuration then return end
+    local p = getProfile()
+    local enabled = p and p.showQueueWindow and self._visualCastType ~= "empower"
+    self:LayoutQueueWindow(self.bar, enabled, self._queueSeconds, self._visualCastType == "channel")
+    self:LayoutStagePips()
+end
+
+function CastBar:ArmTimer(durationObject, drain, startMs, endMs)
     if not self.bar or not durationObject then return end
     local direction = drain and DIR_REMAINING or DIR_ELAPSED
     local profile = getProfile()
     local queue = profile and profile.showQueueWindow and self._visualCastType ~= "empower"
-    self:LayoutQueueWindow(self.bar, queue, queue and durationObject:GetTotalDuration(), drain)
+    self._queueSeconds = computeRemainingSec(startMs, endMs)
+    if not self._queueSeconds then self._queueSeconds = durationObject:GetTotalDuration() end
+    self:LayoutQueueWindow(self.bar, queue, self._queueSeconds, drain)
     local ok = self.bar:SetTimerDuration(durationObject, INTERP_IMMEDIATE, direction)
     if not ok then
         dlog("ArmTimer: SetTimerDuration failed (durationObject malformed?)")
@@ -336,7 +351,8 @@ local function tick_OnUpdate(_self, _elapsed)
 
     local ok, remaining = pcall(duration.GetRemainingDuration, duration)
     if not ok or isSecret(remaining) or type(remaining) ~= "number" then
-        if CastBar.bar then CastBar.bar:SetRightText("") end
+        if CastBar._lastDisplayedTenths ~= false and CastBar.bar then CastBar.bar:SetRightText("") end
+        CastBar._lastDisplayedTenths = false
         return
     end
 
@@ -521,7 +537,7 @@ function CastBar:LayoutStagePips()
             used = used + 1
             local tex = pips[used]
             if not tex then
-                tex = barFrame:CreateTexture(nil, "OVERLAY", nil, 2)
+                tex = (self.bar.textLayer or barFrame):CreateTexture(nil, "ARTWORK")
                 tex:SetColorTexture(STAGE_PIP_COLOR[1], STAGE_PIP_COLOR[2],
                     STAGE_PIP_COLOR[3], STAGE_PIP_COLOR[4])
                 ns.Pixel.Edge(tex, barFrame, false)
@@ -529,8 +545,9 @@ function CastBar:LayoutStagePips()
             end
             tex:ClearAllPoints()
             local x = ns.Pixel.Snap(barFrame, w * frac)
-            tex:SetPoint("TOP", barFrame, "TOPLEFT", x, -1)
-            tex:SetPoint("BOTTOM", barFrame, "BOTTOMLEFT", x, 1)
+            local px = ns.Pixel.Size(barFrame, 1)
+            tex:SetPoint("TOP", barFrame, "TOPLEFT", x, -px)
+            tex:SetPoint("BOTTOM", barFrame, "BOTTOMLEFT", x, px)
             tex:Show()
         end
     end
@@ -709,12 +726,22 @@ function CastBar:HideNow()
     self._activeCastBarID = nil
 end
 
+local finishedDuration
+local function freezeCompletedBar(bar)
+    if not finishedDuration then
+        finishedDuration = C_DurationUtil.CreateDuration()
+        finishedDuration:SetTimeFromStart(0, 1)
+    end
+    bar:SetTimerDuration(finishedDuration, INTERP_IMMEDIATE, DIR_ELAPSED)
+end
+
 function CastBar:PlayInterruptedVisual()
     if not self.bar then return end
     local profile = getProfile()
     if not profile then return end
     self:StopLiveTimer()
     self:ClearStagePips()
+    freezeCompletedBar(self.bar)
     applyColor(self.bar, profile.colors and profile.colors.interrupted)
     self.bar:SetLeftText(INTERRUPTED or "Interrupted")
     self:ClearTimeText()
@@ -728,6 +755,7 @@ function CastBar:PlayFailedVisual()
     if not profile then return end
     self:StopLiveTimer()
     self:ClearStagePips()
+    freezeCompletedBar(self.bar)
     applyColor(self.bar, profile.colors and profile.colors.failed)
     self.bar:SetLeftText(FAILED or "Failed")
     self:ClearTimeText()
@@ -811,7 +839,7 @@ function CastBar:OnSpellcastStart(castGUID, castBarID)
 
     local duration = UnitCastingDuration("player")
     if duration then
-        self:ArmTimer(duration, false)
+        self:ArmTimer(duration, false, startMs, endMs)
         self:StartLiveTimer(duration)
     else
         dlog("OnSpellcastStart: UnitCastingDuration returned nil -- bar will not animate")
@@ -824,11 +852,11 @@ end
 function CastBar:OnSpellcastDelayed(castGUID, castBarID)
     if not castMatches(castGUID, castBarID) then return end
     if self._state ~= "casting" then return end
-    local name = UnitCastingInfo("player")
+    local name, _, _, startMs, endMs = UnitCastingInfo("player")
     if not hasCastInfo(name) then return end
     local duration = UnitCastingDuration("player")
     if duration then
-        self:ArmTimer(duration, false)
+        self:ArmTimer(duration, false, startMs, endMs)
         self:StartLiveTimer(duration)
     end
 end
@@ -871,7 +899,7 @@ function CastBar:OnChannelStart(castGUID, castBarID, eventSpellID)
 
     local duration = UnitChannelDuration("player")
     if duration then
-        self:ArmTimer(duration, true)
+        self:ArmTimer(duration, true, startMs, endMs)
         self:StartLiveTimer(duration)
     else
         dlog("OnChannelStart: UnitChannelDuration returned nil")
@@ -885,13 +913,13 @@ function CastBar:OnChannelUpdate(castGUID, castBarID)
     if self._state ~= "channeling" then return end
     local matches = castMatches(castGUID, castBarID)
     if matches == false then return end
+    local name, _, _, startMs, endMs, _, _, _, empowered = UnitChannelInfo("player")
     if matches == nil then
-        local name, _, _, _, _, _, _, _, empowered = UnitChannelInfo("player")
-        if not hasCastInfo(name) or empowered then return end
+        if not hasCastInfo(name) or (not isSecret(empowered) and empowered) then return end
     end
     local duration = UnitChannelDuration("player")
     if duration then
-        self:ArmTimer(duration, true)
+        self:ArmTimer(duration, true, startMs, endMs)
         self:StartLiveTimer(duration)
     end
 end
@@ -948,7 +976,7 @@ function CastBar:OnEmpowerUpdate(castGUID, castBarID)
     if matches == false then return end
     local _n, _dn, _tex, startMs, _endMs, _ts, _ni, _sid, empowered, numStages =
         UnitChannelInfo("player")
-    if matches == nil and not empowered then return end
+    if matches == nil and (not hasCastInfo(_n) or (not isSecret(empowered) and not empowered)) then return end
     local duration = (UnitEmpoweredChannelDuration and UnitEmpoweredChannelDuration("player"))
                      or UnitChannelDuration("player")
     if duration then
@@ -1226,6 +1254,7 @@ function CastBar:Relayout(width, height)
             self.bar.frame:SetAllPoints(anchor.frame)
         end
         if self.icon then self.icon:Hide() end
+        self:RefreshTimerLayout()
         return
     end
 
@@ -1267,9 +1296,7 @@ function CastBar:Relayout(width, height)
         end
     end
 
-    if self._stageFracs or self._channelTicks then
-        self:LayoutStagePips()
-    end
+    self:RefreshTimerLayout()
 end
 
 local TEST_CYCLE = {
@@ -1687,11 +1714,6 @@ function CastBar:ApplyOptions()
     end
 
     self:Relayout()
-    if self._activeDuration then
-        local queue = profile.showQueueWindow and self._visualCastType ~= "empower"
-        self:LayoutQueueWindow(self.bar, queue, queue and self._activeDuration:GetTotalDuration(), self._visualCastType == "channel")
-        self:LayoutStagePips()
-    end
 
     dlog("ApplyOptions applied")
 end

@@ -3,6 +3,12 @@ local _, ns = ...
 -- These identifiers denote the hostile aura itself. Linked aura IDs are
 -- classified individually, since a single CDM entry can also own a player buff.
 local targetDebuffIDs = {
+    [164812] = true,    -- Moonfire
+    [164815] = true,    -- Sunfire
+    [155722] = true,    -- Rake
+    [1079] = true,      -- Rip
+    [703] = true,       -- Garrote
+    [1943] = true,      -- Rupture
     [589] = true,       -- Shadow Word: Pain
     [34914] = true,     -- Vampiric Touch
     [980] = true,       -- Agony

@@ -776,6 +776,8 @@ local function stripNonPortable(data)
 end
 
 local EXPORT_SECTIONS = {
+    resources = { module = "Resources", fields = {} },
+    castbar = { module = "CastBar", fields = {} },
     cdm = { module = "Bars", fields = { "abilities", "abilitiesDefaults" } },
     auras = { module = "Auras", fields = { "auras", "aurasDefaults" } },
     layout = { module = "Layout", fields = { "anchors", "_sharedSettingsSeeded" } },
@@ -800,6 +802,14 @@ function ns:ExportProfileString(section)
                 if type(scope) == "table" and (scope.anchors or scope.layoutVisuals) then
                     selected.specScopes = selected.specScopes or {}
                     selected.specScopes[key] = { anchors = scope.anchors, layoutVisuals = scope.layoutVisuals }
+                end
+            end
+        end
+        if (section == "resources" or section == "castbar") and type(data.specScopes) == "table" then
+            for key, scope in pairs(data.specScopes) do
+                if type(scope) == "table" and type(scope[section]) == "table" then
+                    selected.specScopes = selected.specScopes or {}
+                    selected.specScopes[key] = { [section] = scope[section] }
                 end
             end
         end

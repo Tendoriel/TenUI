@@ -117,6 +117,7 @@ function Bar:New(parent, opts)
         f.rightText = fs
     end
 
+    self_.textLayer = textLayer
     self_.frame = f
     return self_
 end

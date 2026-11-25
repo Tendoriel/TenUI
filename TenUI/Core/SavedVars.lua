@@ -310,8 +310,6 @@ local SUBKEY_DEFAULTS = {
         },
     },
     CastBar = {
-        showQueueWindow = false,
-        colorEmpowerStages = false,
         text = {
             spellName = { enabled = true, font = "default", size = 12, anchor = "LEFT",  x =  4, y = 0 },
             timer     = { enabled = true, font = "default", size = 12, anchor = "RIGHT", x = -4, y = 0 },
