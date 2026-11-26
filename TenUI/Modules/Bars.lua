@@ -1644,6 +1644,7 @@ local function destroyIconList(list, retained)
 end
 
 function Row:DestroyIcons()
+    Bars._pressIndex = nil
     destroyIconList(self._iconsRow1)
     destroyIconList(self._iconsRow2)
     for i = 1, #self.icons do self.icons[i] = nil end
@@ -1820,6 +1821,7 @@ local function hiddenUnknownSignature(displayedList)
 end
 
 function Row:Rebuild()
+    Bars._pressIndex = nil
     local rp = getRowProfile(self.name)
     if not rp then return end
     local displayed1 = rp.displayed or {}
@@ -2068,6 +2070,7 @@ local SUMMON_BORDER_R, SUMMON_BORDER_G, SUMMON_BORDER_B, SUMMON_BORDER_A = 1, 0.
 function Row:RefreshIcon(icon, entry, desat)
     if not (icon and entry) then return end
     if entry.type == "spell" then
+        icon._pollRangeSpell = nil
         local sid = entry.id
         if not sid then return end
         local baseSID = resolveBaseSpellID(sid)
@@ -2174,6 +2177,9 @@ function Row:RefreshIcon(icon, entry, desat)
             local ok, r = pcall(C_Spell.IsSpellInRange, activeSID, "target")
             if ok and not isSecret(r) then inRange = r end
         end
+
+        icon._pollRangeSpell = rangeTint and activeSID or nil
+        icon._pollOutOfRange = inRange == false
 
         local chargesInfo
         if C_Spell and C_Spell.GetSpellCharges then
@@ -2542,6 +2548,7 @@ function Row:RequestRefresh()
 end
 
 local ROW_EVENTS_COMMON = {
+    "PLAYER_TOTEM_UPDATE",
     "SPELL_UPDATE_COOLDOWN",
     "SPELL_UPDATE_CHARGES",
     "SPELL_UPDATE_USES",
@@ -2647,6 +2654,7 @@ function Row:Enable()
                 return
             end
             if event == "PLAYER_EQUIPMENT_CHANGED" then
+                Bars._pressIndex = nil
                 local slotID = ...
                 if row.name == "Trinkets" and TRINKET_SLOT_SET[slotID] then
                     local scanner = Bars.Scanner and Bars.Scanner.Trinkets
@@ -3102,9 +3110,27 @@ function Bars:RenameCustomBar(id, newName)
 end
 
 function Bars:_TickAll()
-    for _, r in pairs(self.rows) do
-        if r and r._enabled and r.RequestRefresh then
-            r:RequestRefresh()
+    -- Events carry normal cooldown, charge and usability updates. Retain a
+    -- slower reconciliation for viewer state that can settle after its event.
+    local now = GetTime()
+    local reconcile = now >= (self._nextReconcile or 0)
+    if reconcile then self._nextReconcile = now + 1 end
+    local target = UnitExists("target")
+    local desat = self.profileRef.desaturateUnlearned ~= false
+    for _, row in pairs(self.rows) do
+        if row._enabled and #row.icons > 0 then
+            if reconcile then
+                row:RequestRefresh()
+            elseif not row._refreshScheduled then
+                for _, icon in ipairs(row.icons) do
+                    local refresh = icon._summonActiveUntil or icon._consumeCdEnd
+                    if not refresh and target and icon._pollRangeSpell and not icon._hiddenUnknown then
+                        local ok, value = pcall(C_Spell.IsSpellInRange, icon._pollRangeSpell, "target")
+                        refresh = ok and not isSecret(value) and (value == false) ~= icon._pollOutOfRange
+                    end
+                    if refresh and not icon._hiddenUnknown then row:RefreshIcon(icon, icon._entry, desat) end
+                end
+            end
         end
     end
 end
@@ -3173,6 +3199,29 @@ function Bars:_ResyncScope()
     end
 end
 
+local function flashPressedIcon(icon)
+    local flash = icon.pressFlash
+    if not flash then
+        local overlay = CreateFrame("Frame", nil, icon.frame)
+        overlay:SetFrameLevel(icon.frame.cooldown:GetFrameLevel() + 15)
+        overlay:SetAllPoints(icon.frame)
+        flash = overlay:CreateTexture(nil, "OVERLAY")
+        flash:SetAllPoints(icon.frame.icon)
+        flash:SetColorTexture(1, 1, 1, 0.4)
+        local group = flash:CreateAnimationGroup()
+        local fade = group:CreateAnimation("Alpha")
+        fade:SetFromAlpha(1)
+        fade:SetToAlpha(0)
+        fade:SetDuration(0.15)
+        group:SetScript("OnFinished", function() flash:Hide() end)
+        flash.animation = group
+        icon.pressFlash = flash
+    end
+    flash.animation:Stop()
+    flash:Show()
+    flash.animation:Play()
+end
+
 -- Follow the active action page so the flash also follows forms and spell replacements.
 local function mirrorButtonPress(button)
     if not (Bars._enabled and Bars.profileRef.flashOnPress and button) then return end
@@ -3188,39 +3237,50 @@ local function mirrorButtonPress(button)
                 item = tonumber(id)
             elseif kind == "macro" and subType == "spell" then
                 spell = spell or tonumber(id)
+            elseif kind == "macro" and not spell then
+                local name = C_ActionBar.GetActionText(slot)
+                if not isSecret(name) and name then
+                    local macro = GetMacroIndexByName(name)
+                    if macro and macro > 0 then
+                        local _, link = GetMacroItem(macro)
+                        if not isSecret(link) and type(link) == "string" then item = tonumber(link:match("item:(%d+)")) end
+                        if not item then
+                            local resolved = GetMacroSpell(macro)
+                            if not isSecret(resolved) then spell = resolved end
+                        end
+                    end
+                end
             end
         end
     end
     if not (spell or item) then return end
-    local base = spell and (resolveBaseSpellID(spell) or spell)
-    for _, row in pairs(Bars.rows) do
-        for _, icon in ipairs(row.icons) do
-            local entry = icon._entry
-            if entry and icon.frame:IsVisible() and
-                ((entry.type == "spell" and spell and (entry.id == spell or entry.id == base or activeSpellID(entry.id) == spell))
-                or (entry.type == "item" and item and entry.id == item)) then
-                local flash = icon.pressFlash
-                if not flash then
-                    local overlay = CreateFrame("Frame", nil, icon.frame)
-                    overlay:SetFrameLevel(icon.frame.cooldown:GetFrameLevel() + 15)
-                    overlay:SetAllPoints(icon.frame)
-                    flash = overlay:CreateTexture(nil, "OVERLAY")
-                    flash:SetAllPoints(icon.frame.icon)
-                    flash:SetColorTexture(1, 1, 1, 0.4)
-                    local group = flash:CreateAnimationGroup()
-                    local fade = group:CreateAnimation("Alpha")
-                    fade:SetFromAlpha(1)
-                    fade:SetToAlpha(0)
-                    fade:SetDuration(0.15)
-                    group:SetScript("OnFinished", function() flash:Hide() end)
-                    flash.animation = group
-                    icon.pressFlash = flash
+    if not Bars._pressIndex then
+        local index = { spell = {}, item = {} }
+        local function add(group, key, icon)
+            if not key then return end
+            group[key] = group[key] or {}
+            group[key][icon] = true
+        end
+        for _, row in pairs(Bars.rows) do
+            for _, icon in ipairs(row.icons) do
+                local entry = icon._entry
+                if entry and entry.type == "spell" then
+                    local base = resolveBaseSpellID(entry.id) or entry.id
+                    add(index.spell, base, icon)
+                    add(index.spell, entry.id, icon)
+                    add(index.spell, activeSpellID(base), icon)
+                elseif entry and entry.type == "item" then
+                    add(index.item, entry.slot and GetInventoryItemID("player", entry.slot) or entry.id, icon)
+                    for _, alt in ipairs(entry.altItemIDs or {}) do add(index.item, alt, icon) end
                 end
-                flash.animation:Stop()
-                flash:Show()
-                flash.animation:Play()
             end
         end
+        Bars._pressIndex = index
+    end
+    local index = Bars._pressIndex
+    local matches = item and index.item[item] or spell and (index.spell[spell] or index.spell[resolveBaseSpellID(spell)])
+    for icon in pairs(matches or {}) do
+        if icon.frame and icon.frame:IsVisible() then flashPressedIcon(icon) end
     end
 end
 
@@ -3343,6 +3403,7 @@ function Bars:OnEnable(_, profile)
         ef:UnregisterAllEvents()
         ef:SetScript("OnEvent", function(_, event, baseID, overrideID)
             _mirrorMapDirty = true
+            self._pressIndex = nil
             if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" then
                 if not isSecret(baseID) and type(baseID) == "number" then
                     if not isSecret(overrideID) then

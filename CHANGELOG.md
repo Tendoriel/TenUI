@@ -1,16 +1,23 @@
 # Changelog
 
-## [0.6.0] - 2026-11-25
+## [0.6.0] - 2026-11-26
 
 For WoW Retail 12.1.5 (Interface 120105).
 
 ### Class reminders
+
+- Class Reminders now hide immediately when you enter combat, including during a HUD test or while moving the reminder. After combat, your usual visibility rules apply again.
+- Each of the six supported raid buffs has its own icon, spell name and switch. Self buffs and forms, targeted buffs, and pet reminders have separate groups with icons. Existing profiles keep their previous group-buff selection.
 
 - Buff, form and pet reminders disappear as soon as the player dies, including in raids. They stay hidden after releasing spirit and are evaluated again on resurrection.
 - Holy Paladin Beacon reminders refresh when a party or raid member gains or loses an aura. Another group member changing specialization no longer clears the player's last known shield or poison state.
 - The mounted visibility setting for Class Reminders and Stealth Tracking also recognizes skyriding.
 
 ### Cast Bar and cooldowns
+
+- Fixed a Lua error in the cooldown viewer when WoW refreshed the spellbook or changed a spell override.
+- Early recasts of Disintegrate, Arcane Missiles and Rapid Fire preserve the next tick marker when timing is available. An optional red band shows the measured time from sending a cast to its start.
+- CDM checks range and summon expiry between full icon updates. Press flashes use an index that refreshes when the layout or a spell override changes. Native aura trackers stop their fallback timer while idle.
 
 - Fixed two Lua errors that could occur when WoW restricts channel and empower data.
 - Empower stage colors preserve the border and stage dividers. The spell queue window stays inside the border, follows mid-cast resizing and uses readable cast timestamps when available.
@@ -20,6 +27,9 @@ For WoW Retail 12.1.5 (Interface 120105).
 - Tracked Icons and Tracked Bars group six additional target debuffs: Moonfire, Sunfire, Rake, Rip, Garrote and Rupture.
 
 ### Resources, skyriding and profiles
+
+- Sunfury Arcane Mages can enable a separate Arcane Soul indicator in Resources. It counts down the last six global cooldowns of Arcane Surge and the Barrage opportunities during Arcane Soul.
+- HUD anchors realign after resolution or UI scale changes, including centered frames with odd pixel dimensions.
 
 - Affliction and Demonology display whole Soul Shards when power values are restricted. Destruction retains partial shards.
 - Disabling a resource bar or switching away from its resource detaches cast prediction. Native aura fills respect the resource border.

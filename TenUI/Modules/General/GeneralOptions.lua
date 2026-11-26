@@ -262,7 +262,7 @@ local function buildQoLPage(sc)
     sc.refreshReminderPreview = refreshPreview
     local getReminderOptions = isClass and getCR or getST
     local applyReminderOptions = isClass and applyCR or applyST
-    local function addReminderToggle(key, label)
+    local function addReminderToggle(key, label, icons)
         local row = C.CreateCheckBox(sc, label,
             function() return getReminderOptions()[key] == true end,
             function(value)
@@ -270,6 +270,20 @@ local function buildQoLPage(sc)
                 applyReminderOptions()
                 refreshPreview()
             end)
+        if icons then
+            local previous
+            for _, id in ipairs(icons) do
+                local icon = row:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(20, 20)
+                icon:SetTexture(id)
+                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                if previous then icon:SetPoint("LEFT", previous, "RIGHT", 2, 0)
+                else icon:SetPoint("LEFT", row, "LEFT") end
+                previous = icon
+            end
+            row.label:ClearAllPoints()
+            row.label:SetPoint("LEFT", previous, "RIGHT", 6, 0)
+        end
         settingRows[key] = row
         children[#children + 1] = row
     end
@@ -387,19 +401,28 @@ local function buildQoLPage(sc)
     addReminderToggle("enabled", isClass and "Enable Class Reminders" or "Enable Stealth Tracking")
 
     if isClass then
-        children[#children + 1] = C.CreateSubSection(sc, "Class Buffs and Forms")
-        addReminderToggle("shamanShields", "Shaman: shield missing")
-        addReminderToggle("paladinBeacons", "Holy Paladin: beacons missing")
-        addReminderToggle("shadowform", "Shadow Priest: Shadowform missing")
-        addReminderToggle("moonkinForm", "Balance Druid: Moonkin Form missing")
-        addReminderToggle("roguePoisons", "Rogue: lethal and non-lethal poisons")
+        local function texture(spell, fallback)
+            return C_Spell.GetSpellTexture(spell) or fallback
+        end
+        children[#children + 1] = C.CreateSubSection(sc, "Raid Buffs")
+        addReminderToggle("raidBuffs", "Track buffs provided by players in your group")
+        for _, buff in ipairs(ns.ClassReminders.raidBuffs) do
+            addReminderToggle(buff.option, C_Spell.GetSpellName(buff.iconSpell) or buff.label,
+                { texture(buff.iconSpell, buff.fallback) })
+        end
 
-        children[#children + 1] = C.CreateSubSection(sc, "Pets")
-        addReminderToggle("pets", "Pet missing or wrong pet")
-        addReminderToggle("petPassive", "Warn when the pet is on passive")
+        children[#children + 1] = C.CreateSubSection(sc, "Self Buffs and Forms")
+        addReminderToggle("shamanShields", "Shaman shields", { texture(974, 136089), texture(192106, 136051), texture(52127, 132315) })
+        addReminderToggle("shadowform", "Shadowform", { texture(232698, 136200) })
+        addReminderToggle("moonkinForm", "Moonkin Form", { texture(24858, 136036) })
+        addReminderToggle("roguePoisons", "Lethal and non-lethal poisons", { texture(8679, 132273), texture(3408, 132274) })
 
-        children[#children + 1] = C.CreateSubSection(sc, "Group Buffs")
-        addReminderToggle("raidBuffs", "Raid buffs (only when a provider class is in the group)")
+        children[#children + 1] = C.CreateSubSection(sc, "Targeted Buffs")
+        addReminderToggle("paladinBeacons", "Beacon of Light and Beacon of Faith", { texture(53563, 1030094), texture(156910, 1030095) })
+
+        children[#children + 1] = C.CreateSubSection(sc, "Pet Reminders")
+        addReminderToggle("pets", "Missing or incorrect pet", { 132599 })
+        addReminderToggle("petPassive", "Pet on passive", { 132311 })
     else
         children[#children + 1] = C.CreateSubSection(sc, "Stealth Indicators")
         addReminderToggle("rogue", "Rogue (Stealth)")
@@ -438,7 +461,7 @@ local function buildQoLPage(sc)
     if isClass then
         addReminderToggle("showInRaid", "Show in raid groups")
         addReminderToggle("hideInRested", "Hide in rested areas")
-        addReminderToggle("onlyOutOfCombat", "Only out of combat")
+        children[#children + 1] = C.CreateHelpText(sc, "Class reminders are hidden in combat, while dead and in spirit form.")
     end
 
     children[#children + 1] = C.CreateSection(sc, "Position")

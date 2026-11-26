@@ -5053,10 +5053,32 @@ function BarDisplay:ApplyVisualOptions()
     end
 end
 
+function Auras:UpdateMirrorTicker(native)
+    if native and not next(self._summonActiveUntil) then
+        if self._ticker then self._ticker:Cancel() self._ticker = nil end
+        return
+    end
+    if self._ticker then return end
+    self._ticker = C_Timer.NewTicker(MIRROR_INTERVAL_SEC, function()
+        if not self._enabled then return end
+        local now = GetTime()
+        for id, expires in pairs(self._summonActiveUntil) do
+            if expires <= now then self._summonActiveUntil[id] = nil end
+        end
+        if not (self._nativeIcons and self._nativeBars) and not ns.TrackedAuras:IsRestricted()
+            and self._liveAura and self._liveAura.rescanUnitAuras then
+            pcall(self._liveAura.rescanUnitAuras, "player", true)
+            if UnitExists("target") then pcall(self._liveAura.rescanUnitAuras, "target", true) end
+        end
+        self:Refresh()
+    end)
+end
+
 function Auras:Refresh()
     if not self._enabled then return end
     local preview = cdmPreviewOpen() or (ns.EditMode and ns.EditMode:IsActive())
     local nativeIcons, nativeBars = self:_SyncNativeDisplays(preview)
+    self:UpdateMirrorTicker(nativeIcons and nativeBars)
     local iconActive, barActive = {}, {}
     if nativeIcons then
         iconActive = self:_BuildNativeSummonEntries("TrackedIcon")
@@ -6051,21 +6073,6 @@ function Auras:OnEnable(_, profile)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", scheduleScan, self)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnShow", scheduleScan, self)
         EventRegistry:RegisterCallback("CooldownViewerSettings.OnHide", scheduleScan, self)
-    end
-
-    if not self._ticker and C_Timer and C_Timer.NewTicker then
-        self._ticker = C_Timer.NewTicker(MIRROR_INTERVAL_SEC, function()
-            local native = mod._nativeIcons and mod._nativeBars
-            if native and not next(mod._summonActiveUntil) then return end
-            if mod._enabled and not native and not ns.TrackedAuras:IsRestricted()
-                and Auras._liveAura and Auras._liveAura.rescanUnitAuras then
-                pcall(Auras._liveAura.rescanUnitAuras, "player", true)
-                if UnitExists and UnitExists("target") then
-                    pcall(Auras._liveAura.rescanUnitAuras, "target", true)
-                end
-            end
-            mod:Refresh()
-        end)
     end
 
     if C_Timer and C_Timer.After then

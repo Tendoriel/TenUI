@@ -60,6 +60,8 @@ local function buildAnchorKeyList()
         out[#out + 1] = ANCHOR_KEYS[i]
     end
     local ebon = ns:GetAnchor("EbonMight")
+    local soul = ns:GetAnchor("ArcaneSoul")
+    if soul then out[#out + 1] = { key = "ArcaneSoul", label = soul.def.label } end
     if ebon then out[#out + 1] = { key = "EbonMight", label = ebon.def.label } end
     if ns.Bars and ns.Bars.GetCustomBars and ns.Bars.CustomRowKey then
         for _, def in ipairs(ns.Bars:GetCustomBars()) do

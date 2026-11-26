@@ -996,6 +996,11 @@ local function buildResourcesPage(sc)
         end
     )
 
+    if specID == 62 then
+        children[#children + 1] = C.CreateCheckBox(sc, "Sunfury: show Arcane Soul countdown in GCDs",
+            function() return getResProfile().arcaneSoulEnabled == true end,
+            function(v) getResProfile().arcaneSoulEnabled = v applyOptions() end)
+    end
     if specID == 1473 then
         children[#children + 1] = C.CreateCheckBox(sc, "Show Ebon Might bar",
             function() return getResProfile().ebonMightEnabled ~= false end,

@@ -24,6 +24,14 @@ function Pixel.Snap(frame, value)
     return math.floor(value / step + 0.5) * step
 end
 
+-- Align a centered extent against the parent's actual origin. Either extent
+-- can occupy an odd number of physical pixels.
+function Pixel.SnapOffset(frame, offset, fraction, extent, parentExtent)
+    local px = Pixel.Size(frame, 1)
+    local edge = offset + fraction * (parentExtent - extent)
+    return offset + math.floor(edge / px + 0.5) * px - edge
+end
+
 function Pixel.ConfigureTexture(texture)
     texture:SetSnapToPixelGrid(false)
     texture:SetTexelSnappingBias(0)

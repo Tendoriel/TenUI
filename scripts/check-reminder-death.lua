@@ -1,5 +1,6 @@
 -- Exercise the registered event handlers and the normal HUD render path.
-local dead, ghost = false, false
+local dead, ghost, combat = false, false, false
+InCombatLockdown = function() return combat end
 UnitIsDeadOrGhost = function(unit)
     assert(unit == "player")
     return dead or ghost
@@ -48,7 +49,24 @@ reminders._testUntil = 0
 ghost = false
 handlers.PLAYER_UNGHOST("PLAYER_UNGHOST")
 assert(frame.visible and frame.slots[1].entry.label == "Fortitude")
+combat = true
+handlers.PLAYER_REGEN_DISABLED("PLAYER_REGEN_DISABLED")
+assert(not frame.visible)
+frame._locked = false
+reminders:Test(1)
+assert(not frame.visible)
+frame._locked, reminders._testUntil = true, 0
+combat = false
+handlers.PLAYER_REGEN_ENABLED("PLAYER_REGEN_ENABLED")
+assert(frame.visible)
+options.raidBuff21562 = false
+reminders:ApplyOptions()
+assert(not frame.visible)
+options.raidBuff21562, options.raidBuffs = true, false
+reminders:ApplyOptions()
+assert(not frame.visible)
+options.raidBuffs = true
 options.showInRaid = false
 reminders:ApplyOptions()
 assert(not frame.visible)
-print("PASS raid buff reminder, death, ghost, test preview, resurrection and raid visibility")
+print("PASS raid buff reminder, death, ghost, test preview, resurrection, combat, individual buffs and raid visibility")

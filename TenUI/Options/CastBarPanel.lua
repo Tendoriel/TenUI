@@ -263,6 +263,7 @@ local function buildEmbeddedPreview(block)
 
         local queue = cp.showQueueWindow and not phase.stages and (phase.mode == "fill" or phase.mode == "drain")
         ns.CastBar:LayoutQueueWindow(bar, queue, phase.dur, phase.mode == "drain")
+        ns.CastBar:LayoutLatency(bar, cp.showCastLatency and (phase.mode == "fill" or phase.mode == "drain"), phase.dur, phase.mode == "drain", 80)
         ns.CastBar:LayoutEmpowerColors(bar, cp.colorEmpowerStages and phase.stages and PREVIEW_STAGE_FRACS, empowerBase)
 
         if phase.mode == "instant" then
@@ -639,6 +640,7 @@ local function buildCastBarPage(sc)
     )
 
     for _, option in ipairs({
+        { "showCastLatency", "Show measured cast latency (red)" },
         { "showQueueWindow", "Show spell queue window on casts and channels" },
         { "colorEmpowerStages", "Shade each Empower stage separately" },
     }) do

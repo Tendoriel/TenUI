@@ -346,7 +346,9 @@ local function applyPosition(anchor, pos)
     anchor:SetSize(w, h)
     local setX, setY = originToSetPoint(pos.point, pos.x, pos.y, w, h, name)
     anchor:ClearAllPoints()
-    anchor:SetPoint(pos.point, parent, pos.point, ns.Pixel.Snap(parent, setX), ns.Pixel.Snap(parent, setY))
+    local x = ns.Pixel.SnapOffset(anchor, setX, pointHFrac(pos.point), w, parent:GetWidth() / scale)
+    local y = ns.Pixel.SnapOffset(anchor, setY, pointVFrac(pos.point), h, parent:GetHeight() / scale)
+    anchor:SetPoint(pos.point, parent, pos.point, x, y)
     if name == "EssentialCooldowns" and not widthMatchQueued then
         widthMatchQueued = true
         C_Timer.After(0, refreshWidthMatches)
@@ -1412,12 +1414,30 @@ function Anchors:RefreshGridOverlay()
     self:UpdateGridOverlay()
 end
 
-ns:RegisterEvent("UI_SCALE_CHANGED", function()
+local scalePending, scaleQueued
+local function refreshScale()
+    scaleQueued = nil
+    if not ns.savedVarsReady then return end
+    if InCombatLockdown() then scalePending = true return end
+    scalePending = nil
+    for name, runtime in pairs(registry) do
+        if runtime.frame then
+            local entry = validatePos(resolveSavedEntry(name), runtime.def)
+            applyPosition(runtime.frame, entry)
+        end
+    end
+    if ns.CastBar and ns.CastBar.Relayout then ns.CastBar:Relayout() end
     if gridFrame and gridFrame:IsShown() then rebuildGridLines() end
-end)
-ns:RegisterEvent("DISPLAY_SIZE_CHANGED", function()
-    if gridFrame and gridFrame:IsShown() then rebuildGridLines() end
-end)
+end
+
+local function queueScale()
+    if scaleQueued then return end
+    scaleQueued = true
+    C_Timer.After(0, refreshScale)
+end
+
+ns:RegisterEvent("UI_SCALE_CHANGED", queueScale)
+ns:RegisterEvent("DISPLAY_SIZE_CHANGED", queueScale)
 
 function ns:RegisterAnchor(def)
     if type(def) ~= "table" then
@@ -1522,6 +1542,7 @@ ns:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", function(event, unit)
 end)
 
 ns:RegisterEvent("PLAYER_REGEN_ENABLED", function()
+    if scalePending then queueScale() end
     refreshWidthMatches()
     if _pendingSpecReapply and ns.savedVarsReady then
         _pendingSpecReapply = false

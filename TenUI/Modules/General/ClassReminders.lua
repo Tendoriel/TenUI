@@ -100,7 +100,6 @@ local DEFAULTS = {
     showInRaid       = true,
     hideInRested     = true,
     hideWhileMounted = true,
-    onlyOutOfCombat  = false,
     showActive       = false,
     glow             = true,
     iconSize         = 36,
@@ -110,7 +109,13 @@ local DEFAULTS = {
     y                = -220,
 }
 
+for _, buff in ipairs(RAID_BUFFS) do
+    buff.option = "raidBuff" .. buff.iconSpell
+    DEFAULTS[buff.option] = true
+end
+
 local ClassReminders = {
+    raidBuffs        = RAID_BUFFS,
     profileRef   = nil,
     frame        = nil,
     _testUntil   = 0,
@@ -552,8 +557,8 @@ local function evaluate(o, preview)
         local roster = ClassReminders._rosterClasses or {}
         for i = 1, #RAID_BUFFS do
             local def = RAID_BUFFS[i]
-            if roster[def.class] or (preview and def.class == class and spellKnown(def.iconSpell)) then
-                pushAura("raidBuffs", spellIcon(def.iconSpell, def.fallback), def.label,
+            if o[def.option] ~= false and (roster[def.class] or (preview and def.class == class and spellKnown(def.iconSpell))) then
+                pushAura(def.option, spellIcon(def.iconSpell, def.fallback), def.label,
                     not preview and anyPlayerAuraPresent(def.buffIDs))
             end
         end
@@ -764,7 +769,7 @@ local function update()
     local o = getOpts()
     if not o then return end
 
-    if UnitIsDeadOrGhost("player") then
+    if InCombatLockdown() or UnitIsDeadOrGhost("player") then
         f:Hide()
         return
     end
@@ -789,7 +794,6 @@ local function update()
 
     if o.hideWhileMounted and (IsMounted() or (ns.DragonRiding and ns.DragonRiding:IsOnSkyridingMount())) then f:Hide() return end
     if o.hideInRested and IsResting() then f:Hide() return end
-    if o.onlyOutOfCombat and InCombatLockdown() then f:Hide() return end
     if o.instanceOnly and not IsInInstance() then f:Hide() return end
     if not o.showInRaid and IsInRaid() then f:Hide() return end
 
@@ -908,7 +912,7 @@ local function onLifecycleEvent(event, unit)
     if event == "PLAYER_DEAD" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         wipe(personalStates)
     end
-    if event == "PLAYER_DEAD" then
+    if event == "PLAYER_DEAD" or event == "PLAYER_REGEN_DISABLED" then
         if ClassReminders.frame then ClassReminders.frame:Hide() end
         return
     end

@@ -153,10 +153,12 @@ local function resourceAlpha(profile, inCombat)
     return profile.hideOutOfCombat and not inCombat and not Resources._previewActive and 0 or 1
 end
 
-local function updateEbonMight()
+local function updateAuraResources()
     local profile = Resources.profileRef
     if profile then
-        ns.EbonMight.Update(profile, Resources._previewActive, resourceAlpha(profile, InCombatLockdown()))
+        local alpha = resourceAlpha(profile, InCombatLockdown())
+        ns.EbonMight.Update(profile, Resources._previewActive, alpha)
+        ns.ArcaneSoul.Update(profile, Resources._previewActive, alpha)
     end
 end
 
@@ -206,13 +208,20 @@ function Resources:OnEnable(_, profile)
         end
         applyCombatVisibility(true)
         ns.EbonMight.SetAlpha(1)
+        ns.ArcaneSoul.SetAlpha(1)
     end)
     self._leaveCB = ns:RegisterEvent("PLAYER_REGEN_ENABLED", function()
         applyCombatVisibility(false)
-        updateEbonMight()
+        updateAuraResources()
     end)
-    self._restrictionCB = ns:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED", updateEbonMight)
-    self._editCB = ns:RegisterMessage("EDIT_MODE_CHANGED", updateEbonMight)
+    self._soulTalents = ns:RegisterEvent("TRAIT_CONFIG_UPDATED", updateAuraResources)
+    self._soulHaste = ns:RegisterEvent("UNIT_SPELL_HASTE", function(_, unit)
+        if unit == "player" and Resources.profileRef.arcaneSoulEnabled and not InCombatLockdown() then
+            updateAuraResources()
+        end
+    end)
+    self._restrictionCB = ns:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED", updateAuraResources)
+    self._editCB = ns:RegisterMessage("EDIT_MODE_CHANGED", updateAuraResources)
 
     self._specCB = ns:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", function(_, unit)
         if unit and unit ~= "player" then return end
@@ -239,6 +248,9 @@ function Resources:OnDisable()
     Primary:Disable()
     Secondary:Disable()
     ns.EbonMight.Hide()
+    ns.ArcaneSoul.Hide()
+    ns:UnregisterEvent("TRAIT_CONFIG_UPDATED", self._soulTalents)
+    ns:UnregisterEvent("UNIT_SPELL_HASTE", self._soulHaste)
     if self._editCB then
         ns:UnregisterMessage("EDIT_MODE_CHANGED", self._editCB)
         self._editCB = nil
@@ -396,7 +408,7 @@ function Resources:ApplyOptions()
     secondary_ApplyStyle()
     secondary_ApplyValueText()
     Display.RefreshPowerPrediction()
-    updateEbonMight()
+    updateAuraResources()
 
     local InCombatLockdown = InCombatLockdown
     applyCombatVisibility(InCombatLockdown and InCombatLockdown() or false)
@@ -420,7 +432,7 @@ function Resources:SetPreview(flag)
     local inCombat = InCombatLockdown and InCombatLockdown() or false
     if flag then
         applyCombatVisibility(inCombat)
-        updateEbonMight()
+        updateAuraResources()
         if Display and Display.primary_Refresh then Display.primary_Refresh() end
         if Display and Display.secondary_Refresh then Display.secondary_Refresh() end
         dlog("SetPreview: ON")

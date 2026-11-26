@@ -242,18 +242,19 @@ function CastBar:ApplyCastVisual(castType, spellName, iconTexture, notInterrupti
 end
 
 -- Both the settings preview and the HUD use the same duration and fill geometry.
-function CastBar:LayoutQueueWindow(bar, enabled, seconds, drain)
+local function layoutTimingZone(bar, key, milliseconds, seconds, drain, latency)
     local frame = bar.frame
-    local queue = enabled and C_Spell.GetSpellQueueWindow and C_Spell.GetSpellQueueWindow()
+    local queue = milliseconds
     if type(queue) ~= "number" or queue <= 0 or isSecret(seconds) or type(seconds) ~= "number" or seconds <= 0 then
-        if bar.queueZone then bar.queueZone:Hide() end
+        if bar[key] then bar[key]:Hide() end
         return
     end
-    local zone = bar.queueZone
+    local zone = bar[key]
     if not zone then
-        zone = frame:CreateTexture(nil, "OVERLAY", nil, 1)
-        zone:SetColorTexture(1, 1, 1, 0.32)
-        bar.queueZone = zone
+        zone = frame:CreateTexture(nil, "OVERLAY", nil, latency and 2 or 1)
+        if latency then zone:SetColorTexture(1, 0.25, 0.15, 0.75)
+        else zone:SetColorTexture(1, 1, 1, 0.32) end
+        bar[key] = zone
     end
     local edge = drain and "LEFT" or "RIGHT"
     zone:ClearAllPoints()
@@ -263,6 +264,15 @@ function CastBar:LayoutQueueWindow(bar, enabled, seconds, drain)
     zone:SetPoint("BOTTOM" .. edge, frame, "BOTTOM" .. edge, x, inset)
     zone:SetWidth(math.max(0.01, (frame:GetWidth() - 2 * inset) * math.min(1, queue / (1000 * seconds))))
     zone:Show()
+end
+
+function CastBar:LayoutQueueWindow(bar, enabled, seconds, drain)
+    local ms = enabled and C_Spell.GetSpellQueueWindow and C_Spell.GetSpellQueueWindow()
+    layoutTimingZone(bar, "queueZone", ms, seconds, drain)
+end
+
+function CastBar:LayoutLatency(bar, enabled, seconds, drain, ms)
+    layoutTimingZone(bar, "latencyZone", enabled and ms, seconds, drain, true)
 end
 
 function CastBar:LayoutEmpowerColors(bar, fractions, color)
@@ -304,11 +314,20 @@ function CastBar:LayoutEmpowerColors(bar, fractions, color)
     clip:Show()
 end
 
+function CastBar:MatchLatency(guid)
+    local sent = self._sent
+    self._sent, self._latencyMs = nil, nil
+    if sent and not isSecret(guid) and sent.guid == guid then
+        self._latencyMs = (GetTimePreciseSec() - sent.at) * 1000
+    end
+end
+
 function CastBar:RefreshTimerLayout()
     if not self._activeDuration then return end
     local p = getProfile()
     local enabled = p and p.showQueueWindow and self._visualCastType ~= "empower"
     self:LayoutQueueWindow(self.bar, enabled, self._queueSeconds, self._visualCastType == "channel")
+    self:LayoutLatency(self.bar, p and p.showCastLatency, self._queueSeconds, self._visualCastType == "channel", self._latencyMs)
     self:LayoutStagePips()
 end
 
@@ -320,6 +339,7 @@ function CastBar:ArmTimer(durationObject, drain, startMs, endMs)
     self._queueSeconds = computeRemainingSec(startMs, endMs)
     if not self._queueSeconds then self._queueSeconds = durationObject:GetTotalDuration() end
     self:LayoutQueueWindow(self.bar, queue, self._queueSeconds, drain)
+    self:LayoutLatency(self.bar, profile and profile.showCastLatency, self._queueSeconds, drain, self._latencyMs)
     local ok = self.bar:SetTimerDuration(durationObject, INTERP_IMMEDIATE, direction)
     if not ok then
         dlog("ArmTimer: SetTimerDuration failed (durationObject malformed?)")
@@ -388,6 +408,8 @@ function CastBar:StartLiveTimer(durationObject)
 end
 
 function CastBar:StopLiveTimer()
+    self._latencyMs = nil
+    if self.bar and self.bar.latencyZone then self.bar.latencyZone:Hide() end
     if self.bar and self.bar.queueZone then self.bar.queueZone:Hide() end
     self._activeDuration = nil
     self._lastDisplayedTenths = nil
@@ -417,7 +439,7 @@ local function plainNumber(v)
     return v
 end
 
-function CastBar:GetChannelTickFractions(spellID, totalSeconds)
+function CastBar:GetChannelTickFractions(spellID, totalSeconds, start, castID, cadence)
     if not plainNumber(spellID) then return nil end
     local count = CHANNEL_INTERVALS[spellID]
     if spellID == 47540 or spellID == 47757 or spellID == 47758 or spellID == 373129 or spellID == 400171 then
@@ -431,7 +453,23 @@ function CastBar:GetChannelTickFractions(spellID, totalSeconds)
     end
     local marks = {}
     if count then
-        for i = 1, count - 1 do marks[i] = 1 - i / count end
+        local carry = 0
+        if cadence and CHANNEL_EXTRA_INTERVALS[spellID] and start and totalSeconds and totalSeconds > 0 then
+            if cadence.spell == spellID and cadence.finish and start < cadence.finish then
+                if (castID and castID == cadence.id) or (not castID and start == cadence.start) then
+                    carry = cadence.carry
+                elseif start > cadence.start then
+                    carry = (cadence.finish - start) % cadence.interval
+                    if carry < 0.01 or carry > cadence.interval - 0.05 then carry = 0 end
+                end
+            end
+            if carry >= totalSeconds - 0.01 then carry = 0 end
+            cadence.spell, cadence.start, cadence.finish = spellID, start, start + totalSeconds
+            cadence.interval, cadence.id, cadence.carry = (totalSeconds - carry) / count, castID, carry
+        end
+        if carry > 0 then marks[1] = 1 - carry / totalSeconds end
+        local first = carry > 0 and carry / totalSeconds or 0
+        for i = 1, count - 1 do marks[#marks + 1] = (1 - first) * (1 - i / count) end
     elseif (spellID == 198013 or spellID == 473728) and plainNumber(totalSeconds) and totalSeconds > 0 then
         for elapsed = 0.2, totalSeconds - 0.001, 0.2 do
             marks[#marks + 1] = 1 - elapsed / totalSeconds
@@ -736,6 +774,7 @@ local function freezeCompletedBar(bar)
 end
 
 function CastBar:PlayInterruptedVisual()
+    self._cadence = nil
     if not self.bar then return end
     local profile = getProfile()
     if not profile then return end
@@ -750,6 +789,7 @@ function CastBar:PlayInterruptedVisual()
 end
 
 function CastBar:PlayFailedVisual()
+    self._cadence = nil
     if not self.bar then return end
     local profile = getProfile()
     if not profile then return end
@@ -793,6 +833,7 @@ local function playerHasLiveCast()
 end
 
 function CastBar:OnSpellcastStart(castGUID, castBarID)
+    self._cadence = nil
     if self._state == "channeling" or self._state == "empowering" then
         local castingName = UnitCastingInfo and UnitCastingInfo("player")
         if hasCastInfo(castingName) then
@@ -829,6 +870,7 @@ function CastBar:OnSpellcastStart(castGUID, castBarID)
 
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, false)
 
+    self:MatchLatency(castGUID)
     self._activeCastID = readCastGUID(castID) or readCastGUID(castGUID)
     self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
@@ -861,6 +903,16 @@ function CastBar:OnSpellcastDelayed(castGUID, castBarID)
     end
 end
 
+function CastBar:UpdateChannelMarks(startMs, endMs)
+    local start = plainNumber(startMs)
+    local length = computeRemainingSec(startMs, endMs)
+    local spell = self._channelSpell
+    if not spell or not CHANNEL_EXTRA_INTERVALS[spell] or not length then self._cadence = nil end
+    self._cadence = self._cadence or {}
+    self._channelTicks = self:GetChannelTickFractions(spell, length, start and start / 1000,
+        self._activeCastID or self._activeCastBarID, self._cadence)
+end
+
 function CastBar:OnChannelStart(castGUID, castBarID, eventSpellID)
     if self._state ~= "idle" then
         dlog("CastBar: preempting previous cast (state="
@@ -885,16 +937,15 @@ function CastBar:OnChannelStart(castGUID, castBarID, eventSpellID)
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, true)
 
     self._state = "channeling"
+    self:MatchLatency(castGUID)
     self._activeCastID = readCastGUID(castGUID)
     self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
     self._failedFlag    = false
 
     self:ApplyCastVisual("channel", castDisplayName(displayName, name), texture, notInterruptible)
-    local channelStart, channelEnd = plainNumber(startMs), plainNumber(endMs)
-    local channelLength = channelStart and channelEnd and (channelEnd - channelStart) / 1000
-    self._channelTicks = self:GetChannelTickFractions(spellID, channelLength)
-        or self:GetChannelTickFractions(eventSpellID, channelLength)
+    self._channelSpell = plainNumber(spellID) or plainNumber(eventSpellID)
+    self:UpdateChannelMarks(startMs, endMs)
     self:LayoutStagePips()
 
     local duration = UnitChannelDuration("player")
@@ -917,6 +968,8 @@ function CastBar:OnChannelUpdate(castGUID, castBarID)
     if matches == nil then
         if not hasCastInfo(name) or (not isSecret(empowered) and empowered) then return end
     end
+    self:UpdateChannelMarks(startMs, endMs)
+    self:LayoutStagePips()
     local duration = UnitChannelDuration("player")
     if duration then
         self:ArmTimer(duration, true, startMs, endMs)
@@ -925,6 +978,7 @@ function CastBar:OnChannelUpdate(castGUID, castBarID)
 end
 
 function CastBar:OnEmpowerStart(castGUID, castBarID)
+    self._cadence = nil
     if self._state ~= "idle" then
         dlog("CastBar: preempting previous cast (state="
             .. tostring(self._state) .. ") for new EMPOWER_START")
@@ -946,6 +1000,7 @@ function CastBar:OnEmpowerStart(castGUID, castBarID)
     stampLastCast(name, startMs, endMs, spellID, notInterruptible, true)
 
     self._state = "empowering"
+    self:MatchLatency(castGUID)
     self._activeCastID = readCastGUID(castGUID)
     self._activeCastBarID = castBarID or nativeCastBarID
     self._succeededFlag = false
@@ -1229,6 +1284,7 @@ function CastBar:OnInterruptibleChanged(notInterruptible)
 end
 
 function CastBar:OnPlayerEnteringWorld()
+    self._cadence = nil
     self:HideNow()
     self._succeededFlag = false
     self._failedFlag    = false
@@ -1367,6 +1423,11 @@ function CastBar:RunTest()
 end
 
 local EVENT_DISPATCH = {
+    UNIT_SPELLCAST_SENT = function(_, _, guid)
+        if CastBar.profileRef and CastBar.profileRef.showCastLatency and not isSecret(guid) and guid then
+            CastBar._sent = { guid = guid, at = GetTimePreciseSec() }
+        end
+    end,
     UNIT_SPELLCAST_START               = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastStart(castGUID, castBarID) end,
     UNIT_SPELLCAST_STOP                = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastStop(castGUID, castBarID) end,
     UNIT_SPELLCAST_DELAYED             = function(_unit, castGUID, _spellID, castBarID) CastBar:OnSpellcastDelayed(castGUID, castBarID) end,
@@ -1521,6 +1582,7 @@ function CastBar:OnEnable(_, profile)
         if not ok2 then dlog("RegisterUnitEvent(%s) failed: %s", event, tostring(err)) end
     end
 
+    regUnit("UNIT_SPELLCAST_SENT")
     regUnit("UNIT_SPELLCAST_START")
     regUnit("UNIT_SPELLCAST_STOP")
     regUnit("UNIT_SPELLCAST_FAILED")
@@ -1565,6 +1627,7 @@ function CastBar:ApplyBlizzardSuppression()
 end
 
 function CastBar:OnDisable()
+    self._cadence = nil
     self._enabled = false
 
     if self.eventFrame then

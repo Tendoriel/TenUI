@@ -40,6 +40,7 @@ Modules\Resources\ResourceEngine.lua
 Modules\Resources\NativeResourceBar.lua
 Modules\Resources\PowerPrediction.lua
 Modules\Resources\EbonMight.lua
+Modules\Resources\ArcaneSoul.lua
 Modules\Resources\ResourceDisplay.lua
 Modules\Resources\ResourceModule.lua
 Modules\Glow.lua
