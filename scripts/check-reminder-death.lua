@@ -24,7 +24,7 @@ local frame = {
 for i = 1, 8 do
     frame.slots[i] = setmetatable({ label = region, icon = region, glow = region, check = region, glowAnim = region }, { __index = region })
 end
-CreateFrame = function() return { SetScript = noop, RegisterUnitEvent = noop } end
+CreateFrame = function() return { SetScript = noop, UnregisterEvent = noop, RegisterUnitEvent = noop } end
 local handlers = {}
 local options = { enabled = true, raidBuffs = true, showInRaid = true }
 local profile = { modules = { General = { classReminders = options } } }

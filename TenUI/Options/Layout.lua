@@ -231,8 +231,7 @@ local function addTextStyleControls(children, sc, C, label, getStyle, apply)
         function(v)
             getStyle().size = math.floor(v + 0.5)
             apply()
-        end
-    )
+        end, 12)
 
     children[#children + 1] = C.CreateOutlineDropdown(sc, "Outline",
         function()
@@ -261,8 +260,7 @@ local function addTextStyleControls(children, sc, C, label, getStyle, apply)
         function(v)
             getStyle().x = math.floor(v + 0.5)
             apply()
-        end
-    )
+        end, 0)
 
     children[#children + 1] = C.CreateSlider(sc, "Y Offset", -100, 100, 1,
         function()
@@ -272,8 +270,7 @@ local function addTextStyleControls(children, sc, C, label, getStyle, apply)
         function(v)
             getStyle().y = math.floor(v + 0.5)
             apply()
-        end
-    )
+        end, 0)
 end
 
 local function buildLayoutPage(sc)
@@ -298,6 +295,7 @@ local function buildLayoutPage(sc)
         if not found then _selectedAnchor = "Resources" end
     end
 
+    sc.searchTab = _selectedAnchor
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Anchor", anchorItems,
         function() return _selectedAnchor end,
         function(k)
@@ -318,7 +316,7 @@ local function buildLayoutPage(sc)
         end
     )
 
-    do
+    if not readSelectedAnchorProfile().attachTo then
         local xsl = C.CreateSlider(sc, "X Offset", -960, 960, 1,
             function()
                 local ap = readSelectedAnchorProfile()
@@ -331,13 +329,12 @@ local function buildLayoutPage(sc)
                 if not InCombatLockdown() and ns.Anchors and ns.Anchors.Reapply then
                     ns.Anchors:Reapply(_selectedAnchor)
                 end
-            end
-        )
+            end)
         _xSlider = xsl
         children[#children + 1] = xsl
     end
 
-    do
+    if not readSelectedAnchorProfile().attachTo then
         local ysl = C.CreateSlider(sc, "Y Offset", -540, 540, 1,
             function()
                 local ap = readSelectedAnchorProfile()
@@ -350,10 +347,37 @@ local function buildLayoutPage(sc)
                 if not InCombatLockdown() and ns.Anchors and ns.Anchors.Reapply then
                     ns.Anchors:Reapply(_selectedAnchor)
                 end
-            end
-        )
+            end)
         _ySlider = ysl
         children[#children + 1] = ysl
+    end
+
+    local targets = {{key = "screen", label = "Screen"}}
+    for _, item in ipairs(anchorItems) do
+        if ns.Anchors:CanAttach(_selectedAnchor, item.key) then targets[#targets+1] = item end
+    end
+    local function attachment(field, value)
+        if InCombatLockdown() then return end
+        local entry = ns.Anchors:GetEditableEntry(_selectedAnchor)
+        entry[field] = value
+        ns.Anchors:Reapply(_selectedAnchor)
+    end
+    children[#children+1] = C.CreateDropdownLikeList(sc, "Attach to", targets,
+        function() return ns.Anchors:GetEditableEntry(_selectedAnchor).attachTo or "screen" end,
+        function(v)
+            attachment("attachTo", v ~= "screen" and v or nil)
+            ns.Options:RebuildPage("layout")
+        end)
+    if ns.Anchors:GetEditableEntry(_selectedAnchor).attachTo then
+        children[#children+1] = C.CreateDropdownLikeList(sc, "Attach to edge",
+            {{key="BOTTOM",label="Below"}, {key="TOP",label="Above"}, {key="LEFT",label="Left"}, {key="RIGHT",label="Right"}},
+            function() return ns.Anchors:GetEditableEntry(_selectedAnchor).attachSide or "BOTTOM" end, function(v) attachment("attachSide", v) end)
+        for _, axis in ipairs({"X", "Y"}) do
+            local key = "attach" .. axis
+            children[#children+1] = C.CreateSlider(sc, "Attachment offset " .. axis, -500, 500, 1,
+                function() return ns.Anchors:GetEditableEntry(_selectedAnchor)[key] or (key == "attachX" and 0 or -2) end,
+                function(v) attachment(key, v) end)
+        end
     end
 
     if ns.Anchors and ns.Anchors:CanMatchEssentialWidth(_selectedAnchor) then
@@ -371,6 +395,31 @@ local function buildLayoutPage(sc)
     end
 
     if isIconVisualAnchor(_selectedAnchor) then
+        if _selectedAnchor ~= "TrackedIcon" and _selectedAnchor ~= "Consumables" then
+            children[#children+1] = C.CreateCheckBox(sc, "Show action keybinds", function() return getVisualsProfile(_selectedAnchor).showKeybind end,
+                function(v) getVisualsProfile(_selectedAnchor).showKeybind = v applyTextStyle(_selectedAnchor) end)
+            children[#children+1] = C.CreateFontDropdown(sc, "Keybind font", function() return getVisualsProfile(_selectedAnchor).keybindFont end,
+                function(v) getVisualsProfile(_selectedAnchor).keybindFont = v applyTextStyle(_selectedAnchor) end)
+            children[#children+1] = C.CreateDropdownLikeList(sc, "Keybind corner",
+                {{key="TOPLEFT",label="Top left"}, {key="TOPRIGHT",label="Top right"}, {key="BOTTOMLEFT",label="Bottom left"}, {key="BOTTOMRIGHT",label="Bottom right"}},
+                function() return getVisualsProfile(_selectedAnchor).keybindCorner or "TOPLEFT" end,
+                function(v) getVisualsProfile(_selectedAnchor).keybindCorner = v applyTextStyle(_selectedAnchor) end)
+        end
+        local sources = {{key="choose", label="Choose a container…"}}
+        for _, item in ipairs(anchorItems) do
+            if item.key ~= _selectedAnchor and isIconVisualAnchor(item.key) then sources[#sources+1] = item end
+        end
+        children[#children+1] = C.CreateDropdownLikeList(sc, "Copy visuals from", sources, function() return "choose" end,
+            function(source)
+                if source == "choose" or InCombatLockdown() then return end
+                local from, to = getVisualsProfile(source), getVisualsProfile(_selectedAnchor)
+                for _, key in ipairs({"iconWidth","iconHeight","spacing","orientation","showBorder","borderColor","textCooldown","textStack","text"}) do
+                    to[key] = type(from[key]) == "table" and CopyTable(from[key]) or from[key]
+                end
+                applyVisualSize(_selectedAnchor)
+                applyTextStyle(_selectedAnchor)
+                ns.Options:RebuildPage("layout")
+            end)
         children[#children + 1] = C.CreateSlider(sc, "Icon Width", 8, 200, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -380,8 +429,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.iconWidth = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
-            end
-        )
+            end, 36)
         children[#children + 1] = C.CreateSlider(sc, "Icon Height", 8, 200, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -391,8 +439,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.iconHeight = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
-            end
-        )
+            end, 36)
         children[#children + 1] = C.CreateSlider(sc, "Icon Spacing", 0, 40, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -402,8 +449,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.spacing = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
-            end
-        )
+            end, 2)
 
         children[#children + 1] = C.CreateDropdownLikeList(sc, "Orientation",
             {
@@ -444,8 +490,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.borderColor = { r or 0, g or 0, b or 0, a or 1 }
                 applyTextStyle(_selectedAnchor)
-            end
-        )
+            end, { 0, 0, 0, 1 })
     elseif BAR_VISUAL_SET[_selectedAnchor] then
         children[#children + 1] = C.CreateSlider(sc, "Bar Width", 40, 600, 1,
             function()
@@ -458,8 +503,7 @@ local function buildLayoutPage(sc)
                 if n < 1 then n = 1 end
                 vp.barWidth = n
                 applyVisualSize(_selectedAnchor)
-            end
-        )
+            end, 250)
         children[#children + 1] = C.CreateSlider(sc, "Bar Height", 6, 60, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -469,8 +513,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.barHeight = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
-            end
-        )
+            end, 18)
         children[#children + 1] = C.CreateSlider(sc, "Bar Spacing", 0, 40, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -480,8 +523,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.spacing = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
-            end
-        )
+            end, 2)
 
         children[#children + 1] = C.CreateStatusBarTextureDropdown(sc, "Bar Texture",
             function()
@@ -506,8 +548,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.fillColor = { r or 1, g or 1, b or 1, a or 1 }
                 applyTextStyle("TrackedBars")
-            end
-        )
+            end, { 1, 1, 1, 1 })
 
         children[#children + 1] = C.CreateCheckBox(sc, "Show Background",
             function()
@@ -532,8 +573,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.bgColor = { r or 0, g or 0, b or 0, a or 0.5 }
                 applyTextStyle("TrackedBars")
-            end
-        )
+            end, { 0, 0, 0, 0.5 })
 
         children[#children + 1] = C.CreateCheckBox(sc, "Show Border",
             function()
@@ -558,8 +598,7 @@ local function buildLayoutPage(sc)
                 local vp = getVisualsProfile(_selectedAnchor)
                 vp.borderColor = { r or 0, g or 0, b or 0, a or 1 }
                 applyTextStyle("TrackedBars")
-            end
-        )
+            end, { 0, 0, 0, 1 })
     else
         children[#children + 1] = C.CreateSlider(sc, "Width", 40, 1000, 1,
             function()
@@ -576,8 +615,7 @@ local function buildLayoutPage(sc)
                         ns.Anchors:SaveSize(rt.frame)
                     end
                 end
-            end
-        )
+            end, 200)
         children[#children + 1] = C.CreateSlider(sc, "Height", 8, 200, 1,
             function()
                 local ap = getSelectedAnchorProfile()
@@ -593,8 +631,7 @@ local function buildLayoutPage(sc)
                         ns.Anchors:SaveSize(rt.frame)
                     end
                 end
-            end
-        )
+            end, 32)
     end
 
     if not isBarAnchor(_selectedAnchor) then
@@ -613,8 +650,7 @@ local function buildLayoutPage(sc)
                         ns.Pixel.RefreshEdges()
                     end
                 end
-            end
-        )
+            end, 1.0)
     end
 
     if isIconVisualAnchor(_selectedAnchor) then
@@ -656,8 +692,7 @@ local function buildLayoutPage(sc)
                     end
                 end
             end
-        end
-    )
+        end, 1.0)
 
     children[#children + 1] = C.CreateSection(sc, "Visibility")
     children[#children + 1] = C.CreateHelpText(sc,
@@ -769,8 +804,7 @@ local function buildLayoutPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Snap Distance (px)", 2, 64, 1,
         function() return getSnapProfile().distance or 6 end,
-        function(v) getSnapProfile().distance = math.floor(v + 0.5) end
-    )
+        function(v) getSnapProfile().distance = math.floor(v + 0.5) end, 6)
 
     children[#children + 1] = C.CreateSlider(sc, "Snap Gap (px)", 0, 20, 1,
         function()
@@ -781,8 +815,7 @@ local function buildLayoutPage(sc)
             local g = math.floor(v + 0.5)
             if g < 0 then g = 0 end
             getSnapProfile().gap = g
-        end
-    )
+        end, 2)
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Snap Lines",
         function() return getSnapProfile().showLines ~= false end,
@@ -819,12 +852,13 @@ local function buildLayoutPage(sc)
             if ns.Anchors and ns.Anchors.RefreshGridOverlay then
                 ns.Anchors:RefreshGridOverlay()
             end
-        end
-    )
+        end, 32)
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math.max(totalH, 10))
 end
+
+ns.Options.GetSnapSettings = getSnapProfile
 
 function ns.Options:OpenLayoutForAnchor(anchor)
     if not anchor then return end

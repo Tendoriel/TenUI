@@ -57,6 +57,7 @@ function Pixel.RefreshEdges()
 end
 
 function Pixel.SetFont(region, font, size, flags)
+    if flags == "GLOBAL" then flags = ns:GetGlobalStyle().outline or "OUTLINE" end
     if type(flags) ~= "string" then flags = "" end
     local slug = flags and flags:find("SLUG", 1, true) and flags
         or (flags and flags ~= "" and flags .. ", SLUG" or "SLUG")

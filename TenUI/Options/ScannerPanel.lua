@@ -800,11 +800,12 @@ local function buildScannerPage(sc)
         _selectedCustomBarID = tonumber(ui.lastOptionsSub.cdmbarsCustomBar)
     end
 
+    sc.searchTab = _selectedContainer
     local canPreview = _selectedContainer ~= "Consumables"
     local header = ns.Options:BuildCooldownHeader("cdmbars", "cdmbars", 55)
     _updatePreview = canPreview and ns.Options:CreateCooldownStrip(header, -56, {
         resize = function(height) ns.Options:GetPinnedHeader("cdmbars", height) end,
-        select = function(item) ns.AbilityPanel:OpenForSpell(item.spellID, item) end,
+        select = function(item, group) ns.AbilityPanel:OpenForSpell(item.spellID, item, group) end,
         move = function(source, row, index)
             ns.Bars:MovePreviewEntry(source.item.rowName, source.item.entry, source.row, row, index)
             refreshCooldownPreview()

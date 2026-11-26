@@ -43,6 +43,7 @@ function UI.CreateSection(parent, title)
     line:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
     line:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     f.text = fs
+    f.searchHeading = true
     return f
 end
 
@@ -52,6 +53,7 @@ function UI.CreateSubSection(parent, title)
     local fs = UI.Text(f, UI.Fonts.section, Theme.color.violet, string.upper(tostring(title or "")))
     fs:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 2)
     f.text = fs
+    f.searchHeading = true
     return f
 end
 
@@ -197,7 +199,23 @@ end
 
 UI.CreateToggle = UI.CreateCheckBox
 
-function UI.CreateSlider(parent, labelText, minVal, maxVal, step, get, set)
+local function addReset(row, value, apply)
+    if value == nil then return end
+    row:EnableMouse(true)
+    row:HookScript("OnMouseUp", function(_, button)
+        if button ~= "RightButton" then return end
+        if type(value) == "table" then apply(unpack(value)) else apply(value) end
+        row.Refresh()
+    end)
+    row:HookScript("OnEnter", function()
+        GameTooltip:SetOwner(row, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Right-click the label to restore its default")
+        GameTooltip:Show()
+    end)
+    row:HookScript("OnLeave", function() if GameTooltip:IsOwned(row) then GameTooltip:Hide() end end)
+end
+
+function UI.CreateSlider(parent, labelText, minVal, maxVal, step, get, set, default)
     minVal = minVal or 0
     maxVal = maxVal or 1
     step   = step or 0.01
@@ -363,6 +381,7 @@ function UI.CreateSlider(parent, labelText, minVal, maxVal, step, get, set)
     eb:SetScript("OnEditFocusLost", commitEditBox)
 
     f.Refresh = refresh
+    addReset(f, default, set)
     f.slider  = slider
     f.editBox = eb
     return f
@@ -624,7 +643,7 @@ end
 
 UI.CreateDropdown = UI.CreateDropdownLikeList
 
-function UI.CreateColorSwatch(parent, labelText, getRGBA, setRGBA)
+function UI.CreateColorSwatch(parent, labelText, getRGBA, setRGBA, default)
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(ROW_W, ROW_H)
 
@@ -685,6 +704,7 @@ function UI.CreateColorSwatch(parent, labelText, getRGBA, setRGBA)
     end)
 
     f.Refresh = refresh
+    addReset(f, default, setRGBA)
     f.swatch = swatch
     return f
 end
@@ -724,6 +744,7 @@ local LEGACY_KEY_TO_LSM = {
 }
 
 function UI.ResolveFontPath(key)
+    if not key or key == "default" or key == "GLOBAL" then key = ns:GetGlobalStyle().font or key end
     if key == nil or key == "" then return Theme.font.fallback end
     if type(key) == "string" and (key:find("\\", 1, true) or key:find("/", 1, true)) then
         return key
@@ -793,12 +814,14 @@ local function fontDisplayKey(stored)
     return stored
 end
 
-function UI.CreateFontDropdown(parent, labelText, get, set)
+function UI.CreateFontDropdown(parent, labelText, get, set, globalPicker)
     local current = type(get) == "function" and get() or nil
     local values = lsmFontValues(current)
+    if not globalPicker then table.insert(values, 1, { key = "default", label = "Global default" }) end
     return UI.CreateDropdownLikeList(parent, labelText, values,
         function()
             local v = type(get) == "function" and get() or nil
+            if not globalPicker and (not v or v == "default") then return "default" end
             return fontDisplayKey(v)
         end,
         set
@@ -811,8 +834,12 @@ local OUTLINE_LIST = {
     { key = "THICKOUTLINE", label = "Thick Outline" },
 }
 
-function UI.CreateOutlineDropdown(parent, labelText, get, set)
-    return UI.CreateDropdownLikeList(parent, labelText or "Outline", OUTLINE_LIST, get, set)
+function UI.CreateOutlineDropdown(parent, labelText, get, set, globalPicker)
+    local values = OUTLINE_LIST
+    if not globalPicker then
+        values = { { key = "GLOBAL", label = "Global default" }, unpack(OUTLINE_LIST) }
+    end
+    return UI.CreateDropdownLikeList(parent, labelText or "Outline", values, get, set)
 end
 
 local function barfxStatusbarSet()
@@ -892,12 +919,14 @@ local function statusbarDisplayKey(stored)
     return stored
 end
 
-function UI.CreateStatusBarTextureDropdown(parent, labelText, get, set)
+function UI.CreateStatusBarTextureDropdown(parent, labelText, get, set, globalPicker)
     local current = type(get) == "function" and get() or nil
     local values = lsmStatusbarValues(current)
+    if not globalPicker then table.insert(values, 1, { key = "default", label = "Global default" }) end
     return UI.CreateDropdownLikeList(parent, labelText, values,
         function()
             local v = type(get) == "function" and get() or nil
+            if not v or v == "" then return globalPicker and "Blizzard" or "default" end
             return statusbarDisplayKey(v)
         end,
         set

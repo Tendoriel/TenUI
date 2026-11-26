@@ -1,9 +1,11 @@
 -- Verify how the helper configures the two native aura slots, including spec changes.
+unpack = unpack or table.unpack
 local function noop() end
 local spec, tree, haste, combat = 62, 39, 0, false
 local frames, slots = {}, {}
 local function frame(parent)
     local f = { parent = parent, visible = true }
+    f.SetTextColor = noop
     f.SetAllPoints, f.SetPoint = noop, noop
     f.SetMouseClickEnabled, f.SetMouseMotionEnabled = noop, noop
     function f:GetParent() return self.parent end
@@ -47,7 +49,7 @@ C_CurveUtil = { CreateColorCurve = function() return { SetType = noop, AddPoint 
 CreateColor = function(...) return {...} end
 Enum = { LuaCurveType = { Step = 1 }, DurationTextBindingProperty = { RemainingDuration = 1 } }
 local anchor
-local ns = { Pixel = { SetFont = noop }, EditMode = { IsActive = function() return false end },
+local ns = { Widgets = { resolveMedia = function() return "font" end }, Pixel = { SetFont = noop }, EditMode = { IsActive = function() return false end },
     Debug = { Warn = function(_, _, reason) error(reason) end },
     Resources_Resolver = { GetPlayerInfo = function() return "MAGE", 1, spec end },
     GetAnchor = function() return anchor end,

@@ -1922,6 +1922,12 @@ local function handler(msg)
     cmd = (cmd or ""):lower()
     rest = rest or ""
 
+    if cmd == "profile" then
+        if rest == "" or rest == "list" then out(table.concat(ns:ListProfiles(), ", "))
+        elseif ns:SetActiveProfile(rest) then out("Active profile: " .. rest)
+        else out("Unknown profile or in combat.") end
+        return
+    end
     if cmd == "help" or cmd == "?" then
         showHelp()
         return

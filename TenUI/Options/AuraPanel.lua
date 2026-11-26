@@ -10,6 +10,7 @@ local pcall    = pcall
 local ipairs   = ipairs
 
 local _selectedAuraContainer = "TrackedBars"
+local batch
 local _currentAuraSpellID    = nil
 local _currentAuraContainer  = nil
 local _currentAuraCooldownID = nil
@@ -310,11 +311,12 @@ local function buildAuraPage(sc)
         end
     end
 
+    sc.searchTab = _selectedAuraContainer
     local containerKey = _selectedAuraContainer
     local header = ns.Options:BuildCooldownHeader("auras", containerKey, 64)
     _updateAuraPreview = ns.Options:CreateCooldownStrip(header, -29, {
         resize = function(height) ns.Options:GetPinnedHeader("auras", height) end,
-        select = function(item) AuraPanel:OpenForAura(item.spellID, containerKey, item.cooldownID) end,
+        select = function(item, group) AuraPanel:OpenForAura(item.spellID, containerKey, item.cooldownID, group) end,
         move = function(source, _, index, item)
             if item and ns.Auras:MoveTrackedEntry(containerKey, source.item.key, item.key, source.index < index) then
                 rebuildAuraList()
@@ -426,8 +428,7 @@ local function buildAuraPage(sc)
                 auras.profileRef.timerDecimals = v > 0 and math.floor(v + 0.5) or nil
                 auras:RequestRefresh()
             end
-        end
-    )
+        end, 0)
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Tracked aura tooltips", {
         { key = "always", label = "Always" },
@@ -482,8 +483,7 @@ local function buildAuraPage(sc)
             local _, threshold = ns.Auras:GetLowTimeTextConfig()
             return threshold
         end,
-        function(v) if ns.Auras then ns.Auras:SetLowTimeTextThreshold(v) end end
-    )
+        function(v) if ns.Auras then ns.Auras:SetLowTimeTextThreshold(v) end end, 5)
     children[#children + 1] = C.CreateColorSwatch(sc, "Low-time color",
         function()
             if not ns.Auras then return 1, 0.15, 0.1, 1 end
@@ -491,8 +491,7 @@ local function buildAuraPage(sc)
         end,
         function(r, g, b)
             if ns.Auras then ns.Auras:SetLowTimeTextLowRGB(r, g, b) end
-        end
-    )
+        end, { 1, 0.15, 0.1, 1 })
 
     _relayoutAuraPage = function()
         local h = C.LayoutVertical(sc, children, 4, -8)
@@ -601,7 +600,7 @@ local function buildAuraSettingsPage(sc)
             local color = (barSettings().appearance or {}).fill or (visuals and visuals.fillColor)
             if color then return color[1], color[2], color[3], color[4] or 1 end
             return 1, 1, 1, 1
-        end, function(r, g, b, a) setAppearance("fill", { r, g, b, a or 1 }) end)
+        end, function(r, g, b, a) setAppearance("fill", { r, g, b, a or 1 }) end, { 1, 1, 1, 1 })
         for _, field in ipairs({ { key = "showIcon", label = "Show icon" }, { key = "showName", label = "Show name" },
                                 { key = "showTimer", label = "Show timer" }, { key = "reverseFill", label = "Reverse fill" } }) do
             children[#children + 1] = C.CreateCheckBox(sc, field.label, function()
@@ -636,10 +635,10 @@ local function buildAuraSettingsPage(sc)
 
     local gainToggle
     local activeModeControl
-    local function setGlow(kind, setting, value)
+    local function writeGlow(targetKey, targetSpell, kind, setting, value)
         if not ns.Auras then return end
-        local existing = getGlow(kind)
-        local aura = getAuraProfile(key)
+        local existing = ns.Auras:GetAuraGlowSettings(targetKey, targetSpell, kind)
+        local aura = getAuraProfile(targetKey)
         local allGlows, glow = {}, {}
         if type(aura.glow) == "table" then ns._deepCopyMissing(allGlows, aura.glow) end
         if existing then ns._deepCopyMissing(glow, existing) end
@@ -648,10 +647,20 @@ local function buildAuraSettingsPage(sc)
             and (kind == "gain" or (kind == "activeAura" and ns.Glow:GetStyleRenderer(value))) then
             glow.mode = "on"
         end
-        glow[setting] = value
+        glow[setting] = type(value) == "table" and CopyTable(value) or value
         if kind == "activeAura" then glow.useGroup = glow.mode == "inherit" or nil end
         allGlows[kind] = glow
         aura.glow = allGlows
+    end
+    if batch and #batch > 1 then
+        children[#children+1] = C.CreateHelpText(sc, ("Glow changes apply to %d selected auras."):format(#batch))
+    end
+    local function setGlow(kind, setting, value)
+        writeGlow(key, spellID, kind, setting, value)
+        for _, item in ipairs(batch or {}) do
+            local target = item.cooldownID and ("cdm:" .. item.cooldownID) or item.spellID
+            if target ~= key then writeGlow(target, item.spellID, kind, setting, value) end
+        end
         ns.Auras:RequestRefresh()
         if gainToggle and kind == "gain" then gainToggle.Refresh() end
         if activeModeControl and kind == "activeAura" then activeModeControl.Refresh() end
@@ -733,8 +742,7 @@ local function buildAuraSettingsPage(sc)
             local glow = getGlow("lowTimeGlow")
             return glow and tonumber(glow.threshold) or 5
         end,
-        function(v) setGlow("lowTimeGlow", "threshold", v) end
-    )
+        function(v) setGlow("lowTimeGlow", "threshold", v) end, 5)
     addGlowStyle("Expiring aura glow style", "lowTimeGlow", {
         { key = "solid", label = "Solid Outline (default)" },
     })
@@ -813,7 +821,8 @@ local function buildAuraSettingsPage(sc)
     sc:SetHeight(math.max(totalH, 10))
 end
 
-function AuraPanel:OpenForAura(spellID, containerKey, cooldownID)
+function AuraPanel:OpenForAura(spellID, containerKey, cooldownID, group)
+    batch = group
     if not spellID then return end
     _currentAuraSpellID = spellID
     _currentAuraContainer = containerKey
@@ -839,3 +848,5 @@ ns.Options:RegisterPage({
     restorePage = "auras",
     build = buildAuraSettingsPage,
 })
+
+ns:RegisterMessage("PROFILE_CHANGED", function() batch = nil end)

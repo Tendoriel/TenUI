@@ -63,6 +63,7 @@ local CastBar = {
 local DEFAULTS = {
     enabled       = true,
     showQueueWindow = false,
+    showCastLatency = false,
     colorEmpowerStages = false,
     showIcon      = true,
     iconSide      = "LEFT",
@@ -258,7 +259,7 @@ local function layoutTimingZone(bar, key, milliseconds, seconds, drain, latency)
     end
     local edge = drain and "LEFT" or "RIGHT"
     zone:ClearAllPoints()
-    local inset = frame.border and ns.Pixel.Size(frame, 1) or 0
+    local inset = frame.border and frame.border.top:IsShown() and ns.Pixel.Size(frame, 1) or 0
     local x = drain and inset or -inset
     zone:SetPoint("TOP" .. edge, frame, "TOP" .. edge, x, -inset)
     zone:SetPoint("BOTTOM" .. edge, frame, "BOTTOM" .. edge, x, inset)
@@ -292,7 +293,7 @@ function CastBar:LayoutEmpowerColors(bar, fractions, color)
         bar.stageClip = clip
     end
     clip:SetAllPoints(frame:GetStatusBarTexture())
-    local inset = frame.border and ns.Pixel.Size(frame, 1) or 0
+    local inset = frame.border and frame.border.top:IsShown() and ns.Pixel.Size(frame, 1) or 0
     local width, left = frame:GetWidth(), 0
     for i = 1, #fractions + 1 do
         local right = fractions[i] or 1
@@ -318,7 +319,10 @@ function CastBar:MatchLatency(guid)
     local sent = self._sent
     self._sent, self._latencyMs = nil, nil
     if sent and not isSecret(guid) and sent.guid == guid then
-        self._latencyMs = (GetTimePreciseSec() - sent.at) * 1000
+        self._lastLatencyMs = (GetTimePreciseSec() - sent.at) * 1000
+    end
+    if self.profileRef and self.profileRef.showCastLatency then
+        self._latencyMs = self._lastLatencyMs or select(4, GetNetStats())
     end
 end
 
@@ -448,7 +452,12 @@ function CastBar:GetChannelTickFractions(spellID, totalSeconds, start, castID, c
     local extra = CHANNEL_EXTRA_INTERVALS[spellID]
     if extra and IsPlayerSpell then
         for talent, intervals in pairs(extra) do
-            if IsPlayerSpell(talent) then count = count + intervals end
+            local learned = IsPlayerSpell(talent)
+            if not learned and talent == 1296581 and C_UnitAuras then
+                local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, talent)
+                learned = ok and not isSecret(aura) and aura ~= nil
+            end
+            if learned then count = count + intervals end
         end
     end
     local marks = {}
@@ -1425,6 +1434,11 @@ end
 local EVENT_DISPATCH = {
     UNIT_SPELLCAST_SENT = function(_, _, guid)
         if CastBar.profileRef and CastBar.profileRef.showCastLatency and not isSecret(guid) and guid then
+            CastBar._sent = nil
+            if hasCastInfo(UnitCastingInfo("player")) or hasCastInfo(UnitChannelInfo("player")) then return end
+            local gcd = C_Spell.GetSpellCooldown(61304)
+            if not gcd or isSecret(gcd.duration) or isSecret(gcd.startTime) then return end
+            if gcd.duration > 0 and gcd.startTime + gcd.duration > GetTime() then return end
             CastBar._sent = { guid = guid, at = GetTimePreciseSec() }
         end
     end,

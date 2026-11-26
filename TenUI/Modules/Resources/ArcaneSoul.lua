@@ -4,6 +4,9 @@ local Soul = {}
 ns.ArcaneSoul = Soul
 local anchorName = "ArcaneSoul"
 local proxy, sample
+local font, size, flags
+local normalColor, lastColor
+local defaultNormal, defaultLast = {0.8, 0.65, 1, 1}, {1, 0.75, 0.25, 1}
 local phases = {
     { id = 365362, label = "Soul in " },
     { id = 451038, label = "Barrage " },
@@ -29,8 +32,8 @@ local function bind(phase, gcd)
     fmt:SetBreakpoints(points)
     local curve = C_CurveUtil.CreateColorCurve()
     curve:SetType(Enum.LuaCurveType.Step)
-    curve:AddPoint(0, CreateColor(1, 0.75, 0.25))
-    curve:AddPoint(gcd + 0.0001, CreateColor(0.8, 0.65, 1))
+    curve:AddPoint(0, CreateColor(unpack(lastColor)))
+    curve:AddPoint(gcd + 0.0001, CreateColor(unpack(normalColor)))
     phase.button:SetDurationText(phase.text, {
         textFormatter = fmt,
         textColor = { curve = curve, property = Enum.DurationTextBindingProperty.RemainingDuration },
@@ -51,7 +54,7 @@ local function prepare(phase, gcd)
                 button:SetMouseClickEnabled(false)
                 button:SetMouseMotionEnabled(false)
                 local text = button:CreateFontString(nil, "OVERLAY")
-                ns.Pixel.SetFont(text, STANDARD_TEXT_FONT, 14, "OUTLINE")
+                ns.Pixel.SetFont(text, font, size, flags)
                 text:SetPoint("CENTER")
                 phase.button, phase.text, phase.gcd = button, text, nil
                 bind(phase, phase.desiredGcd or gcd)
@@ -89,12 +92,24 @@ function Soul.Update(profile, preview, alpha)
             defaultX = 255, defaultY = -100, width = 150, height = 22 })
         if ns.Visibility then ns.Visibility:UpdateOne(anchorName) end
     end
+    local primary = profile.primary or {}
+    font = ns.Widgets.resolveMedia("font", primary.font, ns.Widgets.DEFAULT_FONT)
+    size, flags = profile.arcaneSoulFontSize or primary.fontSize or 14, primary.fontFlags or "OUTLINE"
+    local normal, last = profile.arcaneSoulColor or defaultNormal, profile.arcaneSoulLastColor or defaultLast
+    if normal ~= normalColor or last ~= lastColor then
+        for _, phase in ipairs(phases) do phase.gcd = nil end
+    end
+    normalColor, lastColor = normal, last
     if not proxy then
         proxy = CreateFrame("Frame", nil, anchor.frame)
         sample = proxy:CreateFontString(nil, "OVERLAY")
-        ns.Pixel.SetFont(sample, STANDARD_TEXT_FONT, 14, "OUTLINE")
         sample:SetPoint("CENTER")
         sample:SetText("Barrage 3")
+    end
+    ns.Pixel.SetFont(sample, font, size, flags)
+    sample:SetTextColor(unpack(normalColor))
+    for _, phase in ipairs(phases) do
+        if phase.text and not InCombatLockdown() then ns.Pixel.SetFont(phase.text, font, size, flags) end
     end
     if proxy:GetParent() ~= anchor.frame then proxy:SetParent(anchor.frame) end
     proxy:SetAllPoints(anchor.frame)

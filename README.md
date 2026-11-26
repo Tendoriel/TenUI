@@ -2,7 +2,7 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
-TenUI 0.6.1 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
+TenUI 0.6.2 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
 
 [![Website](https://img.shields.io/badge/Website-tenuiaddon.com-08979c?style=flat)](https://tenuiaddon.com/) [![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.1.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
@@ -68,11 +68,11 @@ Cooldown Manager settings in an earlier release:
 
 ### Profiles
 - Multiple profiles with rename and copy support, and an ordered profile list.
-- Automatic profile swapping per specialization.
-- Export a full profile or share its CDM, Auras, Layout, Resources or Cast Bar settings. Import creates a separate profile.
+- Automatic profile swapping by specialization or instance type (dungeon, raid, arena or battleground).
+- Export a full profile or combine selected sections. Preview an import before creating a profile or applying selected sections to the active one. Undo restores the previous profile settings during the same session.
 
 ### Interface
-- A unified, styled options window covering every module.
+- Search settings in the top-right of the options window. Select a result to open its page and highlight the control when available.
 - SharedMedia support for fonts and bar textures, plus a set of bundled bar fill textures.
 
 ## Installation
@@ -133,7 +133,7 @@ No. Unlocking and dragging anchors is blocked during combat by the game. Leave c
 TenUI builds on top of it. The Cooldown Manager remains the source of truth for which abilities are tracked, and TenUI presents them with its own bars, icons and styling.
 
 **How do I share my setup with a friend?**
-In **Profiles**, choose an **Export section**, click **Generate Export** and copy the text. Your friend pastes it under **Import** to create a new profile. A partial import uses defaults for the other sections.
+In **Profiles**, choose the sections to share, generate the export and copy the string. The recipient can preview its contents and apply selected sections to their active profile. When creating a separate profile from a partial export, they can fill omitted sections with defaults or their current settings.
 
 **My layout broke after an update. How do I recover?**
 Run `/tenui reset anchors` to restore default positions without touching the rest of your settings. As a last resort, `/tenui reset` wipes all saved settings after a confirmation prompt.

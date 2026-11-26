@@ -289,7 +289,10 @@ local function validatePos(pos, def)
     local alpha = isFiniteNumber(pos.alpha) and math.max(0, math.min(1, pos.alpha)) or nil
     local scale = isFiniteNumber(pos.scale) and pos.scale > 0 and pos.scale or nil
     return { point = point, x = x, y = y, width = width, height = height,
-        alpha = alpha, scale = scale }, corrupt
+        alpha = alpha, scale = scale, attachTo = type(pos.attachTo) == "string" and pos.attachTo or nil,
+        attachSide = VALID_POINTS[pos.attachSide] and pos.attachSide or "BOTTOM",
+        attachX = isFiniteNumber(pos.attachX) and pos.attachX or 0,
+        attachY = isFiniteNumber(pos.attachY) and pos.attachY or -2 }, corrupt
 end
 
 local function clampToScreen(pos)
@@ -329,6 +332,18 @@ local function refreshWidthMatches()
     end
 end
 
+local opposite = { TOP = "BOTTOM", BOTTOM = "TOP", LEFT = "RIGHT", RIGHT = "LEFT" }
+function Anchors:CanAttach(name, target)
+    local seen = { [name] = true }
+    while target do
+        if seen[target] then return false end
+        seen[target] = true
+        local entry = resolveSavedEntry(target)
+        target = type(entry) == "table" and entry.attachTo
+    end
+    return true
+end
+
 local function applyPosition(anchor, pos)
     local scale = pos.scale or 1
     if anchor:GetScale() ~= scale then anchor:SetScale(scale) end
@@ -348,7 +363,13 @@ local function applyPosition(anchor, pos)
     anchor:ClearAllPoints()
     local x = ns.Pixel.SnapOffset(anchor, setX, pointHFrac(pos.point), w, parent:GetWidth() / scale)
     local y = ns.Pixel.SnapOffset(anchor, setY, pointVFrac(pos.point), h, parent:GetHeight() / scale)
-    anchor:SetPoint(pos.point, parent, pos.point, x, y)
+    local target = pos.attachTo and registry[pos.attachTo]
+    local side = pos.attachSide or "BOTTOM"
+    if target and opposite[side] and Anchors:CanAttach(name, pos.attachTo) then
+        anchor:SetPoint(opposite[side], target.frame, side, ns.Pixel.Snap(anchor, pos.attachX or 0), ns.Pixel.Snap(anchor, pos.attachY or -2))
+    else
+        anchor:SetPoint(pos.point, parent, pos.point, x, y)
+    end
     if name == "EssentialCooldowns" and not widthMatchQueued then
         widthMatchQueued = true
         C_Timer.After(0, refreshWidthMatches)
@@ -490,6 +511,12 @@ function Anchors:Unregister(name)
     if not runtime then return false end
     registry[name] = nil
     dormantRegistry[name] = runtime
+    if ns.savedVarsReady then
+        for child in pairs(registry) do
+            local entry = resolveSavedEntry(child)
+            if entry and entry.attachTo == name then Anchors:Reapply(child) end
+        end
+    end
     if ns.Visibility and ns.Visibility.UnregisterEntry then
         ns.Visibility:UnregisterEntry(name)
     end
@@ -531,6 +558,25 @@ function Anchors:SavePosition(anchor)
     local def = anchor.def
     local entry = validatePos(resolveSavedEntry(anchor.anchorName), def)
 
+    local target = entry.attachTo and registry[entry.attachTo]
+    if target then
+        local side = entry.attachSide
+        local edge = { TOP = "GetTop", BOTTOM = "GetBottom", LEFT = "GetLeft", RIGHT = "GetRight" }
+        local tx, ty = target.frame:GetCenter()
+        local ax, ay = anchor:GetCenter()
+        if tx and ty and ax and ay and opposite[side] then
+            local factor = target.frame:GetEffectiveScale() / anchor:GetEffectiveScale()
+            if side == "TOP" or side == "BOTTOM" then
+                ay, ty = anchor[edge[opposite[side]]](anchor), target.frame[edge[side]](target.frame)
+            else
+                ax, tx = anchor[edge[opposite[side]]](anchor), target.frame[edge[side]](target.frame)
+            end
+            entry.attachX, entry.attachY = math_floor(ax-tx*factor+0.5), math_floor(ay-ty*factor+0.5)
+            writeOverlayEntry(anchor.anchorName, entry)
+            applyPosition(anchor, entry)
+            return
+        end
+    end
     local point, _, relativePoint, x, y = anchor:GetPoint(1)
     if not point then
         return
@@ -872,6 +918,10 @@ function Anchors:ApplyProfile()
     migrateTinyTrackedAnchors(saved)
     migrateOriginModel(saved)
     migratePointCanonicalization(saved)
+    for _, runtime in pairs(registry) do
+        local _, relative = runtime.frame:GetPoint(1)
+        if relative and relative ~= parent then runtime.frame:ClearAllPoints() end
+    end
     for name, runtime in pairs(registry) do
         local rawResolved, tier = resolveSavedEntry(name)
         if ns.Debug and ns.Debug.IsVerbose and ns.Debug:IsVerbose("anchors") then
@@ -1436,6 +1486,7 @@ local function queueScale()
     C_Timer.After(0, refreshScale)
 end
 
+ns:RegisterMessage("GLOBAL_SCALE_CHANGED", queueScale)
 ns:RegisterEvent("UI_SCALE_CHANGED", queueScale)
 ns:RegisterEvent("DISPLAY_SIZE_CHANGED", queueScale)
 
@@ -1457,7 +1508,14 @@ function ns:RegisterAnchor(def)
             height = def.height        or 32,
         },
     }
-    return buildAnchor(internal)
+    local runtime = buildAnchor(internal)
+    if ns.savedVarsReady then
+        for name in pairs(registry) do
+            local entry = resolveSavedEntry(name)
+            if entry and entry.attachTo == def.name then Anchors:Reapply(name) end
+        end
+    end
+    return runtime
 end
 
 function ns:GetAnchor(name)

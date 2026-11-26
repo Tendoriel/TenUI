@@ -718,8 +718,7 @@ local function buildResourcesPage(sc)
                 entry.primary = { r, g, b, a or 1 }
             end
             applyOptions()
-        end
-    )
+        end, { 0.5, 0.5, 0.5, 1 })
 
     children[#children + 1] = C.CreateStatusBarTextureDropdown(sc, "Primary Bar Texture",
         function()
@@ -756,8 +755,7 @@ local function buildResourcesPage(sc)
             local rp = getResProfile()
             rp.primary.bgColor = { r or 0, g or 0, b or 0, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0, 0, 0, 0.28 })
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Bar Border",
         function()
@@ -782,8 +780,7 @@ local function buildResourcesPage(sc)
             local rp = getResProfile()
             rp.primary.borderColor = { r or 0, g or 0, b or 0, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0, 0, 0, 1 })
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Primary Power Type Override",
         RESOURCE_POWER_OVERRIDE_LIST,
@@ -828,8 +825,7 @@ local function buildResourcesPage(sc)
         function(v)
             getThreshold().pct = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 20)
 
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Threshold Direction",
         {
@@ -907,8 +903,7 @@ local function buildResourcesPage(sc)
             local rp = getResProfile()
             rp.primary.fontSize = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 12)
 
     children[#children + 1] = C.CreateOutlineDropdown(sc, "Primary Font Outline",
         function()
@@ -944,8 +939,7 @@ local function buildResourcesPage(sc)
             local rp = getResProfile()
             rp.primary.fontX = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 0)
 
     children[#children + 1] = C.CreateSlider(sc, "Primary Font Offset Y", -40, 40, 1,
         function()
@@ -956,8 +950,7 @@ local function buildResourcesPage(sc)
             local rp = getResProfile()
             rp.primary.fontY = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 0)
 
     children[#children + 1] = C.CreateSubSection(sc, "Secondary Resource")
 
@@ -1000,6 +993,15 @@ local function buildResourcesPage(sc)
         children[#children + 1] = C.CreateCheckBox(sc, "Sunfury: show Arcane Soul countdown in GCDs",
             function() return getResProfile().arcaneSoulEnabled == true end,
             function(v) getResProfile().arcaneSoulEnabled = v applyOptions() end)
+        children[#children+1] = C.CreateSlider(sc, "Arcane Soul font size", 8, 40, 1,
+            function() local p = getResProfile() return p.arcaneSoulFontSize or (p.primary or {}).fontSize or 14 end,
+            function(v) getResProfile().arcaneSoulFontSize = v applyOptions() end, 14)
+        for _, entry in ipairs({{"arcaneSoulColor", "Arcane Soul text", {0.8,0.65,1,1}},
+                                {"arcaneSoulLastColor", "Last Barrage text", {1,0.75,0.25,1}}}) do
+            local key, label, default = unpack(entry)
+            children[#children+1] = C.CreateColorSwatch(sc, label, function() return unpack(getResProfile()[key] or default) end,
+                function(...) getResProfile()[key] = {...} applyOptions() end)
+        end
     end
     if specID == 1473 then
         children[#children + 1] = C.CreateCheckBox(sc, "Show Ebon Might bar",
@@ -1031,8 +1033,7 @@ local function buildResourcesPage(sc)
                 entry.secondary = { r, g, b, a or 1 }
             end
             applyOptions()
-        end
-    )
+        end, { 0.5, 0.5, 0.5, 1 })
 
     children[#children + 1] = C.CreateStatusBarTextureDropdown(sc, "Secondary Bar Texture",
         function()
@@ -1055,8 +1056,7 @@ local function buildResourcesPage(sc)
             local rp = getResProfile()
             rp.secondary.pipSpacing = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 2)
 
     children[#children + 1] = C.CreateHelpText(sc,
         "Bar-style secondaries (Insanity, Maelstrom...) follow the Primary bar's border/background until changed here.")
@@ -1170,8 +1170,7 @@ local function buildResourcesPage(sc)
         function(v)
             getSecText().fontSize = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 12)
 
     children[#children + 1] = C.CreateOutlineDropdown(sc, "Secondary Text Outline",
         function()
@@ -1241,8 +1240,7 @@ local function buildResourcesPage(sc)
                     ns.Anchors:SaveSize(rt.frame)
                 end
             end
-        end
-    )
+        end, 240)
 
     children[#children + 1] = C.CreateSlider(sc, "Primary Height", 8, 60, 1,
         function()
@@ -1261,8 +1259,7 @@ local function buildResourcesPage(sc)
                     ns.Anchors:SaveSize(rt.frame)
                 end
             end
-        end
-    )
+        end, 18)
 
     children[#children + 1] = C.CreateSlider(sc, "Secondary Width", 40, 600, 1,
         function()
@@ -1281,8 +1278,7 @@ local function buildResourcesPage(sc)
                     ns.Anchors:SaveSize(rt.frame)
                 end
             end
-        end
-    )
+        end, 240)
 
     children[#children + 1] = C.CreateSlider(sc, "Secondary Height", 8, 60, 1,
         function()
@@ -1301,8 +1297,7 @@ local function buildResourcesPage(sc)
                     ns.Anchors:SaveSize(rt.frame)
                 end
             end
-        end
-    )
+        end, 16)
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math_max(totalH, 10))

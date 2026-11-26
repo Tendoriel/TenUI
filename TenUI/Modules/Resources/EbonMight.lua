@@ -64,6 +64,8 @@ function EbonMight.Update(profile, preview, alpha)
     bar:SetRightText(showPreview and "12.4" or "")
     bar:Show()
     if showPreview then
+        ns.NativeResourceBar.Show(bar, AURA_ID, nil, texture, color,
+            { font, fontSize, flags, "RIGHT", -4, 0, "RIGHT" }, label)
         ns.NativeResourceBar.Hide(bar)
         bar:SetFont(font, fontSize, flags)
         bar:SetTexture(texture)

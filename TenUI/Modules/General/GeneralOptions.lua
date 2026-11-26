@@ -221,6 +221,7 @@ local function buildQoLPage(sc)
         end
     end
 
+    sc.searchTab = _selectedQoLTab
     ns.Options:ClearPinnedHeader("qolReminders")
     local tabRow = ns.Options:GetPinnedHeader("qolReminders", 28)
 
@@ -267,6 +268,12 @@ local function buildQoLPage(sc)
             function() return getReminderOptions()[key] == true end,
             function(value)
                 getReminderOptions()[key] = value
+                if key == "raidBuffs" then
+                    for _, buff in ipairs(ns.ClassReminders.raidBuffs) do
+                        local child = settingRows[buff.option]
+                        if child then child:SetAlpha(value and 1 or 0.45) child:EnableMouse(value) end
+                    end
+                end
                 applyReminderOptions()
                 refreshPreview()
             end)
@@ -283,6 +290,10 @@ local function buildQoLPage(sc)
             end
             row.label:ClearAllPoints()
             row.label:SetPoint("LEFT", previous, "RIGHT", 6, 0)
+        end
+        if key:match("^raidBuff%d") and not getReminderOptions().raidBuffs then
+            row:SetAlpha(0.45)
+            row:EnableMouse(false)
         end
         settingRows[key] = row
         children[#children + 1] = row
@@ -336,23 +347,19 @@ local function buildQoLPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Font Size", 10, 72, 1,
         function() return getCA().fontSize or 32 end,
-        function(v) getCA().fontSize = v applyCA() end
-    )
+        function(v) getCA().fontSize = v applyCA() end, 32)
 
     children[#children + 1] = C.CreateSlider(sc, "Hold Duration (s)", 0.1, 5.0, 0.1,
         function() return getCA().holdDuration or 0.9 end,
-        function(v) getCA().holdDuration = v applyCA() end
-    )
+        function(v) getCA().holdDuration = v applyCA() end, 0.9)
 
     children[#children + 1] = C.CreateSlider(sc, "Fade In (s)", 0.0, 2.0, 0.05,
         function() return getCA().fadeInDuration or 0.25 end,
-        function(v) getCA().fadeInDuration = v applyCA() end
-    )
+        function(v) getCA().fadeInDuration = v applyCA() end, 0.25)
 
     children[#children + 1] = C.CreateSlider(sc, "Fade Out (s)", 0.0, 3.0, 0.05,
         function() return getCA().fadeOutDuration or 0.6 end,
-        function(v) getCA().fadeOutDuration = v applyCA() end
-    )
+        function(v) getCA().fadeOutDuration = v applyCA() end, 0.6)
 
     children[#children + 1] = C.CreateCheckBox(sc, "Play Sound on Alert",
         function() return getCA().soundEnabled == true end,
@@ -445,7 +452,7 @@ local function buildQoLPage(sc)
                 getCR().fontSize = value
                 applyCR()
                 refreshPreview()
-            end)
+            end, 11)
     end
     children[#children + 1] = C.CreateSlider(sc, "Icon Size", 16, 96, 1,
         function() return getReminderOptions().iconSize or 36 end,
@@ -453,7 +460,7 @@ local function buildQoLPage(sc)
             getReminderOptions().iconSize = value
             applyReminderOptions()
             refreshPreview()
-        end)
+        end, 36)
 
     children[#children + 1] = C.CreateSection(sc, "Visibility")
     addReminderToggle("hideWhileMounted", "Hide while mounted")

@@ -494,8 +494,7 @@ local function buildCastBarPage(sc)
                 end
             end
             if _previewRefresh then pcall(_previewRefresh) end
-        end
-    )
+        end, 240)
 
     children[#children + 1] = C.CreateSlider(sc, "Height", 8, 60, 1,
         function()
@@ -515,8 +514,7 @@ local function buildCastBarPage(sc)
                 end
             end
             if _previewRefresh then pcall(_previewRefresh) end
-        end
-    )
+        end, 22)
 
     children[#children + 1] = C.CreateSubSection(sc, "Spell Icon")
 
@@ -585,8 +583,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.iconSize = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 22)
 
     children[#children + 1] = C.CreateHelpText(sc,
         "Moving the Icon Size slider turns Auto off. Re-enable Auto to match the bar height again.")
@@ -602,8 +599,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.iconGap = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 2)
 
     children[#children + 1] = C.CreateSubSection(sc, "Cast Information")
 
@@ -696,8 +692,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.fontSize = math_floor(v + 0.5)
             applyOptions()
-        end
-    )
+        end, 12)
 
     children[#children + 1] = C.CreateOutlineDropdown(sc, "Font Outline",
         function()
@@ -749,8 +744,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.bgColor = { r or 0, g or 0, b or 0, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0, 0, 0, 0.28 })
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Bar Border",
         function()
@@ -775,8 +769,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.borderColor = { r or 0, g or 0, b or 0, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0, 0, 0, 1 })
 
     children[#children + 1] = C.CreateSubSection(sc, "Bar Colors")
 
@@ -791,8 +784,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.cast = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 1.0, 0.7, 0.0, 1 })
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Non-Interruptible",
         function()
@@ -805,8 +797,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.uninterruptible = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0.5, 0.5, 0.5, 1 })
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Channel",
         function()
@@ -819,8 +810,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.channel = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0.3, 0.7, 1.0, 1 })
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Empower",
         function()
@@ -833,8 +823,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.empower = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0.8, 0.3, 1.0, 1 })
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Interrupted",
         function()
@@ -847,8 +836,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.interrupted = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 1.0, 0.1, 0.1, 1 })
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Failed",
         function()
@@ -861,8 +849,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.failed = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0.6, 0.6, 0.6, 1 })
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Succeeded",
         function()
@@ -875,8 +862,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.colors.success = { r, g, b, a or 1 }
             applyOptions()
-        end
-    )
+        end, { 0.2, 1.0, 0.2, 1 })
 
     children[#children + 1] = C.CreateSubSection(sc, "Timing")
 
@@ -889,8 +875,7 @@ local function buildCastBarPage(sc)
             local cp = getCBProfile()
             cp.holdTime = math_floor(v * 10 + 0.5) / 10
             applyOptions()
-        end
-    )
+        end, 0.4)
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math_max(totalH, 10))

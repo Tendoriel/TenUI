@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.2] - 2026-11-26
+
+For WoW Retail 12.1.5 (Interface 120105).
+
+### Settings and layout
+
+- Search from the right-hand side of the settings header. Selecting a result opens its page or tab and highlights the matching control when available.
+- Attach one HUD element to the edge of another and adjust the gap. Edit Mode now has controls for the grid, snapping, grid size, Undo, Cancel and Save & Lock. Right-click an unlocked element to open its Layout settings.
+- General now includes shared font, outline and bar texture settings. Use Global Appearance to apply them across HUD modules. Settings with a resettable slider or color allow a right-click on the label to restore the default.
+- Ctrl-click entries in the cooldown or aura preview to edit supported settings together. Layout can copy visuals between cooldown rows and display optional action-bar keybindings.
+- Escape closes the settings window. Changing profiles refreshes open settings, and changing the global scale realigns HUD anchors.
+
+### Profiles
+
+- Export multiple sections in one compressed string. Import Preview lists the included sections and specialization data. Older TenUI profile strings remain readable.
+- Apply selected sections to the active profile or create a new profile. A partial import can inherit omitted settings from the active profile.
+- Copy sections between local profiles, duplicate the active profile, or undo the last reset or merge during the current session.
+- Copy or reset specialization overrides and assign profiles by instance type. Use `/tenui profile list` and `/tenui profile NAME` to list or switch profiles.
+
+### Combat HUD and reminders
+
+- Fixed CDM stack counters that stopped updating if the buff first appeared after the icon was created. Added target-debuff handling for Flame Shock, Frost Fever, Blood Plague, Fire Breath and Unstable Affliction.
+- The optional Cast Bar latency band filters queued casts out of its measurements. The spell queue and empower overlays respect hidden borders. Arcane Missiles tick markers also check for the tier bonus aura when readable.
+- Entering combat dismisses resource preview samples. The Arcane Soul indicator uses the configured font, with separate size and color settings. Ebon Might prepares its live display while previewing.
+- Class Reminders suspend aura subscriptions during combat. Between pulls in an active Mythic+ run, supported shields and poisons can show their last known state and its age. Raid buff and Tooltip ID options dim when their parent is disabled.
+
 ## [0.6.1] - 2026-11-26
 
 For WoW Retail 12.1.5 (Interface 120105).

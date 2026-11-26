@@ -55,6 +55,8 @@ tools/
 !/scripts/check-reminder-death.lua
 !/scripts/check-channel-layout.lua
 !/scripts/check-arcane-soul.lua
+!/scripts/check-profile-transfer.lua
+!/scripts/check-aura-count.lua
 site/
 RULES.md
 *.jsx

@@ -1821,6 +1821,7 @@ local function hiddenUnknownSignature(displayedList)
 end
 
 function Row:Rebuild()
+    self.keybindVisuals = rowVisualsBlock(self.name)
     Bars._pressIndex = nil
     local rp = getRowProfile(self.name)
     if not rp then return end
@@ -1982,12 +1983,14 @@ function Row:Layout()
 end
 
 function Row:ApplyVisualOptions()
+    self.keybindVisuals = rowVisualsBlock(self.name)
     local textStyle = getVisualProfileTextForRow(self.name)
     local cdTextStyle = getVisualProfileCooldownTextForRow(self.name)
     local borderOn, borderColor = rowIconBorderStyle(self.name)
     for i = 1, #self.icons do
         local icon = self.icons[i]
         if icon and icon.ApplyTextStyle then
+            icon.bindFont = nil
             icon:ApplyTextStyle(textStyle)
         end
         if icon and icon._entry then
@@ -2069,6 +2072,9 @@ local SUMMON_BORDER_R, SUMMON_BORDER_G, SUMMON_BORDER_B, SUMMON_BORDER_A = 1, 0.
 
 function Row:RefreshIcon(icon, entry, desat)
     if not (icon and entry) then return end
+    if icon.bindLabel or (self.keybindVisuals and self.keybindVisuals.showKeybind) then
+        ns:UpdateCooldownKeybind(icon, self.keybindVisuals, entry)
+    end
     if entry.type == "spell" then
         icon._pollRangeSpell = nil
         local sid = entry.id

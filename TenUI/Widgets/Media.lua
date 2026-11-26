@@ -27,6 +27,12 @@ local function looksLikePath(s)
     return false
 end
 
+local emptyStyle = {}
+function ns:GetGlobalStyle()
+    local p = self.savedVarsReady and self:GetProfile()
+    return p and p.globalStyle or emptyStyle
+end
+
 local function resolveFont(key, fallback)
     if not key or key == "" then return fallback end
     if looksLikePath(key) then return key end
@@ -44,6 +50,9 @@ local function resolveFont(key, fallback)
 end
 
 local function resolveMedia(kind, key, fallback)
+    local default = not key or key == "" or key == "default" or key == "GLOBAL"
+    if kind == "statusbar" and (default or key == DEFAULT_STATUSBAR) then key = ns:GetGlobalStyle().texture or key end
+    if kind == "font" and (default or key == DEFAULT_FONT) then key = ns:GetGlobalStyle().font or key end
     if kind == "font" then
         return resolveFont(key, fallback)
     end

@@ -57,3 +57,5 @@ end)
 ns:RegisterMessage("SPEC_PROFILE_ASSIGNMENT_CHANGED", function(_, specID)
     if specID == ns:GetLiveSpecID() then applyCurrentProfile() end
 end)
+
+ns:RegisterMessage("CONTENT_PROFILE_CHANGED", applyCurrentProfile)

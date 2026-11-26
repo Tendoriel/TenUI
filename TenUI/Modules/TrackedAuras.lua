@@ -993,6 +993,15 @@ function TrackedAuras:SetupPlayerAuraCount(icon, auraSpellID)
     local restricted = self:IsRestricted()
     if restricted and state then return end
     if icon._playerAuraCountFailed == restricted then return end
+    local function styleCount(text)
+        if not text then return end
+        local point, _, relativePoint, x, y = frame.stack:GetPoint(1)
+        point = point or "BOTTOMRIGHT"
+        text:SetFont(frame.stack:GetFont())
+        text:SetJustifyH("RIGHT")
+        text:ClearAllPoints()
+        text:SetPoint(point, state.container, relativePoint or point, x or -1, y or 1)
+    end
     local ok, err = pcall(function()
         if not state then
             local container = createContainer(frame, "player")
@@ -1011,19 +1020,13 @@ function TrackedAuras:SetupPlayerAuraCount(icon, auraSpellID)
                     button:SetMouseClickEnabled(false)
                     button:SetMouseMotionEnabled(false)
                     local text = button:CreateFontString(nil, "OVERLAY")
-                    text:SetFont(frame.stack:GetFont())
+                    styleCount(text)
                     button:SetApplicationCount(text, { formatter = auraCountFormatter })
                     state.text = text
                 end,
             })
         end
-        local text = state.text
-        local point, _, relativePoint, x, y = frame.stack:GetPoint(1)
-        point = point or "BOTTOMRIGHT"
-        text:SetFont(frame.stack:GetFont())
-        text:SetJustifyH("RIGHT")
-        text:ClearAllPoints()
-        text:SetPoint(point, state.container, relativePoint or point, x or -1, y or 1)
+        styleCount(state.text)
     end)
     if ok then
         icon._playerAuraCount = state

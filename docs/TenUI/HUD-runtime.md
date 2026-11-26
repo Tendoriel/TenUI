@@ -7,6 +7,8 @@
 | [AurasNative](../../TenUI/Modules/AurasNative.lua) | Maps catalog entries to player buffs and current-target debuffs, then configures native icon and bar displays. |
 | [TrackedAuras](../../TenUI/Modules/TrackedAuras.lua) | Configures AuraContainer slots, icon and bar regions, timer formatting, stacks and glow. Blizzard updates bound values during combat. |
 | [CDMLayout](../../TenUI/Core/CDMLayout.lua) | Reads Blizzard's saved cooldown viewer layout for consumers that need the player's categories and ordering. |
+| [ArcaneSoul](../../TenUI/Modules/Resources/ArcaneSoul.lua) | Displays the final global cooldowns of Arcane Surge and the Barrages remaining in Arcane Soul using native aura slots. |
+| [CooldownKeybinds](../../TenUI/Modules/CooldownKeybinds.lua) | Reads spell bindings from Blizzard action buttons outside combat for optional labels on cooldown icons. |
 | [EbonMight](../../TenUI/Modules/Resources/EbonMight.lua) | Provides the optional Augmentation duration bar alongside mana and Essence. |
 | [NativeResourceBar](../../TenUI/Modules/Resources/NativeResourceBar.lua) | Binds a resource bar to aura duration or applications. Reuses the last configured native slot under combat restrictions. |
 | [PowerPrediction](../../TenUI/Modules/Resources/PowerPrediction.lua) | Resolves spell costs and supported resource gains for the prediction overlay. |

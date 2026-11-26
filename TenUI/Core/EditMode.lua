@@ -149,12 +149,68 @@ local function overlay_OnUpdate(self)
     end
 end
 
+local session, previous, toolbar
+local function capture()
+    local p = ns:GetProfile()
+    local scope = p.specScopes and p.specScopes[ns:GetSpecScopeKey()]
+    return { profile = p, spec = ns:GetSpecScopeKey(), base = CopyTable(p.anchors or {}),
+        scoped = scope and scope.anchors and CopyTable(scope.anchors) }
+end
+
+local function restore(snapshot)
+    if not snapshot or snapshot.profile ~= ns:GetProfile() or snapshot.spec ~= ns:GetSpecScopeKey() or InCombatLockdown() then return end
+    snapshot.profile.anchors = CopyTable(snapshot.base)
+    local scope = snapshot.profile.specScopes and snapshot.profile.specScopes[snapshot.spec]
+    if scope then scope.anchors = snapshot.scoped and CopyTable(snapshot.scoped) end
+    ns.Anchors:ApplyProfile()
+end
+
+local function updateToolbar()
+    if not editModeActive then
+        if toolbar then toolbar:Hide() end
+        return
+    end
+    if not session or session.profile ~= ns:GetProfile() or session.spec ~= ns:GetSpecScopeKey() then
+        session, previous = capture(), nil
+    end
+    if not toolbar then
+        toolbar = CreateFrame("Frame", nil, UIParent)
+        toolbar:SetPoint("TOP", 0, -42)
+        toolbar:SetSize(455, 28)
+        toolbar:SetFrameStrata("DIALOG")
+        ns.UI.SkinPanel(toolbar)
+        local function button(label, width, x, callback)
+            local b = ns.UI.CreateCompactButton(toolbar, label, callback, width)
+            b:SetPoint("LEFT", x, 0)
+            return b
+        end
+        local function snap() return ns.Options.GetSnapSettings() end
+        toolbar.grid = button("Grid", 72, 4, function() snap().showGrid = not snap().showGrid ns.Anchors:RefreshGridOverlay() updateToolbar() end)
+        toolbar.snap = button("Snap", 72, 80, function() snap().enabled = not snap().enabled updateToolbar() end)
+        toolbar.step = button("32 px", 62, 156, function()
+            local step = snap().gridSize or 32
+            snap().gridSize = step < 32 and 32 or step < 64 and 64 or step < 128 and 128 or 16
+            ns.Anchors:RefreshGridOverlay()
+            updateToolbar()
+        end)
+        button("Undo", 54, 222, function() restore(previous) previous = nil end)
+        button("Cancel", 66, 280, function() restore(session) ns:LockAnchors() end)
+        button("Save & Lock", 100, 350, function() ns:LockAnchors() end)
+    end
+    local settings = ns.Options.GetSnapSettings()
+    toolbar.grid.label:SetText(settings.showGrid and "Grid: on" or "Grid: off")
+    toolbar.snap.label:SetText(settings.enabled and "Snap: on" or "Snap: off")
+    toolbar.step.label:SetText((settings.gridSize or 32) .. " px")
+    toolbar:Show()
+end
+
 local function overlay_OnDragStart(self)
     if InCombatLockdown() then return end
     if ns:AreAnchorsLocked() then return end
     local anchor = self.anchor
     if not anchor then return end
 
+    previous = capture()
     self._dragging = true
     self._wasDrag = true
     self._shiftAxis = nil
@@ -243,7 +299,15 @@ local function nudgeAnchor(anchorName, dx, dy)
     local entry = ns.Anchors:ResolveEntry(anchorName)
     local cx = (entry and tonumber(entry.x)) or 0
     local cy = (entry and tonumber(entry.y)) or 0
-    ns.Anchors:SetPositionDirect(anchorName, cx + dx, cy + dy)
+    previous = capture()
+    if entry and entry.attachTo then
+        local editable = ns.Anchors:GetEditableEntry(anchorName)
+        editable.attachX = (entry.attachX or 0) + dx
+        editable.attachY = (entry.attachY or -2) + dy
+        ns.Anchors:Reapply(anchorName)
+    else
+        ns.Anchors:SetPositionDirect(anchorName, cx + dx, cy + dy)
+    end
     if ns.Auras and type(ns.Auras.RequestRefresh) == "function" then
         pcall(ns.Auras.RequestRefresh, ns.Auras)
     end
@@ -421,6 +485,11 @@ local function overlay_OnMouseDown(self, button)
 end
 
 local function overlay_OnMouseUp(self, button)
+    if button == "RightButton" and not ns:AreAnchorsLocked() then
+        ns.Options:Open()
+        ns.Options:OpenLayoutForAnchor(self.anchor.anchorName)
+        return
+    end
     if button ~= "LeftButton" then return end
     if self._wasDrag or self._dragging then
         self._wasDrag = false
@@ -627,6 +696,7 @@ local function applyState()
     for name, anchor in ns.Anchors:Iterate() do
         applyAnchorState(name, anchor)
     end
+    updateToolbar()
     ns:Fire("EDIT_MODE_CHANGED", editModeActive)
 end
 
@@ -683,6 +753,7 @@ end)
 local function syncFromDb()
     if not ns.db then return end
     if ns.db.locked then
+        session, previous = nil, nil
         editModeActive = false
     else
         if InCombatLockdown() then

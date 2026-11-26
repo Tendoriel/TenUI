@@ -100,15 +100,15 @@ local function buildDragonRidingPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Width", 80, 600, 1,
         function() return getField("width") or 240 end,
-        function(v) setField("width", v) rebuild() end)
+        function(v) setField("width", v) rebuild() end, 240)
 
     children[#children + 1] = C.CreateSlider(sc, "Element Spacing", 0, 12, 1,
         function() return getField("gap") or 2 end,
-        function(v) setField("gap", v) rebuild() end)
+        function(v) setField("gap", v) rebuild() end, 2)
 
     children[#children + 1] = C.CreateSlider(sc, "Stack Spacing", 0, 10, 1,
         function() return getField("stackSpacing") or 2 end,
-        function(v) setField("stackSpacing", v) rebuild() end)
+        function(v) setField("stackSpacing", v) rebuild() end, 2)
 
     children[#children + 1] = C.CreateSubSection(sc, "Style")
 
@@ -118,7 +118,7 @@ local function buildDragonRidingPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Border Size", 0, 4, 1,
         function() return getField("borderThickness") or 0 end,
-        function(v) setField("borderThickness", v) redraw() end)
+        function(v) setField("borderThickness", v) redraw() end, 0)
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Border Color",
         colorGetter("borderColor"), colorSetter("borderColor"))
@@ -127,7 +127,7 @@ local function buildDragonRidingPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Speed Bar Height", 4, 40, 1,
         function() return getField("speedHeight") or 14 end,
-        function(v) setField("speedHeight", v) rebuild() end)
+        function(v) setField("speedHeight", v) rebuild() end, 14)
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Speed Color",
         colorGetter("normalColor"), colorSetter("normalColor"))
@@ -170,7 +170,7 @@ local function buildDragonRidingPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Charge Height", 2, 24, 1,
         function() return getField("skyridingHeight") or 10 end,
-        function(v) setField("skyridingHeight", v) rebuild() end)
+        function(v) setField("skyridingHeight", v) rebuild() end, 10)
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Charge Fill",
         colorGetter("skyridingFilled"), colorSetter("skyridingFilled"))
@@ -182,7 +182,7 @@ local function buildDragonRidingPage(sc)
 
     children[#children + 1] = C.CreateSlider(sc, "Second Wind Height", 2, 24, 1,
         function() return getField("secondWindHeight") or 6 end,
-        function(v) setField("secondWindHeight", v) rebuild() end)
+        function(v) setField("secondWindHeight", v) rebuild() end, 6)
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Second Wind Fill",
         colorGetter("secondWindFilled"), colorSetter("secondWindFilled"))

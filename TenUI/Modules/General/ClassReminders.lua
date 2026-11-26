@@ -400,6 +400,10 @@ local function rememberedPersonalState(key, active, icon, preview)
     end
     local state = personalStates[key]
     if not state then return nil end
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive() then
+        local minutes = math.floor((GetTime() - state.observed) / 60)
+        return state.active, state.icon, minutes > 0 and (" (seen " .. minutes .. "m ago)") or " (last seen)"
+    end
     local remaining = state.observed + 30 - GetTime()
     if remaining <= 0 then
         personalStates[key] = nil
@@ -895,6 +899,8 @@ local LIFECYCLE_EVENTS = {
     "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED",
     "ADDON_RESTRICTION_STATE_CHANGED",
+    "CHALLENGE_MODE_COMPLETED",
+    "CHALLENGE_MODE_RESET",
     "PLAYER_UPDATE_RESTING",
     "PLAYER_MOUNT_DISPLAY_CHANGED",
     "PLAYER_CAN_GLIDE_CHANGED",
@@ -907,10 +913,14 @@ local LIFECYCLE_EVENTS = {
     "TRAIT_CONFIG_UPDATED",
 }
 
+local syncUnitEvents
 local function onLifecycleEvent(event, unit)
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit and unit ~= "player" then return end
     if event == "PLAYER_DEAD" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         wipe(personalStates)
+    end
+    if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_SPECIALIZATION_CHANGED" then
+        syncUnitEvents()
     end
     if event == "PLAYER_DEAD" or event == "PLAYER_REGEN_DISABLED" then
         if ClassReminders.frame then ClassReminders.frame:Hide() end
@@ -926,7 +936,7 @@ local function onRosterEvent()
     scheduleRosterRebuild()
 end
 
-local function syncUnitEvents()
+syncUnitEvents = function()
     local uf = ClassReminders._unitFrame
     if not uf then
         uf = CreateFrame("Frame")
@@ -938,14 +948,20 @@ local function syncUnitEvents()
         end)
         ClassReminders._unitFrame = uf
     end
-    if not uf._registered then
-        if playerClass() == "PALADIN" then
+    local mode = not InCombatLockdown() and (currentSpecID() == HOLY_PALADIN_SPEC and "group" or "personal")
+    if mode == uf._registered then return end
+    if uf._registered then
+        uf:UnregisterEvent("UNIT_AURA")
+        uf:UnregisterEvent("UNIT_PET")
+    end
+    uf._registered = mode
+    if mode then
+        if mode == "group" then
             uf:RegisterEvent("UNIT_AURA")
         else
             uf:RegisterUnitEvent("UNIT_AURA", "player", "pet")
         end
         uf:RegisterUnitEvent("UNIT_PET", "player")
-        uf._registered = true
     end
 end
 

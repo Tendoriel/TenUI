@@ -14,6 +14,11 @@ local targetDebuffIDs = {
     [980] = true,       -- Agony
     [146739] = true,    -- Corruption
     [157736] = true,    -- Immolate
+    [55078] = true,     -- Blood Plague
+    [55095] = true,     -- Frost Fever
+    [188389] = true,    -- Flame Shock
+    [357209] = true,    -- Fire Breath damage over time
+    [1259790] = true,   -- Unstable Affliction
     [445474] = true,    -- Wither
 }
 

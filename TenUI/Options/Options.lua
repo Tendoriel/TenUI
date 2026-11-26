@@ -143,6 +143,8 @@ function Options:_BuildWindow()
     local Theme = UI.Theme
 
     local f = CreateFrame("Frame", "TenUIOptionsFrame", UIParent)
+    tinsert(UISpecialFrames, "TenUIOptionsFrame")
+    f:SetScript("OnHide", function() Options._isOpen = false end)
     f:SetSize(WIN_W, WIN_H)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     f:SetMovable(true)
@@ -166,8 +168,9 @@ function Options:_BuildWindow()
 
     local closeBtn = UI.CreateCloseButton(header, function() Options:Close() end)
     closeBtn:SetPoint("RIGHT", header, "RIGHT", -8, 0)
+    header.searchField = ns.AddSettingsSearch(header, _pageMap, closeBtn)
 
-    local unlockBtn = UI.CreateCompactButton(header, "Edit Mode", function()
+    local unlockBtn = UI.CreateCompactButton(header, ns.db and ns.db.locked and "Edit Mode" or "Exit Edit", function()
         if InCombatLockdown() then
             DEFAULT_CHAT_FRAME:AddMessage("|cff4fc3f7TenUI|r: Cannot unlock frames in combat")
             return
@@ -179,7 +182,7 @@ function Options:_BuildWindow()
         end
     end, 80)
     unlockBtn:SetHeight(20)
-    unlockBtn:SetPoint("RIGHT", closeBtn, "LEFT", -10, 0)
+    unlockBtn:SetPoint("RIGHT", header.searchField, "LEFT", -10, 0)
     unlockBtn:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
         if ns.db and ns.db.locked then
@@ -390,7 +393,12 @@ function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
     strip:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, offset)
     C.SkinPanel(strip)
 
-    local buttons, lanes = {}, {}
+    local buttons, lanes, selected = {}, {}, {}
+    local function itemKey(item) return item.key or item.spellID end
+    local function mark(button)
+        local active = selected[itemKey(button.optionItem)] ~= nil
+        button.selection:SetShown(active)
+    end
     local columns, dragging, currentRows
     local function dropAtCursor()
         local left, top = strip:GetLeft(), strip:GetTop()
@@ -448,24 +456,41 @@ function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
                             GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
                             GameTooltip:SetText(self.optionItem.label)
                             GameTooltip:AddLine("Drag to reorder", 0.6, 0.8, 1)
-                            if self.optionItem.spellID then GameTooltip:AddLine("Right-click: settings", 0.6, 0.8, 1) end
+                            if self.optionItem.spellID then GameTooltip:AddLine("Ctrl-click to select multiple · Right-click for settings", 0.6, 0.8, 1) end
                             if callbacks.remove then GameTooltip:AddLine("Shift-right-click: remove", 0.6, 0.8, 1) end
                             GameTooltip:Show()
                         end,
                     })
                     button:SetSize(iconSize, iconSize)
+                    button.selection = button:CreateTexture(nil, "OVERLAY")
+                    button.selection:SetColorTexture(0.5, 0.4, 1, 0.9)
+                    button.selection:SetPoint("BOTTOMLEFT")
+                    button.selection:SetPoint("BOTTOMRIGHT")
+                    button.selection:SetHeight(3)
                     button:RegisterForDrag("LeftButton")
                     button:SetScript("OnClick", function(self, mouse)
+                        if mouse == "LeftButton" and IsControlKeyDown() and self.optionItem.spellID then
+                            local key = itemKey(self.optionItem)
+                            if selected[key] then selected[key] = nil else selected[key] = self.optionItem end
+                            mark(self)
+                            return
+                        end
                         if mouse ~= "RightButton" then return end
                         GameTooltip:Hide()
                         if callbacks.remove and IsShiftKeyDown() then
                             callbacks.remove(self.optionItem, self.previewRow)
                         elseif self.optionItem.spellID then
-                            callbacks.select(self.optionItem)
+                            local group = {}
+                            if selected[itemKey(self.optionItem)] then
+                                for _, visible in ipairs(buttons) do
+                                    if visible:IsShown() and selected[itemKey(visible.optionItem)] then group[#group+1] = visible.optionItem end
+                                end
+                            end
+                            callbacks.select(self.optionItem, group)
                         end
                     end)
                     button:SetScript("OnDragStart", function(self)
-                        if InCombatLockdown() then return end
+                        if InCombatLockdown() or IsControlKeyDown() then return end
                         GameTooltip:Hide()
                         dragging = { row = self.previewRow, index = self.previewIndex, item = self.optionItem }
                         self:SetAlpha(0.55)
@@ -491,6 +516,7 @@ function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
                     buttons[used] = button
                 end
                 button.optionItem = item
+                mark(button)
                 button.previewRow, button.previewIndex = row, index
                 button.iconTex:SetTexture(item.texture or 134400)
                 button:ClearAllPoints()
@@ -543,6 +569,8 @@ function Options:SelectPage(key, forceRebuild)
         tab:SetSelected(true)
     end
 
+    if entry.profileDirty and entry.built then forceRebuild = true end
+    entry.profileDirty = nil
     if forceRebuild and entry.built then
         self:RebuildPage(key)
     end
@@ -566,6 +594,7 @@ function Options:SelectPage(key, forceRebuild)
         entry.built = true
     end
 
+    if entry.scrollChild then ns.IndexSettingsPage(key, entry.scrollChild) end
     if entry.container then
         entry.container:Show()
     end
@@ -596,6 +625,7 @@ function Options:Open()
         self:SelectPage(savedPage)
     end
 
+    if _currentPage and _pageMap[_currentPage].profileDirty then self:SelectPage(_currentPage, true) end
     _frame:Show()
     Options._isOpen = true
 end
@@ -668,7 +698,7 @@ end
 
 ns:RegisterMessage("LOCK_STATE_CHANGED", function(_, locked)
     if _frame and _frame.ubLabel then
-        _frame.ubLabel:SetText("Edit Mode")
+        _frame.ubLabel:SetText(locked and "Edit Mode" or "Exit Edit")
     end
 end)
 
@@ -689,10 +719,14 @@ ns:RegisterEvent("PLAYER_REGEN_ENABLED", function()
     end
 end)
 
-ns:RegisterEvent("PLAYER_LOGIN", function()
-    if _frame then
-        tinsert(UISpecialFrames, "TenUIOptionsFrame")
-    end
+ns:RegisterMessage("PROFILE_CHANGED", function()
+    for _, entry in pairs(_pageMap) do entry.profileDirty = entry.built end
+    C_Timer.After(0, function()
+        if _frame and _frame:IsShown() and _currentPage and _pageMap[_currentPage].profileDirty then
+            if InCombatLockdown() then _pendingPage = _currentPage
+            else Options:SelectPage(_currentPage, true) end
+        end
+    end)
 end)
 
 local function getTooltipControl()
@@ -735,10 +769,10 @@ local function buildGeneralPage(sc)
                 if ns.anchorParent then
                     ns.anchorParent:SetScale(v)
                     ns.Pixel.RefreshEdges()
+                    ns:Fire("GLOBAL_SCALE_CHANGED")
                 end
             end
-        end
-    )
+        end, 1.0)
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Minimap Button",
         function()
@@ -757,12 +791,55 @@ local function buildGeneralPage(sc)
         end
     )
 
+    children[#children+1] = C.CreateSection(sc, "Global Appearance")
+    local function setGlobal(key, value)
+        local p = ns:GetProfile()
+        p.globalStyle = p.globalStyle or {}
+        p.globalStyle[key] = value
+        ns:Fire("PROFILE_CHANGED", ns:GetProfileKey())
+    end
+    children[#children+1] = C.CreateFontDropdown(sc, "Default font", function() return ns:GetGlobalStyle().font end,
+        function(v) setGlobal("font", v) end, true)
+    children[#children+1] = C.CreateStatusBarTextureDropdown(sc, "Default bar texture", function() return ns:GetGlobalStyle().texture end,
+        function(v) setGlobal("texture", v) end, true)
+    children[#children+1] = C.CreateOutlineDropdown(sc, "Default outline", function() return ns:GetGlobalStyle().outline or "OUTLINE" end,
+        function(v) setGlobal("outline", v) end, true)
+    children[#children+1] = C.CreateButton(sc, "Apply Global Appearance to All HUD Modules", function()
+        StaticPopupDialogs.TENUI_GLOBAL_STYLE = {
+            text = "Replace local HUD font, outline and bar texture overrides in this profile?",
+            button1 = ACCEPT, button2 = CANCEL, timeout = 0, whileDead = true, hideOnEscape = true,
+            OnAccept = function(_, key)
+                if InCombatLockdown() or key ~= ns:GetProfileKey() then return end
+                ns:BackupProfile()
+                local function reset(t)
+                    for field, value in pairs(t) do
+                        if type(value) == "table" then reset(value)
+                        elseif field == "font" or field == "fontKey" or field == "keybindFont" then t[field] = "default"
+                        elseif field == "fontFlags" or (field == "flags" and type(value) == "string") then t[field] = "GLOBAL"
+                        elseif (field == "texture" or field == "barTexture") and type(value) == "string" then t[field] = "default" end
+                    end
+                end
+                local p = ns:GetProfile()
+                for _, name in ipairs({"Layout","Resources","CastBar","DragonRiding","General","Auras"}) do
+                    if p.modules[name] then reset(p.modules[name]) end
+                end
+                for _, scope in pairs(p.specScopes or {}) do reset(scope) end
+                ns:Fire("PROFILE_CHANGED", key)
+            end,
+        }
+        StaticPopup_Show("TENUI_GLOBAL_STYLE", nil, nil, ns:GetProfileKey())
+    end)
+
     children[#children + 1] = C.CreateSection(sc, "Tooltip IDs")
     children[#children + 1] = C.CreateHelpText(sc, "Add item, spell and icon IDs to tooltips.")
 
+    local tooltipChildren = {}
     children[#children + 1] = C.CreateCheckBox(sc, "Enable Tooltip IDs",
         function() return getTooltipControl().enabled == true end,
-        function(v) getTooltipControl().enabled = v end
+        function(v)
+            getTooltipControl().enabled = v
+            for _, row in ipairs(tooltipChildren) do row:SetAlpha(v and 1 or 0.45) row:EnableMouse(v) end
+        end
     )
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Item ID",
@@ -784,6 +861,14 @@ local function buildGeneralPage(sc)
         function() return getTooltipControl().requireModifier == true end,
         function(v) getTooltipControl().requireModifier = v end
     )
+
+    for i = #children-3, #children do
+        local child = children[i]
+        tooltipChildren[#tooltipChildren+1] = child
+        local enabled = getTooltipControl().enabled == true
+        child:SetAlpha(enabled and 1 or 0.45)
+        child:EnableMouse(enabled)
+    end
 
     local totalH = C.LayoutVertical(sc, children, 4, -8)
     sc:SetHeight(math.max(totalH, 10))

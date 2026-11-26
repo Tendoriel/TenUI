@@ -219,6 +219,12 @@ function ns:GetDefaultProfileKey()
 end
 
 local function selectProfile(self, assigned, specID)
+    local rules = self.db.contentProfiles
+    if rules and IsInInstance then
+        local _, kind = IsInInstance()
+        local assignedContent = rules[kind]
+        if assignedContent and self.db.profiles[assignedContent] then return assignedContent, "content" end
+    end
     local char = self.charDb
     if specID and char and char.selectedSpec == specID and self.db.profiles[char.selectedProfile] then
         return char.selectedProfile, "character"
@@ -273,6 +279,8 @@ function ns:RenameProfile(oldName, newName)
             if pName == oldName then self.db.specProfiles[specID] = newName end
         end
     end
+    for kind, value in pairs(self.db.contentProfiles or {}) do if value == oldName then self.db.contentProfiles[kind] = newName end end
+    if self._lastProfileBackup and self._lastProfileBackup.name == oldName then self._lastProfileBackup.name = newName end
     if self.db.defaultProfile == oldName then self.db.defaultProfile = newName end
     if self.charDb and self.charDb.selectedProfile == oldName then self.charDb.selectedProfile = newName end
 
@@ -297,6 +305,8 @@ function ns:DeleteProfile(name)
     self.db.profiles = self.db.profiles or {}
     if not self.db.profiles[name] then return false, "profile does not exist" end
 
+    for kind, value in pairs(self.db.contentProfiles or {}) do if value == name then self.db.contentProfiles[kind] = nil end end
+    if self._lastProfileBackup and self._lastProfileBackup.name == name then self._lastProfileBackup = nil end
     self.db.profiles[name] = nil
     self:_RemoveProfileFromOrder(name)
 
@@ -748,6 +758,7 @@ function ns:CopyAnchorPositions(sourceName)
     local destination = self:GetProfile()
     if not source or source == destination or type(source.anchors) ~= "table" then return false end
 
+    self:BackupProfile()
     local copied = deepCopyData(source.anchors)
     local sourceScope = type(source.specScopes) == "table" and source.specScopes[self:GetSpecScopeKey()]
     if type(sourceScope) == "table" and type(sourceScope.anchors) == "table" then
@@ -775,53 +786,110 @@ local function stripNonPortable(data)
     end
 end
 
-local EXPORT_SECTIONS = {
-    resources = { module = "Resources", fields = {} },
-    castbar = { module = "CastBar", fields = {} },
-    cdm = { module = "Bars", fields = { "abilities", "abilitiesDefaults" } },
-    auras = { module = "Auras", fields = { "auras", "aurasDefaults" } },
-    layout = { module = "Layout", fields = { "anchors", "_sharedSettingsSeeded" } },
+local sections = {
+    positions = { label = "Anchor positions", fields = {"anchors"}, scopes = {"anchors"} },
+    visuals = { label = "Layout visuals", module = "Layout", member = "visuals", scopes = {"layoutVisuals"} },
+    cdm = { label = "Cooldown Manager", module = "Bars", fields = {"abilities", "abilitiesDefaults"} },
+    auras = { label = "Auras", module = "Auras", fields = {"auras", "aurasDefaults"} },
+    resources = { label = "Resources", module = "Resources", scopes = {"resources"} },
+    castbar = { label = "Cast Bar", module = "CastBar", scopes = {"castbar"} },
+    glow = { label = "Glow", module = "Glow" },
+    reminders = { label = "Reminders", general = {"classReminders", "stealthTracking", "talentReminder", "combatAlerts"} },
+    skyriding = { label = "Skyriding", module = "DragonRiding" },
 }
+ns.ProfileSections = sections
+ns.ProfileSectionOrder = { "positions", "visuals", "cdm", "auras", "resources", "castbar", "glow", "reminders", "skyriding" }
+
+local function selectionKeys(selection)
+    if selection == "layout" then return {positions = true, visuals = true} end
+    if type(selection) == "string" then return { [selection] = true } end
+    return selection
+end
+
+local function transfer(destination, source, keys)
+    destination.modules = destination.modules or {}
+    for key, enabled in pairs(keys) do
+        local def = enabled and sections[key]
+        if def then
+            if def.member then
+                local target = destination.modules[def.module] or {}
+                local origin = source.modules[def.module]
+                target[def.member] = origin and deepCopyData(origin[def.member])
+                destination.modules[def.module] = target
+            elseif def.module then
+                destination.modules[def.module] = deepCopyData(source.modules[def.module])
+            end
+            for _, field in ipairs(def.fields or {}) do destination[field] = deepCopyData(source[field]) end
+            if def.general then
+                local general = source.modules.General or {}
+                destination.modules.General = destination.modules.General or {}
+                for _, field in ipairs(def.general) do destination.modules.General[field] = deepCopyData(general[field]) end
+            end
+            for _, domain in ipairs(def.scopes or {}) do
+                for _, scope in pairs(destination.specScopes or {}) do scope[domain] = nil end
+                for name, scope in pairs(source.specScopes or {}) do
+                    if scope[domain] then
+                        destination.specScopes = destination.specScopes or {}
+                        destination.specScopes[name] = destination.specScopes[name] or {}
+                        destination.specScopes[name][domain] = deepCopyData(scope[domain])
+                    end
+                end
+            end
+        end
+    end
+end
+
+function ns:BackupProfile()
+    self._lastProfileBackup = { name = self:GetProfileKey(), data = deepCopyProfileData(self:GetProfile()) }
+end
+
+function ns:UndoProfileChange()
+    local backup = self._lastProfileBackup
+    if InCombatLockdown() or not backup or backup.name ~= self:GetProfileKey() then return false end
+    self.db.profiles[backup.name] = backup.data
+    self._lastProfileBackup = nil
+    self:Fire("PROFILE_CHANGED", backup.name)
+    return true
+end
+
+function ns:ApplyProfileSections(source, keys)
+    if not self.savedVarsReady or InCombatLockdown() or not source or source == self:GetProfile() then return false end
+    local selected = {}
+    for key, enabled in pairs(keys or {}) do if enabled and sections[key] then selected[key] = true end end
+    if not next(selected) then return false end
+    local result = deepCopyProfileData(self:GetProfile())
+    transfer(result, source, selected)
+    self:PrepareProfile(result)
+    self:BackupProfile()
+    self.db.profiles[self:GetProfileKey()] = result
+    self:Fire("PROFILE_CHANGED", self:GetProfileKey())
+    return true
+end
 
 function ns:ExportProfileString(section)
     if not self.savedVarsReady then return nil, "saved variables not ready" end
-    local p = self:GetProfile()
-    if type(p) ~= "table" then return nil, "no active profile" end
-    local selection = EXPORT_SECTIONS[section]
-    if section and section ~= "all" and not selection then return nil, "unknown export section" end
-
-    local data = deepCopyProfileData(p)
+    local data = deepCopyProfileData(self:GetProfile())
     stripNonPortable(data)
     self:SeedSharedProfileSettings(data)
-
-    if selection then
-        local selected = { modules = { [selection.module] = data.modules[selection.module] } }
-        for _, field in ipairs(selection.fields) do selected[field] = data[field] end
-        if section == "layout" and type(data.specScopes) == "table" then
-            for key, scope in pairs(data.specScopes) do
-                if type(scope) == "table" and (scope.anchors or scope.layoutVisuals) then
-                    selected.specScopes = selected.specScopes or {}
-                    selected.specScopes[key] = { anchors = scope.anchors, layoutVisuals = scope.layoutVisuals }
-                end
-            end
+    local names = {}
+    if section and section ~= "all" then
+        local keys = selectionKeys(section)
+        for _, key in ipairs(self.ProfileSectionOrder) do
+            if keys[key] then names[#names + 1] = key end
         end
-        if (section == "resources" or section == "castbar") and type(data.specScopes) == "table" then
-            for key, scope in pairs(data.specScopes) do
-                if type(scope) == "table" and type(scope[section]) == "table" then
-                    selected.specScopes = selected.specScopes or {}
-                    selected.specScopes[key] = { [section] = scope[section] }
-                end
-            end
-        end
-        data = selected
+        if #names == 0 then return nil, "select at least one section" end
+        local partial = {modules = {}}
+        transfer(partial, data, keys)
+        data = partial
+    else
+        names[1] = "all"
     end
-
     local payload = serializeValue(data, 1, {})
-    if type(payload) ~= "string" then
-        return nil, "serialization failed"
-    end
-    return ("TenUI_Profile:v%d:%s:%s"):format(
-        EXPORT_FORMAT_VERSION, tostring(self.version or "?"), payload)
+    if #payload > 500000 then return nil, "profile exceeds the import size limit" end
+    local packed = C_EncodingUtil.CompressString(payload)
+    local encoded = packed and C_EncodingUtil.EncodeBase64(packed)
+    if not encoded then return nil, "compression failed" end
+    return ("TenUI:2:%s:%s:%s"):format(self.version or "?", table.concat(names, ","), encoded)
 end
 
 function ns:DeserializeProfileString(str)
@@ -829,16 +897,27 @@ function ns:DeserializeProfileString(str)
         return nil, "empty import string"
     end
     str = str:gsub("^%s+", ""):gsub("%s+$", "")
-    local ver, _addonVer, payload = str:match(EXPORT_HEADER_PATTERN)
-    if not ver then
-        ver, _addonVer, payload = str:match(LEGACY_EXPORT_HEADER_PATTERN)
-    end
-    if not ver then
-        return nil, "invalid format (not a TenUI export string)"
-    end
-    if tonumber(ver) ~= EXPORT_FORMAT_VERSION then
-        return nil, ("unsupported format version v%s (this client reads v%d)")
-            :format(tostring(ver), EXPORT_FORMAT_VERSION)
+    local version, names, encoded = str:match("^TenUI:2:([^:]+):([a-z,]+):([A-Za-z0-9+/=]+)$")
+    local payload
+    local available = {}
+    if encoded then
+        if #encoded > 700000 then return nil, "encoded string too large" end
+        for key in names:gmatch("[a-z]+") do
+            if available[key] or (not sections[key] and key ~= "all") then return nil, "unknown section" end
+            available[key] = true
+        end
+        if not next(available) or (available.all and names ~= "all") then return nil, "invalid section list" end
+        local ok, result = pcall(function()
+            local packed = C_EncodingUtil.DecodeBase64(encoded)
+            return packed and C_EncodingUtil.DecompressString(packed)
+        end)
+        if not ok or not result then return nil, "invalid compressed payload" end
+        payload = result
+    else
+        local format
+        format, version, payload = str:match(EXPORT_HEADER_PATTERN)
+        if not format then format, version, payload = str:match(LEGACY_EXPORT_HEADER_PATTERN) end
+        if tonumber(format) ~= EXPORT_FORMAT_VERSION then return nil, "unrecognized profile format" end
     end
 
     local data, err = parseTableLiteral(payload)
@@ -850,20 +929,41 @@ function ns:DeserializeProfileString(str)
         return nil, "invalid profile data (missing 'modules' table)"
     end
     for _, key in ipairs({ "anchors", "abilities", "auras",
-                           "abilitiesDefaults", "aurasDefaults", "specScopes" }) do
+                           "abilitiesDefaults", "aurasDefaults", "specScopes", "globalStyle" }) do
         if data[key] ~= nil and type(data[key]) ~= "table" then
             return nil, ("invalid profile data ('%s' is not a table)"):format(key)
         end
     end
-    return data
+    for _, module in pairs(data.modules) do
+        if type(module) ~= "table" then return nil, "invalid module data" end
+    end
+    for key, scope in pairs(data.specScopes or {}) do
+        if type(key) ~= "string" or type(scope) ~= "table" then return nil, "invalid specialization" end
+        for _, domain in ipairs({"anchors", "layoutVisuals", "castbar", "resources"}) do
+            if scope[domain] ~= nil and type(scope[domain]) ~= "table" then return nil, "invalid specialization data" end
+        end
+    end
+    if not encoded then
+        -- Legacy partial exports contain at most one of these five modules.
+        local partialModules = { Resources = true, CastBar = true, Layout = true, Bars = true, Auras = true }
+        local firstModule = next(data.modules)
+        if firstModule and (not partialModules[firstModule] or next(data.modules, firstModule)) then
+            available.all = true
+        end
+        for key, def in pairs(sections) do
+            if (def.module and data.modules[def.module]) or (def.general and data.modules.General) then available[key] = true end
+            for _, field in ipairs(def.fields or {}) do if data[field] then available[key] = true end end
+        end
+    end
+    return data, nil, {version = version, sections = available}
 end
 
-function ns:ImportProfile(str, profileName)
+function ns:ImportProfile(str, profileName, inherit)
     if not self.savedVarsReady or not self.db then
         return false, "saved variables not ready"
     end
 
-    local data, err = self:DeserializeProfileString(str)
+    local data, err, info = self:DeserializeProfileString(str)
     if not data then return false, err end
 
     self.db.profiles = self.db.profiles or {}
@@ -884,6 +984,11 @@ function ns:ImportProfile(str, profileName)
         return false, ("profile '%s' already exists -- choose another name"):format(name)
     end
 
+    if inherit and not info.sections.all then
+        local base = deepCopyProfileData(self:GetProfile())
+        transfer(base, data, info.sections)
+        data = base
+    end
     stripNonPortable(data)
     data.modules = data.modules or {}
 

@@ -8,6 +8,7 @@ local tostring = tostring
 local tonumber = tonumber
 local pcall    = pcall
 
+local batch
 local _currentSpellID = nil
 local _currentEntry   = nil
 local _currentRowName = nil
@@ -49,6 +50,21 @@ local function buildAbilityPage(sc)
         return
     end
 
+    if batch and #batch > 1 then
+        children[#children+1] = C.CreateHelpText(sc, ("Glow and combat visibility changes apply to %d selected icons."):format(#batch))
+    end
+    local function batchSetting(branch, group, field, value)
+        for _, item in ipairs(batch or {}) do
+            if item.spellID ~= spellID then
+                local data = getAbilityProfile(item.spellID)
+                data[branch] = data[branch] or {}
+                local target = data[branch]
+                if group then target[group] = target[group] or {} target = target[group] end
+                target[field] = type(value) == "table" and CopyTable(value) or value
+                ns.Bars:ApplyAbilityOptions(item.spellID)
+            end
+        end
+    end
     local function applyAbilityOptions()
         if ns.Bars and ns.Bars.ApplyAbilityOptions then ns.Bars:ApplyAbilityOptions(spellID) end
     end
@@ -192,6 +208,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.proc = ap.glow.proc or {}
             ap.glow.proc.enabled = v
+            batchSetting("glow", "proc", "enabled", ap.glow.proc.enabled)
             if ns.Bars and ns.Bars.ReapplyProcGlowForSpell then
                 pcall(ns.Bars.ReapplyProcGlowForSpell, ns.Bars, spellID)
             end
@@ -210,6 +227,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.proc = ap.glow.proc or {}
             ap.glow.proc.style = v
+            batchSetting("glow", "proc", "style", ap.glow.proc.style)
             if ns.Bars and ns.Bars.ReapplyProcGlowForSpell then
                 pcall(ns.Bars.ReapplyProcGlowForSpell, ns.Bars, spellID)
             end
@@ -229,12 +247,12 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.proc = ap.glow.proc or {}
             ap.glow.proc.color = { r, g, b, a }
+            batchSetting("glow", "proc", "color", ap.glow.proc.color)
             if ns.Bars and ns.Bars.ReapplyProcGlowForSpell then
                 pcall(ns.Bars.ReapplyProcGlowForSpell, ns.Bars, spellID)
             end
             restylePreview()
-        end
-    )
+        end, { 1, 1, 1, 1 })
 
     children[#children + 1] = C.CreateHelpText(sc,
         "The Blizzard style uses the game's animated proc art and ignores the color. " ..
@@ -252,6 +270,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.ready = ap.glow.ready or {}
             ap.glow.ready.enabled = v
+            batchSetting("glow", "ready", "enabled", ap.glow.ready.enabled)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
@@ -269,6 +288,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.ready = ap.glow.ready or {}
             ap.glow.ready.combatOnly = v and true or false
+            batchSetting("glow", "ready", "combatOnly", ap.glow.ready.combatOnly)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
@@ -288,6 +308,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.ready = ap.glow.ready or {}
             ap.glow.ready.style = v
+            batchSetting("glow", "ready", "style", ap.glow.ready.style)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
@@ -307,12 +328,12 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.ready = ap.glow.ready or {}
             ap.glow.ready.color = { r, g, b, a }
+            batchSetting("glow", "ready", "color", ap.glow.ready.color)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
             restylePreview()
-        end
-    )
+        end, { 0.3, 1, 0.3, 1 })
 
     children[#children + 1] = C.CreateHelpText(sc,
         "Glows while the ability is ready (ignores the global cooldown). " ..
@@ -330,6 +351,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.maxStacks = ap.glow.maxStacks or {}
             ap.glow.maxStacks.enabled = v
+            batchSetting("glow", "maxStacks", "enabled", ap.glow.maxStacks.enabled)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
@@ -347,6 +369,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.maxStacks = ap.glow.maxStacks or {}
             ap.glow.maxStacks.combatOnly = v and true or false
+            batchSetting("glow", "maxStacks", "combatOnly", ap.glow.maxStacks.combatOnly)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
@@ -366,6 +389,7 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.maxStacks = ap.glow.maxStacks or {}
             ap.glow.maxStacks.style = v
+            batchSetting("glow", "maxStacks", "style", ap.glow.maxStacks.style)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
@@ -385,12 +409,12 @@ local function buildAbilityPage(sc)
             ap.glow = ap.glow or {}
             ap.glow.maxStacks = ap.glow.maxStacks or {}
             ap.glow.maxStacks.color = { r, g, b, a }
+            batchSetting("glow", "maxStacks", "color", ap.glow.maxStacks.color)
             if ns.Bars and ns.Bars._TickAll then
                 pcall(ns.Bars._TickAll, ns.Bars)
             end
             restylePreview()
-        end
-    )
+        end, { 1, 0.5, 0, 1 })
 
     children[#children + 1] = C.CreateHelpText(sc,
         "Glows a charge ability when all its charges are available (at max stacks). " ..
@@ -426,8 +450,7 @@ local function buildAbilityPage(sc)
             ap.warnings.cooldownText.custom = true
             applyAbilityOptions()
             restylePreview()
-        end
-    )
+        end, 13)
 
     children[#children + 1] = C.CreateFontDropdown(sc, "Cooldown Text Font",
         function()
@@ -474,8 +497,7 @@ local function buildAbilityPage(sc)
             ap.warnings.cooldownText.custom = true
             applyAbilityOptions()
             restylePreview()
-        end
-    )
+        end, 0)
 
     children[#children + 1] = C.CreateSlider(sc, "Text Y Offset", -50, 50, 1,
         function()
@@ -490,8 +512,7 @@ local function buildAbilityPage(sc)
             ap.warnings.cooldownText.custom = true
             applyAbilityOptions()
             restylePreview()
-        end
-    )
+        end, 0)
 
     children[#children + 1] = C.CreateSubSection(sc, "Range Indicator")
 
@@ -558,6 +579,7 @@ local function buildAbilityPage(sc)
             local ap = getAbilityProfile(spellID)
             ap.visibility = ap.visibility or {}
             ap.visibility.combatOnly = v
+            batchSetting("visibility", nil, "combatOnly", v)
             applyAbilityOptions()
         end
     )
@@ -566,7 +588,8 @@ local function buildAbilityPage(sc)
     sc:SetHeight(math.max(totalH, 10))
 end
 
-function AbilityPanel:OpenForSpell(spellID, context)
+function AbilityPanel:OpenForSpell(spellID, context, group)
+    batch = group
     _currentSpellID = spellID
     if type(context) == "table" then
         _currentEntry   = context.entry
@@ -588,3 +611,5 @@ ns.Options:RegisterPage({
     restorePage = "cdmbars",
     build = buildAbilityPage,
 })
+
+ns:RegisterMessage("PROFILE_CHANGED", function() batch = nil end)

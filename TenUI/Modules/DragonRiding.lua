@@ -382,7 +382,7 @@ function DragonRiding:Redraw()
     self.speedBar.tick:SetColorTexture(p.tickColor.r, p.tickColor.g, p.tickColor.b, p.tickColor.a)
 
     local stFont, stSize = resolveFontPath("default", p.speedText.size)
-    ns.Pixel.SetFont(self.speedBar.text, stFont, stSize, "OUTLINE")
+    ns.Pixel.SetFont(self.speedBar.text, stFont, stSize, "GLOBAL")
     self.speedBar.text:ClearAllPoints()
     self.speedBar.text:SetPoint(p.speedText.justify or "CENTER", self.speedBar,
         p.speedText.justify or "CENTER", p.speedText.offsetX or 0, p.speedText.offsetY or 0)
@@ -401,7 +401,7 @@ function DragonRiding:Redraw()
     end
 
     local wsFont, wsSize = resolveFontPath("default", p.whirlingSurgeText.size)
-    ns.Pixel.SetFont(self.wsIcon.text, wsFont, wsSize, "OUTLINE")
+    ns.Pixel.SetFont(self.wsIcon.text, wsFont, wsSize, "GLOBAL")
     self.wsIcon.text:ClearAllPoints()
     self.wsIcon.text:SetPoint(p.whirlingSurgeText.justify or "CENTER", self.wsIcon,
         p.whirlingSurgeText.justify or "CENTER", p.whirlingSurgeText.offsetX or 0, p.whirlingSurgeText.offsetY or 0)
