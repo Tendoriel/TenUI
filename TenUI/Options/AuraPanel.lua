@@ -12,6 +12,7 @@ local ipairs   = ipairs
 local _selectedAuraContainer = "TrackedBars"
 local batch
 local _currentAuraSpellID    = nil
+function ns.HasAuraSelection() return _currentAuraSpellID ~= nil end
 local _currentAuraContainer  = nil
 local _currentAuraCooldownID = nil
 

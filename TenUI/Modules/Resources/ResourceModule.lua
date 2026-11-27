@@ -448,6 +448,9 @@ function Resources:IsPreview()
     return self._previewActive == true
 end
 
+Resources.IsPreviewActive = Resources.IsPreview
+
+
 ns:RegisterModule("Resources", {
     defaults = DEFAULTS,
     OnEnable = function(mod, profile) Resources:OnEnable(mod, profile) end,

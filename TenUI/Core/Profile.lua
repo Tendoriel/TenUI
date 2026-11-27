@@ -134,6 +134,8 @@ function ns:SetActiveProfile(name, fromSpec)
     end
     if not (self.db.profiles and self.db.profiles[name]) then return false end
     if not fromSpec then
+        local _, kind = IsInInstance()
+        self._manualContent = kind
         if self.charDb then
             self.charDb.selectedProfile = name
             self.charDb.selectedSpec = self:GetLiveSpecID()
@@ -222,6 +224,10 @@ local function selectProfile(self, assigned, specID)
     local rules = self.db.contentProfiles
     if rules and IsInInstance then
         local _, kind = IsInInstance()
+        if self._manualContent ~= kind then self._manualContent = nil end
+        if self._manualContent and self.charDb and self.charDb.selectedSpec == specID and self.db.profiles[self.charDb.selectedProfile] then
+            return self.charDb.selectedProfile, "character"
+        end
         local assignedContent = rules[kind]
         if assignedContent and self.db.profiles[assignedContent] then return assignedContent, "content" end
     end
@@ -787,6 +793,8 @@ local function stripNonPortable(data)
 end
 
 local sections = {
+    appearance = { label = "Global appearance", fields = {"globalStyle"} },
+    general = { label = "Snapping and tooltips", module = "Layout", member = "snapping", general = {"tooltipControl"} },
     positions = { label = "Anchor positions", fields = {"anchors"}, scopes = {"anchors"} },
     visuals = { label = "Layout visuals", module = "Layout", member = "visuals", scopes = {"layoutVisuals"} },
     cdm = { label = "Cooldown Manager", module = "Bars", fields = {"abilities", "abilitiesDefaults"} },
@@ -798,7 +806,7 @@ local sections = {
     skyriding = { label = "Skyriding", module = "DragonRiding" },
 }
 ns.ProfileSections = sections
-ns.ProfileSectionOrder = { "positions", "visuals", "cdm", "auras", "resources", "castbar", "glow", "reminders", "skyriding" }
+ns.ProfileSectionOrder = { "positions", "visuals", "cdm", "auras", "resources", "castbar", "glow", "reminders", "skyriding", "appearance", "general" }
 
 local function selectionKeys(selection)
     if selection == "layout" then return {positions = true, visuals = true} end
@@ -837,6 +845,20 @@ local function transfer(destination, source, keys)
             end
         end
     end
+end
+
+function ns:ProfileSectionDiffers(source, key)
+    local function equal(a, b)
+        if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+        for k, v in pairs(a) do if not equal(v, b[k]) then return false end end
+        for k in pairs(b) do if a[k] == nil then return false end end
+        return true
+    end
+    local current, incoming = {}, {}
+    local keys = {[key] = true}
+    transfer(current, self:GetProfile(), keys)
+    transfer(incoming, source, keys)
+    return not equal(current, incoming)
 end
 
 function ns:BackupProfile()
@@ -951,14 +973,18 @@ function ns:DeserializeProfileString(str)
             available.all = true
         end
         for key, def in pairs(sections) do
-            if (def.module and data.modules[def.module]) or (def.general and data.modules.General) then available[key] = true end
+            local module = def.module and data.modules[def.module]
+            if module and (not def.member or module[def.member] ~= nil) then available[key] = true end
+            for _, field in ipairs(def.general or {}) do
+                if data.modules.General and data.modules.General[field] ~= nil then available[key] = true end
+            end
             for _, field in ipairs(def.fields or {}) do if data[field] then available[key] = true end end
         end
     end
     return data, nil, {version = version, sections = available}
 end
 
-function ns:ImportProfile(str, profileName, inherit)
+function ns:ImportProfile(str, profileName, inherit, chosen)
     if not self.savedVarsReady or not self.db then
         return false, "saved variables not ready"
     end
@@ -984,9 +1010,16 @@ function ns:ImportProfile(str, profileName, inherit)
         return false, ("profile '%s' already exists -- choose another name"):format(name)
     end
 
-    if inherit and not info.sections.all then
-        local base = deepCopyProfileData(self:GetProfile())
-        transfer(base, data, info.sections)
+    local selected, full = {}, info.sections.all
+    for _, key in ipairs(self.ProfileSectionOrder) do
+        if info.sections[key] or info.sections.all then
+            if not chosen or chosen[key] then selected[key] = true else full = false end
+        end
+    end
+    if chosen and not next(selected) then return false, "choose at least one section" end
+    if not full and (inherit or chosen) then
+        local base = inherit and deepCopyProfileData(self:GetProfile()) or { modules = {} }
+        transfer(base, data, selected)
         data = base
     end
     stripNonPortable(data)

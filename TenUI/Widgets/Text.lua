@@ -25,7 +25,7 @@ function Text:New(parent, opts)
     local flags = opts.fontFlags or "OUTLINE"
 
     local fs = f:CreateFontString(nil, "OVERLAY")
-    fs:SetFont(fontPath, size, flags)
+    ns.Pixel.SetFont(fs, fontPath, size, flags)
     fs:SetAllPoints(f)
     fs:SetJustifyH(opts.justifyH or "CENTER")
     fs:SetJustifyV(opts.justifyV or "MIDDLE")
@@ -61,7 +61,7 @@ end
 
 function Text:SetFont(fontKey, size, flags)
     local fontPath = (Widgets.resolveMedia)("font", fontKey, Widgets.DEFAULT_FONT)
-    self.frame.text:SetFont(fontPath, size or 14, flags or "OUTLINE")
+    ns.Pixel.SetFont(self.frame.text, fontPath, size or 14, flags or "OUTLINE")
 end
 
 function Text:SetJustifyH(j)

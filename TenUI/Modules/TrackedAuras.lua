@@ -352,24 +352,45 @@ local function applyStyle(button, regions, config, restyle)
     local bar = regions.bar
     if bar then
         regions.icon:ClearAllPoints()
-        regions.icon:SetPoint("LEFT", button)
+        local right = style.iconSide == "RIGHT"
+        regions.icon:SetPoint(right and "RIGHT" or "LEFT", button)
         regions.icon:SetSize(config.height, config.height)
-        regions.icon:SetShown(style.showIcon)
+        local showIcon = style.showIcon and style.iconSide ~= "NONE"
+        regions.icon:SetShown(showIcon)
         bar:ClearAllPoints()
-        if style.showIcon then
+        if showIcon and not right then
             bar:SetPoint("TOPLEFT", regions.icon, "TOPRIGHT", 2, 0)
         else
             bar:SetPoint("TOPLEFT", button)
         end
-        bar:SetPoint("BOTTOMRIGHT", button)
+        if showIcon and right then bar:SetPoint("BOTTOMRIGHT",regions.icon,"BOTTOMLEFT",-2,0)
+        else bar:SetPoint("BOTTOMRIGHT", button) end
         bar:SetStatusBarTexture(style.texture)
         bar:SetStatusBarColor(unpack(style.fill))
         bar:SetReverseFill(style.reverseFill == true)
+        if style.spark and not regions.spark then
+            regions.spark = bar:CreateTexture(nil,"OVERLAY")
+            regions.spark:SetColorTexture(1,1,1,0.85)
+            regions.spark:SetWidth(2)
+        end
+        if regions.spark then
+            local edge = style.reverseFill and "LEFT" or "RIGHT"
+            regions.spark:ClearAllPoints()
+            regions.spark:SetPoint("TOP",bar:GetStatusBarTexture(),"TOP"..edge)
+            regions.spark:SetPoint("BOTTOM",bar:GetStatusBarTexture(),"BOTTOM"..edge)
+            regions.spark:SetShown(style.spark == true)
+        end
+        if button.SetDurationBar then
+            button:SetDurationBar(bar,{direction = style.elapsed and Enum.StatusBarTimerDirection.ElapsedTime or Enum.StatusBarTimerDirection.RemainingTime})
+        end
         regions.bg:SetColorTexture(unpack(style.background))
         regions.bg:SetShown(style.showBackground)
         styleText(regions.name, bar, style.name, "LEFT")
         regions.name:SetShown(style.showName)
     else
+        ns.Widgets.Icon.ApplyCropTexCoord(regions.icon,config.width,config.height,(style.zoom or 8)/100)
+        regions.cooldown:SetSwipeColor(0,0,0,style.swipeAlpha or 0.8)
+        regions.cooldown:SetReverse(style.reverseSwipe ~= false)
         regions.cooldown:SetDrawSwipe(style.showSwipe)
         regions.cooldown:SetDrawEdge(style.showSwipe)
     end
@@ -455,7 +476,7 @@ local function bindRegions(button, regions, bindName, style)
     bindDurationText(button, regions, style)
     if regions.bar then
         if bindName then button:SetSpellName(regions.name) end
-        button:SetDurationBar(regions.bar, { direction = Enum.StatusBarTimerDirection.RemainingTime })
+        -- applyStyle binds the timer direction for new and restyled frames.
     else
         button:SetDurationCooldown(regions.cooldown)
     end
@@ -897,7 +918,7 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
         if state.container:IsShown() ~= shown then state.container:SetShown(shown) end
         return
     end
-    local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe) .. signature(appearance)
+    local styleSignature = signature(textStyle) .. tostring(showText) .. tostring(showSwipe) .. signature(appearance) .. tostring(icon.iconZoom) .. tostring(icon.swipeAlpha)
     local key = idSignature .. "/" .. styleSignature
     local failure = failed[frame]
     if failure and failure.signature == key and (not failure.restricted or restricted) then return end
@@ -907,6 +928,7 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
         return
     end
     local function style(visual)
+        if not visual then return end
         local fs = visual.timer
         local styleOptions = textStyle or {}
         local font, size, flags = GameFontNormal:GetFont()
@@ -919,10 +941,11 @@ function TrackedAuras:SyncCooldownAura(icon, unit, ids, showText, showSwipe, tex
         fs:ClearAllPoints()
         fs:SetPoint(point, visual.cooldown, point, styleOptions.x or 0, styleOptions.y or 0)
         fs:SetShown(showText)
+        visual.cooldown:SetSwipeColor(0,0,0,icon.swipeAlpha or 0.8)
         visual.cooldown:SetDrawSwipe(showSwipe)
         visual.cooldown:SetDrawEdge(unit == "player" and showSwipe)
         if appearance then
-            ns.Widgets.Icon.ApplyCropTexCoord(visual.icon, appearance.width, appearance.height)
+            ns.Widgets.Icon.ApplyCropTexCoord(visual.icon, appearance.width, appearance.height, icon.iconZoom)
             if appearance.border or visual.border then
                 visual.border = applyBorder(visual.effects, visual.border, appearance.border)
             end

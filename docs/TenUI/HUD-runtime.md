@@ -21,3 +21,10 @@ Cooldown rows process game events as they arrive. Between events they check rang
 Tracked Icons and Tracked Bars use Blizzard's native aura updates when both displays support them. Polling resumes for legacy displays and for summons with a locally tracked expiry.
 
 Class Reminders hide on entry to combat or on death. Leaving combat or returning to life re-evaluates the current profile, group and auras. The six raid-buff switches take effect when group buff tracking is enabled and the roster includes a player of the providing class.
+
+## Settings navigation and HUD actions in 0.6.3
+
+- `Options/SearchCatalog.lua` seeds the searchable labels for unopened pages. `SettingsSearch.lua` adds visible controls, selects their tab and scrolls to the result. Layout, Resources and Profiles use pinned tabs.
+- `Modules/CooldownKeybinds.lua` maps player action slots to spell IDs, their base spells and item IDs. The cache is rebuilt outside combat after bindings, equipment, specialization or action slots change.
+- `Widgets/HUDActions.lua` creates optional action buttons for consumables and class reminders. They use an independent parent controlled by Blizzard's combat visibility driver. The HUD stays movable in Edit Mode.
+- Active Tracked Bars can use expiration order when Blizzard exposes the timers. Fixed and independent bars retain their configured slots.

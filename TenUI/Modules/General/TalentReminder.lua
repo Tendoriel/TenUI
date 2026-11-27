@@ -143,7 +143,7 @@ end
 
 local function showBanner(text)
     local f = buildBanner()
-    f.text:SetFont(resolveFont(), 18, "OUTLINE")
+    ns.Pixel.SetFont(f.text, resolveFont(), 18, "GLOBAL")
     f.text:SetTextColor(0.4, 0.85, 1, 1)
     f.text:SetText(text or "")
     f:Show()

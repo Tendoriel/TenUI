@@ -57,6 +57,7 @@ tools/
 !/scripts/check-arcane-soul.lua
 !/scripts/check-profile-transfer.lua
 !/scripts/check-aura-count.lua
+!/scripts/check-cooldown-keybinds.lua
 site/
 RULES.md
 *.jsx

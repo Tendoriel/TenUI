@@ -1834,6 +1834,7 @@ function Row:Rebuild()
     if #displayed1 == 0 and #displayed2 == 0 then
         self:DestroyIcons()
         self._hiddenSig = ""
+        if self.name == "Consumables" then self:Layout() end
         if self.container then self.container:SetAlpha(0) end
         return
     end
@@ -1881,7 +1882,7 @@ function Row:GetIconSize()
     return 36
 end
 
-local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, crossOffset, orient)
+local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, crossOffset, orient, visuals)
     local count = countVisibleIcons(iconList)
     if count == 0 then return end
     local vertical = orient == "V"
@@ -1896,6 +1897,7 @@ local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, cros
             local f = icon.frame
             f:ClearAllPoints()
             f:SetSize(iconW, iconH)
+            ns.StyleCooldownIcon(icon, anchor.frame.anchorName, visuals)
             if f.cooldown then
                 f.cooldown:ClearAllPoints()
                 f.cooldown:SetAllPoints(f)
@@ -1932,10 +1934,16 @@ function Row:Layout()
     if not (anchor and anchor.frame) then return end
     local count1 = countVisibleIcons(self._iconsRow1 or {})
     local count2 = countVisibleIcons(self._iconsRow2 or {})
-    if count1 == 0 and count2 == 0 then return end
+    if count1 == 0 and count2 == 0 then
+        if self.name == "Consumables" and not InCombatLockdown() and ns.AutoFitAnchor then
+            ns:AutoFitAnchor(self.name, 1, 1)
+        end
+        return
+    end
 
     local parent = Bars.profileRef or {}
-    local mode = parent.iconAnchor or "CENTER"
+    local visuals = rowVisualsBlock(self.name) or {}
+    local mode = visuals.growth or parent.iconAnchor or "CENTER"
     if mode ~= "LEFT" and mode ~= "CENTER" and mode ~= "RIGHT" then mode = "CENTER" end
 
     local iconW, iconH, spacing = getVisualProfileForRow(self.name)
@@ -1944,7 +1952,7 @@ function Row:Layout()
     local orient = rowOrientation(self.name)
 
     if count1 > 0 then
-        layoutIconRow(anchor, self._iconsRow1, iconW, iconH, spacing, mode, 0, orient)
+        layoutIconRow(anchor, self._iconsRow1, iconW, iconH, spacing, mode, 0, orient, visuals)
     end
 
     if count2 > 0 then
@@ -1954,7 +1962,7 @@ function Row:Layout()
         else
             cross2 = -(iconH + spacing)
         end
-        layoutIconRow(anchor, self._iconsRow2, iconW, iconH, spacing, mode, cross2, orient)
+        layoutIconRow(anchor, self._iconsRow2, iconW, iconH, spacing, mode, cross2, orient, visuals)
     end
 
     if ns.AutoFitAnchor then
@@ -1990,6 +1998,7 @@ function Row:ApplyVisualOptions()
     for i = 1, #self.icons do
         local icon = self.icons[i]
         if icon and icon.ApplyTextStyle then
+            icon._lastTintKey = nil
             icon.bindFont = nil
             icon:ApplyTextStyle(textStyle)
         end
@@ -2295,6 +2304,9 @@ function Row:RefreshIcon(icon, entry, desat)
         end
 
         icon._effOnRealCD = onRealCooldown or nil
+        if self.keybindVisuals and self.keybindVisuals.assisted then
+            ns.UpdateAssistedIcon(icon, sid, activeSID)
+        elseif icon.assistedMark then icon.assistedMark:Hide() end
         local procID = entryActiveProcID(sid)
         setIconProcGlow(icon, sid, procID ~= nil)
 
@@ -2318,9 +2330,11 @@ function Row:RefreshIcon(icon, entry, desat)
         if tintKey ~= icon._lastTintKey then
             icon._lastTintKey = tintKey
             if tintKey == "oor" then
-                icon:SetVertexColor(TINT_OOR_R, TINT_OOR_G, TINT_OOR_B, 1)
+                local c = self.keybindVisuals and self.keybindVisuals.rangeTint
+                if c then icon:SetVertexColor(unpack(c)) else icon:SetVertexColor(TINT_OOR_R, TINT_OOR_G, TINT_OOR_B, 1) end
             elseif tintKey == "nomana" then
-                icon:SetVertexColor(TINT_NOMANA_R, TINT_NOMANA_G, TINT_NOMANA_B, 1)
+                local c = self.keybindVisuals and self.keybindVisuals.powerTint
+                if c then icon:SetVertexColor(unpack(c)) else icon:SetVertexColor(TINT_NOMANA_R, TINT_NOMANA_G, TINT_NOMANA_B, 1) end
             elseif tintKey == "unusable" then
                 icon:SetVertexColor(TINT_UNUSABLE_R, TINT_UNUSABLE_G, TINT_UNUSABLE_B, 1)
             else
@@ -2335,7 +2349,7 @@ function Row:RefreshIcon(icon, entry, desat)
         if not hasEmphasis and not onGCD and not resourceGated and viewerSrc ~= nil then
             shouldDesat = viewerReal and true or false
         end
-        icon:SetDesaturated(shouldDesat and true or false)
+        icon:SetDesaturated(shouldDesat and not (self.keybindVisuals and self.keybindVisuals.desaturateCooldown == false))
 
         local readyNow = (known and readyVisual) and true or false
         icon._readyNowCached = readyNow
@@ -2511,6 +2525,9 @@ function Row:RefreshConsumableIcon(icon, entry, displayID)
         lockedOut = true
     end
 
+    if (c and c.clickToUse) or icon.frame._actionButton then
+        ns.SyncHUDAction(icon.frame, "item", c and c.clickToUse and total > 0 and displayID or nil)
+    end
     local shouldDesat = (total == 0 or itemOnCD or lockedOut) and true or false
     icon:SetDesaturated(shouldDesat)
 end
@@ -3231,34 +3248,7 @@ end
 -- Follow the active action page so the flash also follows forms and spell replacements.
 local function mirrorButtonPress(button)
     if not (Bars._enabled and Bars.profileRef.flashOnPress and button) then return end
-    local slot = button.action
-    if isSecret(slot) or type(slot) ~= "number" then return end
-    local ok, spell = pcall(C_ActionBar.GetSpell, slot)
-    if not ok or isSecret(spell) or type(spell) ~= "number" or spell <= 0 then spell = nil end
-    local item
-    if GetActionInfo then
-        local readable, kind, id, subType = pcall(GetActionInfo, slot)
-        if readable and not isSecret(kind) and not isSecret(id) and not isSecret(subType) then
-            if kind == "item" or (kind == "macro" and subType == "item") then
-                item = tonumber(id)
-            elseif kind == "macro" and subType == "spell" then
-                spell = spell or tonumber(id)
-            elseif kind == "macro" and not spell then
-                local name = C_ActionBar.GetActionText(slot)
-                if not isSecret(name) and name then
-                    local macro = GetMacroIndexByName(name)
-                    if macro and macro > 0 then
-                        local _, link = GetMacroItem(macro)
-                        if not isSecret(link) and type(link) == "string" then item = tonumber(link:match("item:(%d+)")) end
-                        if not item then
-                            local resolved = GetMacroSpell(macro)
-                            if not isSecret(resolved) then spell = resolved end
-                        end
-                    end
-                end
-            end
-        end
-    end
+    local spell, item = ns.ResolveActionSlot(button.action)
     if not (spell or item) then return end
     if not Bars._pressIndex then
         local index = { spell = {}, item = {} }

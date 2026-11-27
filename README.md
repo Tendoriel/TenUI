@@ -2,7 +2,7 @@
 
 A clean, combat-focused HUD for World of Warcraft: cooldowns, auras, resources, cast bar and trinkets in one configurable package.
 
-TenUI 0.6.2 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
+TenUI 0.6.3 targets WoW Retail Midnight 12.1.5 (Interface 120105). See the [changelog](CHANGELOG.md) for version history.
 
 [![Website](https://img.shields.io/badge/Website-tenuiaddon.com-08979c?style=flat)](https://tenuiaddon.com/) [![CurseForge](https://img.shields.io/badge/Download-CurseForge-F16436?style=flat)](https://www.curseforge.com/wow/addons/tenui) [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-181717?style=flat)](https://github.com/Tendoriel/TenUI/releases) [![WoW](https://img.shields.io/badge/WoW-12.1.5-blue?style=flat)](https://github.com/Tendoriel/TenUI) [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](https://github.com/Tendoriel/TenUI/blob/main/LICENSE) [![Issues](https://img.shields.io/badge/Report-Issues-orange?style=flat)](https://github.com/Tendoriel/TenUI/issues)
 
@@ -93,7 +93,7 @@ Run `python3 scripts/build-release.py` from the checkout to build the ZIP in `re
 
 ## Getting Started
 
-1. Type `/tenui options` or click TenUI in the minimap addon compartment to open settings.
+1. Type `/tenui` or click TenUI in the minimap addon compartment to open settings.
 2. Run `/tenui unlock` to unlock all anchors, drag elements where you want them, then `/tenui lock`.
 3. Open the options window to configure modules, abilities and auras.
 
@@ -101,7 +101,7 @@ Useful commands:
 
 | Command | Effect |
 |---|---|
-| `/tenui` / `/tenui help` | Show the installed version or list commands |
+| `/tenui` / `/tenui help` | Open settings or list commands |
 | `/tenui unlock` / `/tenui lock` | Unlock or lock anchors for dragging |
 | `/tenui reset anchors` | Reset all element positions to defaults |
 | `/tenui reset anchor <name>` | Reset a single element |
@@ -140,7 +140,7 @@ Run `/tenui reset anchors` to restore default positions without touching the res
 
 ## Feedback and Issues
 
-Bug reports and feature requests are welcome on the [GitHub issue tracker](https://github.com/Tendoriel/TenUI/issues). When reporting a bug, please include your game version, the TenUI version (shown by `/tenui`), and steps to reproduce.
+Bug reports and feature requests are welcome on the [GitHub issue tracker](https://github.com/Tendoriel/TenUI/issues). When reporting a bug, please include your game version, the TenUI version (shown in the settings footer), and steps to reproduce.
 
 ## License
 

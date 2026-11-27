@@ -119,7 +119,7 @@ local function applyToFrame()
     local o = getOpts()
     if not f or not o then return end
 
-    f.text:SetFont(resolveFontPath(o.font), o.fontSize or DEFAULTS.fontSize, "OUTLINE")
+    ns.Pixel.SetFont(f.text, resolveFontPath(o.font), o.fontSize or DEFAULTS.fontSize, "GLOBAL")
 
     if f._fadeIn  then f._fadeIn:SetDuration(o.fadeInDuration  or DEFAULTS.fadeInDuration)  end
     if f._hold    then f._hold:SetDuration(o.holdDuration      or DEFAULTS.holdDuration)    end

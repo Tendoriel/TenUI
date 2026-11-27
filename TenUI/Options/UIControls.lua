@@ -49,9 +49,14 @@ end
 
 function UI.CreateSubSection(parent, title)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(ROW_W, 18)
+    f:SetSize(ROW_W, 20)
+    UI.Rect(f, "BACKGROUND", Theme.color.section):SetAllPoints()
+    local rule = UI.Rect(f, "ARTWORK", Theme.color.violet)
+    rule:SetWidth(2)
+    rule:SetPoint("TOPLEFT")
+    rule:SetPoint("BOTTOMLEFT")
     local fs = UI.Text(f, UI.Fonts.section, Theme.color.violet, string.upper(tostring(title or "")))
-    fs:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 2)
+    fs:SetPoint("LEFT", f, "LEFT", 8, 0)
     f.text = fs
     f.searchHeading = true
     return f
@@ -82,7 +87,7 @@ local BTN_TEXT_PAD = 16
 local function buildButton(parent, text, callback, width, primary)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(width or ROW_W, ROW_H)
-    local bg = UI.Rect(btn, "BACKGROUND", { 1, 1, 1, 0.02 })
+    local bg = UI.Rect(btn, "BACKGROUND", Theme.color.input)
     bg:SetAllPoints(btn)
     local borderColor = primary and Theme.color.violetDim or C_LINE
     local border = UI.Border(btn, borderColor)
@@ -106,7 +111,7 @@ local function buildButton(parent, text, callback, width, primary)
         end
     end)
     btn:SetScript("OnLeave", function()
-        bg:SetColorTexture(1, 1, 1, 0.02)
+        bg:SetColorTexture(unpack(Theme.color.input))
         border.SetColor(unpack(borderColor))
         label:SetTextColor(unpack(labelColor))
     end)
@@ -117,7 +122,9 @@ local function buildButton(parent, text, callback, width, primary)
 end
 
 function UI.CreateButton(parent, text, callback)
-    return buildButton(parent, text, callback, ROW_W, false)
+    local button = buildButton(parent, text, callback, ROW_W, false)
+    button.layoutKind = "action"
+    return button
 end
 
 function UI.CreateCompactButton(parent, text, callback, width)
@@ -166,6 +173,7 @@ function UI.CreateCheckBox(parent, labelText, get, set)
     label:SetPoint("LEFT", f, "LEFT", 0, 0)
     label:SetJustifyH("LEFT")
     f.label = label
+    f.layoutKind, f.controlWidth = "toggle", 40
 
     local toggle = buildToggle(f)
     toggle:SetPoint("RIGHT", f, "RIGHT", -2, 0)
@@ -231,6 +239,7 @@ function UI.CreateSlider(parent, labelText, minVal, maxVal, step, get, set, defa
     label:SetPoint("LEFT", f, "LEFT", 0, 0)
     label:SetJustifyH("LEFT")
     f.label = label
+    f.layoutKind, f.controlWidth = "slider", 235
 
     local ebFrame = CreateFrame("Frame", nil, f)
     ebFrame:SetSize(EB_W, 18)
@@ -587,6 +596,31 @@ function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
     label:SetPoint("LEFT", f, "LEFT", 0, 0)
     label:SetJustifyH("LEFT")
     f.label = label
+    f.layoutKind, f.controlWidth = "dropdown", 176
+
+    local segmented = { ["Icon Side"] = true, ["Orientation"] = true, ["Direction"] = true,
+        ["Tracked bar icon"] = true, ["Timer direction"] = true, ["Growth"] = true }
+    if segmented[labelText] and type(values) == "table" and #values >= 2 and #values <= 4 then
+        local buttons = {}
+        local function refresh()
+            local current = get()
+            for i, button in ipairs(buttons) do button:SetSelected(values[i].key == current) end
+        end
+        local nextButton
+        local width = 0
+        for i = #values, 1, -1 do
+            local choice = values[i]
+            local b = UI.CreateTabButton(f, choice.label, function() set(choice.key) refresh() end)
+            b:SetHeight(20)
+            b:SetPoint("RIGHT", nextButton or f, nextButton and "LEFT" or "RIGHT", -2, 0)
+            width = width + b:GetWidth() + 2
+            nextButton, buttons[i] = b, b
+        end
+        f.controlWidth = width + 12
+        f.Refresh = refresh
+        refresh()
+        return f
+    end
 
     local btn = CreateFrame("Button", nil, f)
     btn:SetSize(160, 20)
@@ -651,6 +685,7 @@ function UI.CreateColorSwatch(parent, labelText, getRGBA, setRGBA, default)
     label:SetPoint("LEFT", f, "LEFT", 0, 0)
     label:SetJustifyH("LEFT")
     f.label = label
+    f.layoutKind, f.controlWidth = "color", 50
 
     local swatch = CreateFrame("Button", nil, f)
     swatch:SetSize(34, 16)
@@ -1078,17 +1113,41 @@ function UI.LayoutVertical(parent, children, spacing, startY)
     local y = startY
     local pw = parent:GetWidth()
     if not pw or pw <= 0 then pw = ROW_W end
-    for i = 1, #children do
-        local c = children[i]
-        if c then
-            c:ClearAllPoints()
-            c:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
-            c:SetWidth(pw - 16)
-            if type(c.AutoHeight) == "function" then
-                c.AutoHeight()
+    local usable, gap = pw - 16, 14
+    local i = 1
+    while i <= #children do
+        local first = children[i]
+        local count = 1
+        local kind = first.layoutKind
+        local columns = (kind == "chip" or kind == "color" or kind == "action") and 3 or 2
+        if kind then
+            for n = 2, columns do
+                local candidate = children[i+n-1]
+                if not candidate then break end
+                local toggleColor = n == 2 and kind == "toggle" and candidate.layoutKind == "color"
+                if candidate.layoutKind ~= kind and not toggleColor then break end
+                local width = (usable - (n-1)*gap) / n
+                local fits = true
+                for k = i, i+n-1 do
+                    local item = children[k]
+                    local textWidth = item.label and item.label:GetStringWidth() or 0
+                    if textWidth + (item.controlWidth or 16) > width then fits = false break end
+                end
+                if not fits then break end
+                count = n
             end
-            y = y - (c:GetHeight() or ROW_H) - spacing
         end
+        local width, h = (usable-gap*(count-1))/count, 0
+        for n = 1, count do
+            local c = children[i+n-1]
+            c:ClearAllPoints()
+            c:SetPoint("TOPLEFT", parent, "TOPLEFT", 8+(n-1)*(width+gap), y)
+            c:SetWidth(width)
+            if c.AutoHeight then c.AutoHeight() end
+            h = math_max(h, c:GetHeight() or ROW_H)
+        end
+        y = y - h - spacing
+        i = i + count
     end
     return math.abs(y) + 8
 end

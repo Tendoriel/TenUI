@@ -98,6 +98,8 @@ function MinimapButton:ApplyVisibility()
     local icon = getIcon()
     if not (iconDB and icon and self.registered) then return end
     local show = wantsButton()
+    if self._visiblePreference == show then return end
+    self._visiblePreference = show
     iconDB.hide = not show
     local ok, err = pcall(function()
         if show then
@@ -130,6 +132,8 @@ function MinimapButton:OnEnable()
     if not self.registered then
         local ok, err = pcall(function()
             if not icon:IsRegistered(OBJECT_NAME) then
+                self._visiblePreference = wantsButton()
+                iconDB.hide = not self._visiblePreference
                 icon:Register(OBJECT_NAME, launcher, iconDB)
             end
         end)

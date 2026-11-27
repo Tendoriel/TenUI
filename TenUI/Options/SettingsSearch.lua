@@ -45,11 +45,27 @@ function ns.AddSettingsSearch(header, pageMap, closeButton)
     panel:EnableMouse(true)
     panel:EnableMouseWheel(true)
     panel:Hide()
+    function input:CloseResults()
+        self:SetText("")
+        self:ClearFocus()
+        panel:Hide()
+    end
+    input:RegisterEvent("GLOBAL_MOUSE_DOWN")
+    input:SetScript("OnEvent", function()
+        if panel:IsShown() and not input:IsMouseOver() and not panel:IsMouseOver() then input:CloseResults() end
+    end)
     local buttons, matches, offset = {}, {}, 0
     local function open(hit)
         if not hit or InCombatLockdown() then return end
         input:ClearFocus()
         input:SetText("")
+        if hit.page == "ability" and not ns.HasAbilitySelection() then
+            ns.Options:SelectPage("cdmbars")
+            return
+        elseif hit.page == "aura_settings" and not ns.HasAuraSelection() then
+            ns.Options:SelectPage("auras")
+            return
+        end
         if hit.page == "layout" and hit.tab ~= "" then
             ns.Options:OpenLayoutForAnchor(hit.tab)
         else
@@ -61,7 +77,9 @@ function ns.AddSettingsSearch(header, pageMap, closeButton)
         C_Timer.After(0, function()
             for _, row in ipairs({page.scrollChild:GetChildren()}) do
                 local label = rowLabel(row)
-                if label and label:lower() == hit.label:lower() and row:GetTop() then
+                if label and label:lower() == hit.label:lower() then
+                    if page.scrollChild.RevealSetting then page.scrollChild.RevealSetting(row) end
+                    if not row:GetTop() then return end
                     page.scrollFrame:SetVerticalScroll(math.max(0, math.min(page.scrollFrame:GetVerticalScrollRange(), page.scrollChild:GetTop()-row:GetTop()-6)))
                     local highlight = row.searchHighlight or ns.UI.Rect(row, "BACKGROUND", {0.48,0.39,0.94,0.25})
                     row.searchHighlight = highlight
@@ -86,7 +104,7 @@ function ns.AddSettingsSearch(header, pageMap, closeButton)
             local hit = matches[offset+i]
             b.hit = hit
             b:SetShown(hit ~= nil or (i == 1 and n == 0))
-            if hit then b.label:SetText(pageMap[hit.page].def.label .. "  /  " .. hit.label)
+            if hit then b.label:SetText(pageMap[hit.page].def.label .. (hit.tab ~= "" and (" / " .. hit.tab) or "") .. " / " .. hit.label)
             elseif i == 1 then b.label:SetText("No matching settings") end
         end
         panel:Show()

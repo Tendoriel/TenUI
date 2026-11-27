@@ -433,4 +433,29 @@ Show build name on Ready Check
 Show mismatch warning popup
 Talent Reminder
 ]] },
+    { page = "layout", tab = "TrackedBars", labels = [[
+Tracked bar icon
+Timer direction
+Show spark at fill edge
+Active bar order outside combat
+]] },
+    { page = "layout", tab = "EssentialCooldowns", labels = [[
+Icon zoom (%)
+Swipe opacity (%)
+Reverse cooldown swipe
+Growth
+Desaturate on cooldown
+Show assisted rotation hint
+Keybind size
+Keybind X
+Keybind Y
+]] },
+    { page = "resources", tab = "", labels = [[
+Smooth bar animation
+Power bar number format
+]] },
+    { page = "qolReminders", tab = "classReminders", labels = [[
+Click missing buffs or summons outside combat
+Check consumables and repairs during ready checks
+]] },
 }

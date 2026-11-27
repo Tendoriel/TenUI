@@ -606,6 +606,9 @@ local function buildConsumablesSection(sc, children)
 
     _consIconGen = _consIconGen + 1
 
+    children[#children + 1] = C.CreateCheckBox(sc, "Click consumables to use them outside combat",
+        function() return cp.clickToUse == true end,
+        function(value) cp.clickToUse = value resyncConsumables() end)
     children[#children + 1] = C.CreateSubSection(sc, "Tracked Consumables (click an icon to toggle)")
 
     local presets = (ns.CONSUMABLE_PRESETS) or {}

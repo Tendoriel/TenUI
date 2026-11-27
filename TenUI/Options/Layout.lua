@@ -163,6 +163,8 @@ ns:RegisterMessage("ANCHOR_MOVED", function(_, anchorName, x, y)
     if not (_xSlider and _ySlider) then return end
     if _updatingFromAnchor then return end
     _updatingFromAnchor = true
+    local entry = ns.Anchors:ResolveEntry(anchorName)
+    if entry and entry.attachTo then x, y = entry.attachX or 0, entry.attachY or -2 end
     local xi = math.floor((x or 0) + 0.5)
     local yi = math.floor((y or 0) + 0.5)
     if _xSlider.slider then _xSlider.slider:SetValue(xi) end
@@ -276,7 +278,7 @@ end
 local function buildLayoutPage(sc)
     local C = ns.UI
     if not C then return end
-    local children = {}
+    local children, starts = {}, {}
 
     _xSlider = nil
     _ySlider = nil
@@ -295,6 +297,7 @@ local function buildLayoutPage(sc)
         if not found then _selectedAnchor = "Resources" end
     end
 
+    ns.Options:ClearPinnedHeader("layout")
     sc.searchTab = _selectedAnchor
     children[#children + 1] = C.CreateDropdownLikeList(sc, "Anchor", anchorItems,
         function() return _selectedAnchor end,
@@ -315,6 +318,11 @@ local function buildLayoutPage(sc)
             end
         end
     )
+    local picker = table.remove(children)
+    local header = ns.Options:GetPinnedHeader("layout", 59)
+    picker:SetParent(header)
+    picker:SetPoint("TOPLEFT", header, "TOPLEFT", 8, -2)
+    picker:SetPoint("TOPRIGHT", header, "TOPRIGHT", -8, -2)
 
     if not readSelectedAnchorProfile().attachTo then
         local xsl = C.CreateSlider(sc, "X Offset", -960, 960, 1,
@@ -376,7 +384,8 @@ local function buildLayoutPage(sc)
             local key = "attach" .. axis
             children[#children+1] = C.CreateSlider(sc, "Attachment offset " .. axis, -500, 500, 1,
                 function() return ns.Anchors:GetEditableEntry(_selectedAnchor)[key] or (key == "attachX" and 0 or -2) end,
-                function(v) attachment(key, v) end)
+                function(v) if not _updatingFromAnchor then attachment(key, v) end end)
+            if axis == "X" then _xSlider = children[#children] else _ySlider = children[#children] end
         end
     end
 
@@ -394,6 +403,7 @@ local function buildLayoutPage(sc)
         )
     end
 
+    starts[#children+1] = "Style & Text"
     if isIconVisualAnchor(_selectedAnchor) then
         if _selectedAnchor ~= "TrackedIcon" and _selectedAnchor ~= "Consumables" then
             children[#children+1] = C.CreateCheckBox(sc, "Show action keybinds", function() return getVisualsProfile(_selectedAnchor).showKeybind end,
@@ -404,6 +414,39 @@ local function buildLayoutPage(sc)
                 {{key="TOPLEFT",label="Top left"}, {key="TOPRIGHT",label="Top right"}, {key="BOTTOMLEFT",label="Bottom left"}, {key="BOTTOMRIGHT",label="Bottom right"}},
                 function() return getVisualsProfile(_selectedAnchor).keybindCorner or "TOPLEFT" end,
                 function(v) getVisualsProfile(_selectedAnchor).keybindCorner = v applyTextStyle(_selectedAnchor) end)
+        end
+        local function val(key, fallback)
+            return function()
+                local v = getVisualsProfile(_selectedAnchor)[key]
+                if v == nil then return fallback end
+                return v
+            end
+        end
+        local function setter(key)
+            return function(v)
+                getVisualsProfile(_selectedAnchor)[key] = v
+                applyTextStyle(_selectedAnchor)
+            end
+        end
+        children[#children+1] = C.CreateSlider(sc,"Icon zoom (%)",0,30,1,val("zoom",8),setter("zoom"),8)
+        children[#children+1] = C.CreateSlider(sc,"Swipe opacity (%)",0,100,1,val("swipeAlpha",80),setter("swipeAlpha"),80)
+        local tracked = _selectedAnchor == "TrackedIcon"
+        children[#children+1] = C.CreateCheckBox(sc,"Reverse cooldown swipe",val("reverseSwipe",tracked),setter("reverseSwipe"))
+        if not tracked then
+            children[#children+1] = C.CreateDropdownLikeList(sc,"Growth",{{key="CENTER",label="Center"},{key="LEFT",label="Forward"},{key="RIGHT",label="Reverse"}},
+                val("growth",(ns.Bars.profileRef or {}).iconAnchor or "CENTER"),setter("growth"))
+            children[#children+1] = C.CreateCheckBox(sc,"Desaturate on cooldown",val("desaturateCooldown",true),setter("desaturateCooldown"))
+            children[#children+1] = C.CreateCheckBox(sc,"Show assisted rotation hint",val("assisted",false),setter("assisted"))
+            if LibStub("Masque",true) then children[#children+1] = C.CreateCheckBox(sc,"Use Masque skin",val("masque",false),setter("masque")) end
+            for _, setting in ipairs({{"rangeTint","Out of range",{0.64,0.15,0.15,1}},{"powerTint","Insufficient power",{0.5,0.5,1,1}}}) do
+                children[#children+1] = C.CreateColorSwatch(sc,setting[2],function() return unpack(val(setting[1],setting[3])()) end,
+                    function(...) setter(setting[1])({...}) end,setting[3])
+            end
+            if _selectedAnchor ~= "Consumables" then
+                for _, field in ipairs({{"keybindSize","Keybind size",6,30,10},{"keybindX","Keybind X",-30,30,0},{"keybindY","Keybind Y",-30,30,0}}) do
+                    children[#children+1] = C.CreateSlider(sc,field[2],field[3],field[4],1,val(field[1],field[5]),setter(field[1]),field[5])
+                end
+            end
         end
         local sources = {{key="choose", label="Choose a container…"}}
         for _, item in ipairs(anchorItems) do
@@ -430,6 +473,7 @@ local function buildLayoutPage(sc)
                 vp.iconWidth = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
             end, 36)
+        children[#children].settingsGroup = "Position & Size"
         children[#children + 1] = C.CreateSlider(sc, "Icon Height", 8, 200, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -440,6 +484,7 @@ local function buildLayoutPage(sc)
                 vp.iconHeight = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
             end, 36)
+        children[#children].settingsGroup = "Position & Size"
         children[#children + 1] = C.CreateSlider(sc, "Icon Spacing", 0, 40, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -450,6 +495,7 @@ local function buildLayoutPage(sc)
                 vp.spacing = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
             end, 2)
+        children[#children].settingsGroup = "Position & Size"
 
         children[#children + 1] = C.CreateDropdownLikeList(sc, "Orientation",
             {
@@ -504,6 +550,16 @@ local function buildLayoutPage(sc)
                 vp.barWidth = n
                 applyVisualSize(_selectedAnchor)
             end, 250)
+        children[#children].settingsGroup = "Position & Size"
+        local function setBar(key,v) getVisualsProfile("TrackedBars")[key] = v applyTextStyle("TrackedBars") end
+        children[#children+1] = C.CreateDropdownLikeList(sc,"Tracked bar icon",{{key="LEFT",label="Left"},{key="RIGHT",label="Right"},{key="NONE",label="None"}},
+            function() return getVisualsProfile("TrackedBars").iconSide or "LEFT" end,function(v) setBar("iconSide",v) end)
+        children[#children+1] = C.CreateDropdownLikeList(sc,"Timer direction",{{key="drain",label="Drain"},{key="fill",label="Fill"}},
+            function() return getVisualsProfile("TrackedBars").timerDirection or "drain" end,function(v) setBar("timerDirection",v) end)
+        children[#children+1] = C.CreateDropdownLikeList(sc, "Active bar order outside combat",
+            {{key="fixed",label="Configured order"},{key="short",label="Shortest time first"},{key="long",label="Longest time first"}},
+            function() return getVisualsProfile("TrackedBars").barOrder or "fixed" end, function(v) setBar("barOrder",v) end)
+        children[#children+1] = C.CreateCheckBox(sc,"Show spark at fill edge",function() return getVisualsProfile("TrackedBars").spark end,function(v) setBar("spark",v) end)
         children[#children + 1] = C.CreateSlider(sc, "Bar Height", 6, 60, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -514,6 +570,7 @@ local function buildLayoutPage(sc)
                 vp.barHeight = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
             end, 18)
+        children[#children].settingsGroup = "Position & Size"
         children[#children + 1] = C.CreateSlider(sc, "Bar Spacing", 0, 40, 1,
             function()
                 local vp = getVisualsProfile(_selectedAnchor)
@@ -524,6 +581,7 @@ local function buildLayoutPage(sc)
                 vp.spacing = math.floor(v + 0.5)
                 applyVisualSize(_selectedAnchor)
             end, 2)
+        children[#children].settingsGroup = "Position & Size"
 
         children[#children + 1] = C.CreateStatusBarTextureDropdown(sc, "Bar Texture",
             function()
@@ -616,6 +674,7 @@ local function buildLayoutPage(sc)
                     end
                 end
             end, 200)
+        children[#children].settingsGroup = "Position & Size"
         children[#children + 1] = C.CreateSlider(sc, "Height", 8, 200, 1,
             function()
                 local ap = getSelectedAnchorProfile()
@@ -632,6 +691,7 @@ local function buildLayoutPage(sc)
                     end
                 end
             end, 32)
+        children[#children].settingsGroup = "Position & Size"
     end
 
     if not isBarAnchor(_selectedAnchor) then
@@ -651,6 +711,7 @@ local function buildLayoutPage(sc)
                     end
                 end
             end, 1.0)
+        children[#children].settingsGroup = "Position & Size"
     end
 
     if isIconVisualAnchor(_selectedAnchor) then
@@ -694,6 +755,7 @@ local function buildLayoutPage(sc)
             end
         end, 1.0)
 
+    starts[#children+1] = "Visibility & Snap"
     children[#children + 1] = C.CreateSection(sc, "Visibility")
     children[#children + 1] = C.CreateHelpText(sc,
         "State sets when the bar can appear. The options below hide it in specific situations.")
@@ -854,8 +916,9 @@ local function buildLayoutPage(sc)
             end
         end, 32)
 
-    local totalH = C.LayoutVertical(sc, children, 4, -8)
-    sc:SetHeight(math.max(totalH, 10))
+    local byControl = {}
+    for index, name in pairs(starts) do if children[index] then byControl[children[index]] = name end end
+    ns.Options:LayoutSettingsTabs("layout", sc, children, {"Position & Size", "Style & Text", "Visibility & Snap"}, byControl, 30)
 end
 
 ns.Options.GetSnapSettings = getSnapProfile

@@ -56,3 +56,30 @@ assert(ns:GetProfileKey() == "Default" and not ns:ImportProfile(wire, "Inherited
 assert(not ns:DeserializeProfileString("TenUI:2:0.6.2:unknown:1"))
 assert(not ns:DeserializeProfileString("TenUI_Profile:v1:0.6.1:{modules={CastBar=2}}"))
 print("Profile section isolation, copy, undo and legacy import checks passed")
+
+local current = ns:GetProfile()
+current.globalStyle = {font = "TestFont"}
+current.modules.General = {tooltipControl = {enabled = true}}
+local styleWire = assert(ns:ExportProfileString({appearance=true, general=true}))
+local styleData = assert(ns:DeserializeProfileString(styleWire))
+assert(styleData.globalStyle.font == "TestFont" and styleData.modules.Layout.snapping.distance == 7)
+assert(styleData.modules.General.tooltipControl.enabled and not styleData.modules.Layout.visuals)
+assert(ns:ImportProfile(wire, "ResourcesOnly", false, {resources=true}))
+assert(ns.db.profiles.ResourcesOnly.modules.CastBar == nil)
+local allWire = assert(ns:ExportProfileString("all"))
+current.modules.CastBar.width = 101
+assert(ns:ImportProfile(allWire, "InheritSelection", true, {appearance=true}))
+assert(ns.db.profiles.InheritSelection.modules.CastBar.width == 101)
+assert(not ns:ImportProfile(allWire, "Empty", true, {}))
+local kind = "raid"
+IsInInstance = function() return kind ~= "none", kind end
+ns.charDb = {}
+ns.db.contentProfiles = {raid="Legacy", none="ResourcesOnly"}
+assert(ns:ResolveActiveProfile() == "Legacy")
+assert(ns:SetActiveProfile("Inherited"))
+assert(ns:ResolveActiveProfile() == "Inherited")
+kind = "none"
+assert(ns:ResolveActiveProfile() == "ResourcesOnly")
+kind = "raid"
+assert(ns:ResolveActiveProfile() == "Legacy")
+print("PASS appearance, snapping, full and partial selections, inheritance and manual content overrides")

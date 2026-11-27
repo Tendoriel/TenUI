@@ -419,18 +419,61 @@ local function rememberedPersonalState(key, active, icon, preview)
     return state.active, state.icon, " (last seen)"
 end
 
+local readyCheckUntil = 0
+local flaskAuras = {432021,431971,431972,431973,431974,1235057,1235108,1235110,1235111}
+local runeAuras = {1234969,1242347,453250,393438,1264426,347901}
+local flasks = {245926,245927,245931,245930,245933,245932,245929,245928,241320,241321,241324,241325,241322,241323,241326,241327}
+local runes = {259085,224572}
+local oils = {243734,243733,222510,222509,222508}
+
+local function ownedItem(items)
+    for _, id in ipairs(items) do
+        if C_Item.GetItemCount(id) > 0 then return id end
+    end
+end
+
+local function foodBuff()
+    local ok, auras = pcall(C_UnitAuras.GetUnitAuras, "player", "HELPFUL")
+    if not ok or issecretvalue(auras) or type(auras) ~= "table" then return end
+    local unknown = false
+    for _, aura in ipairs(auras) do
+        if issecretvalue(aura) or issecretvalue(aura.icon) then unknown = true
+        elseif aura.icon == 136000 then return true end
+    end
+    if not unknown then return false end
+end
+
 local function evaluate(o, preview)
     local out = {}
     local activeEntries = {}
     local class = playerClass()
-    local function push(key, icon, label, active)
+    local function push(key, icon, label, active, spell, item)
         local entries = active and o.showActive and activeEntries or (not active and out)
         if entries and #entries < MAX_SLOTS then
-            entries[#entries + 1] = { key = key, icon = icon, label = label, active = active }
+            entries[#entries + 1] = { key = key, icon = icon, label = label, active = active, spell = spell, item = item }
         end
     end
-    local function pushAura(key, icon, label, active)
-        if active ~= nil then push(key, icon, label, active) end
+    local function pushAura(key, icon, label, active, spell, item)
+        if active ~= nil then push(key, icon, label, active, spell, item) end
+    end
+
+    if o.readyCheck and not preview and readyCheckUntil > GetTime() then
+        pushAura("flask", 463282, "Flask", anyPlayerAuraPresent(flaskAuras), nil, ownedItem(flasks))
+        pushAura("food", 136000, "Well Fed", foodBuff())
+        pushAura("rune", 463284, "Augment Rune", anyPlayerAuraPresent(runeAuras), nil, ownedItem(runes))
+        if GetInventoryItemID("player", 16) then
+            local enchanted = GetWeaponEnchantInfo()
+            if not issecretvalue(enchanted) then
+                push("oil", 609892, "Weapon enchant", enchanted, nil, ownedItem(oils))
+            end
+        end
+        for slot = 1, 18 do
+            local remaining, max = GetInventoryItemDurability(slot)
+            if remaining and max and max > 0 and remaining / max < 0.2 then
+                push("repair", 136241, "Repair")
+                break
+            end
+        end
     end
 
     if class == "SHAMAN" and o.shamanShields then
@@ -462,7 +505,7 @@ local function evaluate(o, preview)
                 else
                     iconSpell = WATER_SHIELD
                 end
-                push("shamanShields", spellIcon(iconSpell, FALLBACK_SHIELD), "Shield" .. lastSeen)
+                push("shamanShields", spellIcon(iconSpell, FALLBACK_SHIELD), "Shield" .. lastSeen, false, iconSpell)
             end
         end
     end
@@ -508,13 +551,13 @@ local function evaluate(o, preview)
         end
 
         if petExpected then
-            push("pets", missingIcon, missingLabel, not preview and petAlive())
+            push("pets", missingIcon, missingLabel, not preview and petAlive(), ({HUNTER=883, WARLOCK=688, DEATHKNIGHT=46585, MAGE=WATER_ELEMENTAL})[class])
         end
 
         if class == "WARLOCK" and currentSpecID() == DEMONOLOGY_SPEC
             and (preview or petAlive()) and spellKnown(SUMMON_FELGUARD) then
             if preview or petIsFelguard() == false then
-                push("pets", spellIcon(SUMMON_FELGUARD, FALLBACK_PET), "Felguard!")
+                push("pets", spellIcon(SUMMON_FELGUARD, FALLBACK_PET), "Felguard!", false, SUMMON_FELGUARD)
             end
         end
 
@@ -528,32 +571,32 @@ local function evaluate(o, preview)
         and spellKnown(SHADOWFORM) then
         local missing = preview or shadowformMissing()
         if missing ~= nil then
-            push("shadowform", spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform", not missing)
+            push("shadowform", spellIcon(SHADOWFORM, FALLBACK_SHADOW), "Shadowform", not missing, SHADOWFORM)
         end
     end
 
     if class == "DRUID" and o.moonkinForm and currentSpecID() == BALANCE_SPEC then
         local active = not preview and formState(MOONKIN_FORMS)
-        pushAura("moonkinForm", spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active)
+        pushAura("moonkinForm", spellIcon(MOONKIN_FORM, 136036), "Moonkin Form", active, MOONKIN_FORM)
     end
 
     if class == "ROGUE" and o.roguePoisons then
         local knowsLethal, knowsNonLethal = false, false
         for i = 1, #LETHAL_POISONS do
-            if spellKnown(LETHAL_POISONS[i]) then knowsLethal = true break end
+            if spellKnown(LETHAL_POISONS[i]) then knowsLethal = LETHAL_POISONS[i] break end
         end
         for i = 1, #NONLETHAL_POISONS do
-            if spellKnown(NONLETHAL_POISONS[i]) then knowsNonLethal = true break end
+            if spellKnown(NONLETHAL_POISONS[i]) then knowsNonLethal = NONLETHAL_POISONS[i] break end
         end
         if knowsLethal then
             local active, _, suffix = rememberedPersonalState("lethal",
                 not preview and anyPlayerAuraPresent(LETHAL_POISONS), nil, preview)
-            if active ~= nil then push("roguePoisons", spellIcon(LETHAL_POISONS[1], FALLBACK_POISON), "Lethal" .. suffix, active) end
+            if active ~= nil then push("roguePoisons", spellIcon(knowsLethal, FALLBACK_POISON), "Lethal" .. suffix, active, knowsLethal) end
         end
         if knowsNonLethal then
             local active, _, suffix = rememberedPersonalState("nonlethal",
                 not preview and anyPlayerAuraPresent(NONLETHAL_POISONS), nil, preview)
-            if active ~= nil then push("roguePoisons", spellIcon(NONLETHAL_POISONS[1], FALLBACK_POISON), "Non-lethal" .. suffix, active) end
+            if active ~= nil then push("roguePoisons", spellIcon(knowsNonLethal, FALLBACK_POISON), "Non-lethal" .. suffix, active, knowsNonLethal) end
         end
     end
 
@@ -563,7 +606,7 @@ local function evaluate(o, preview)
             local def = RAID_BUFFS[i]
             if o[def.option] ~= false and (roster[def.class] or (preview and def.class == class and spellKnown(def.iconSpell))) then
                 pushAura(def.option, spellIcon(def.iconSpell, def.fallback), def.label,
-                    not preview and anyPlayerAuraPresent(def.buffIDs))
+                    not preview and anyPlayerAuraPresent(def.buffIDs), def.class == class and def.iconSpell or nil)
             end
         end
     end
@@ -667,7 +710,7 @@ local function renderSlots(f, entries, o)
         local e = entries[i]
         slot.entry = e
         if e then
-            slot.label:SetFont(fontPath, fontSz, "OUTLINE")
+            ns.Pixel.SetFont(slot.label, fontPath, fontSz, "GLOBAL")
             slot.label:SetText(e.label or "")
             local width = math.max(size, slot.label:GetStringWidth())
             slot:SetSize(size, size)
@@ -706,6 +749,15 @@ local function render(entries)
         f:SetPoint(o.point or "CENTER", UIParent, o.point or "CENTER", o.x or 0, o.y or 0)
     end
     renderSlots(f, entries, o)
+    for i, slot in ipairs(f.slots) do
+        local e = entries[i]
+        if o.clickToApply and f._locked and ClassReminders._testUntil <= GetTime() and e and not e.active then
+            local spell = e.spell and spellKnown(e.spell) and e.spell
+            ns.SyncHUDAction(slot, spell and "spell" or "item", spell or e.item)
+        elseif slot._actionButton then
+            ns.SyncHUDAction(slot)
+        end
+    end
 end
 
 local function previewEntries(o)
@@ -892,6 +944,7 @@ function ClassReminders:CenterHorizontally()
 end
 
 local LIFECYCLE_EVENTS = {
+    "READY_CHECK", "READY_CHECK_FINISHED", "UPDATE_INVENTORY_DURABILITY",
     "PLAYER_DEAD",
     "PLAYER_ALIVE",
     "PLAYER_UNGHOST",
@@ -914,7 +967,14 @@ local LIFECYCLE_EVENTS = {
 }
 
 local syncUnitEvents
-local function onLifecycleEvent(event, unit)
+local function onLifecycleEvent(event, unit, timeout)
+    if event == "READY_CHECK" then
+        local duration = not issecretvalue(timeout) and tonumber(timeout) or 30
+        readyCheckUntil = GetTime() + duration
+        C_Timer.After(duration, scheduleUpdate)
+    elseif event == "READY_CHECK_FINISHED" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_REGEN_DISABLED" then
+        readyCheckUntil = 0
+    end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit and unit ~= "player" then return end
     if event == "PLAYER_DEAD" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         wipe(personalStates)

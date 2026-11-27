@@ -43,23 +43,24 @@ end
 
 local CROP_TRIM_HALF = 0.42
 
-local function cropTexCoords(w, h)
-    local left, right, top, bottom = 0.08, 0.92, 0.08, 0.92
+local function cropTexCoords(w, h, zoom)
+    zoom = zoom or 0.08
+    local left, right, top, bottom = zoom, 1-zoom, zoom, 1-zoom
     if type(w) == "number" and type(h) == "number" and w > 0 and h > 0 and w ~= h then
         if w > h then
-            local half = CROP_TRIM_HALF * (h / w)
+            local half = (0.5-zoom) * (h / w)
             top, bottom = 0.5 - half, 0.5 + half
         else
-            local half = CROP_TRIM_HALF * (w / h)
+            local half = (0.5-zoom) * (w / h)
             left, right = 0.5 - half, 0.5 + half
         end
     end
     return left, right, top, bottom
 end
 
-function Icon.ApplyCropTexCoord(tex, w, h)
+function Icon.ApplyCropTexCoord(tex, w, h, zoom)
     if not (tex and tex.SetTexCoord) then return end
-    local l, r, t, b = cropTexCoords(w, h)
+    local l, r, t, b = cropTexCoords(w, h, zoom)
     pcall(tex.SetTexCoord, tex, l, r, t, b)
 end
 
@@ -70,7 +71,8 @@ function Icon:New(parent, opts)
     self_._opts = opts
     self_._state = "live"
 
-    local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local f = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    f:EnableMouse(false)
     f:SetAllPoints(parent)
 
     local icon = f:CreateTexture(nil, "ARTWORK")
@@ -78,7 +80,7 @@ function Icon:New(parent, opts)
     if opts.zoomIcon ~= false then
         icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         f:SetScript("OnSizeChanged", function(_, w, h)
-            Icon.ApplyCropTexCoord(icon, w, h)
+            Icon.ApplyCropTexCoord(icon, w, h, self_.iconZoom)
         end)
     end
     if opts.texture then
@@ -224,7 +226,7 @@ function Icon:SetDrawSwipe(enabled)
     cd._inSwipeHook = true
     pcall(cd.SetDrawSwipe, cd, value)
     if value then
-        pcall(cd.SetSwipeColor, cd, 0, 0, 0, 0.8)
+        pcall(cd.SetSwipeColor, cd, 0, 0, 0, self.swipeAlpha or 0.8)
         pcall(cd.SetDrawEdge, cd, self._drawEdge ~= false)
     else
         pcall(cd.SetSwipeColor, cd, 0, 0, 0, 0)
@@ -384,7 +386,7 @@ function Icon:ApplyCooldownTextStyle(style)
                 end
             end
             if fo then
-                pcall(fo.SetFont, fo, fontPath, size, flags)
+                pcall(ns.Pixel.SetFont, fo, fontPath, size, flags)
                 pcall(cd.SetCountdownFont, cd, fo:GetName())
             end
         end
@@ -413,7 +415,7 @@ function Icon:SetTextFont(fontPath, size, flags)
     if not fontPath then return end
     local s = (type(size) == "number" and size > 0) and size or 12
     local fl = (type(flags) == "string") and flags or "OUTLINE"
-    local ok = pcall(fs.SetFont, fs, fontPath, s, fl)
+    local ok = pcall(ns.Pixel.SetFont, fs, fontPath, s, fl)
     if not ok and ns.Debug and ns.Debug.Log then
         ns.Debug:Log("Icon:SetTextFont failed for path=" .. tostring(fontPath))
     end
@@ -670,6 +672,7 @@ function Icon:SetItemTooltip(itemID, enabled)
 end
 
 function Icon:Destroy()
+    if self.masqueGroup then self.masqueGroup:RemoveButton(self.frame) self.masqueGroup = nil end
     local f = self.frame
     if f then
         if f.cooldown then

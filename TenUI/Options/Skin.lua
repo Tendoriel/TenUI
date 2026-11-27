@@ -20,11 +20,11 @@ local Theme = {
         panelLight  = { 0.047, 0.063, 0.118, 0.95 },
         input       = { 0.016, 0.024, 0.055, 0.92 },
         line        = { 0.46, 0.46, 0.60, 0.55 },
-        lineSoft    = { 0.32, 0.32, 0.44, 0.35 },
+        lineSoft    = { 0.38, 0.38, 0.54, 0.65 },
         lineFaint   = { 0.26, 0.26, 0.36, 0.22 },
         text        = { 0.784, 0.811, 0.878, 1.0 },
         textBright  = { 0.92, 0.94, 1.0, 1.0 },
-        textDim     = { 0.52, 0.55, 0.66, 1.0 },
+        textDim     = { 0.64, 0.66, 0.76, 1.0 },
         textFaint   = { 0.38, 0.40, 0.50, 1.0 },
         accent      = { 0.349, 0.761, 1.0, 1.0 },
         accentDim   = { 0.349, 0.761, 1.0, 0.45 },
@@ -32,7 +32,8 @@ local Theme = {
         violetDim   = { 0.557, 0.486, 1.0, 0.40 },
         danger      = { 1.0, 0.35, 0.38, 1.0 },
         hover       = { 1.0, 1.0, 1.0, 0.05 },
-        selected    = { 0.557, 0.486, 1.0, 0.10 },
+        selected    = { 0.557, 0.486, 1.0, 0.18 },
+        section     = { 0.092, 0.083, 0.16, 0.92 },
     },
     spacing = {
         pad        = 10,
@@ -363,9 +364,11 @@ function UI.CreateSidebarItem(parent, label, onClick)
     edge:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, -2)
     edge:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, 2)
     edge:Hide()
-    local glow = UI.GlowLine(btn, "ARTWORK", { 0.557, 0.486, 1.0, 0.18 })
-    glow:SetAllPoints(btn)
-    glow:Hide()
+    local marker = UI.Rect(btn, "ARTWORK", Theme.color.violet)
+    marker:SetSize(4, 4)
+    marker:SetPoint("RIGHT", btn, "RIGHT", -8, 0)
+    marker:SetRotation(math.pi / 4)
+    marker:Hide()
     local fs = UI.Text(btn, UI.Fonts.label, Theme.color.textDim, label)
     fs:SetPoint("LEFT", btn, "LEFT", 12, 0)
     btn.label = fs
@@ -374,12 +377,12 @@ function UI.CreateSidebarItem(parent, label, onClick)
         self._selected = sel and true or false
         if self._selected then
             edge:Show()
-            glow:Show()
+            marker:Show()
             bg:SetColorTexture(unpack(Theme.color.selected))
             fs:SetTextColor(unpack(Theme.color.textBright))
         else
             edge:Hide()
-            glow:Hide()
+            marker:Hide()
             bg:SetColorTexture(0, 0, 0, 0)
             fs:SetTextColor(unpack(Theme.color.textDim))
         end
@@ -405,7 +408,10 @@ end
 function UI.CreateTabButton(parent, label, onClick)
     local btn = CreateFrame("Button", nil, parent)
     local fs = UI.Text(btn, UI.Fonts.label, Theme.color.textDim, label)
-    fs:SetPoint("CENTER", btn, "CENTER", 0, 2)
+    local fill = UI.Rect(btn, "BACKGROUND", Theme.color.input)
+    fill:SetAllPoints()
+    local border = UI.Border(btn, Theme.color.lineSoft)
+    fs:SetPoint("CENTER", btn, "CENTER", 0, 1)
     btn:SetSize(math.max(fs:GetStringWidth() + 20, 50), 26)
     local underline = btn:CreateTexture(nil, "ARTWORK")
     underline:SetColorTexture(unpack(Theme.color.accent))
@@ -418,9 +424,13 @@ function UI.CreateTabButton(parent, label, onClick)
     function btn.SetSelected(self, sel)
         self._selected = sel and true or false
         if self._selected then
+            fill:SetColorTexture(unpack(Theme.color.selected))
+            border.SetColor(unpack(Theme.color.violetDim))
             underline:Show()
             fs:SetTextColor(unpack(Theme.color.textBright))
         else
+            fill:SetColorTexture(unpack(Theme.color.input))
+            border.SetColor(unpack(Theme.color.lineSoft))
             underline:Hide()
             fs:SetTextColor(unpack(Theme.color.textDim))
         end

@@ -163,6 +163,7 @@ local function restore(snapshot)
     local scope = snapshot.profile.specScopes and snapshot.profile.specScopes[snapshot.spec]
     if scope then scope.anchors = snapshot.scoped and CopyTable(snapshot.scoped) end
     ns.Anchors:ApplyProfile()
+    if ns.Options:GetCurrentPage() == "layout" then ns.Options:RebuildPage("layout") end
 end
 
 local function updateToolbar()
@@ -177,7 +178,7 @@ local function updateToolbar()
         toolbar = CreateFrame("Frame", nil, UIParent)
         toolbar:SetPoint("TOP", 0, -42)
         toolbar:SetSize(455, 28)
-        toolbar:SetFrameStrata("DIALOG")
+        toolbar:SetFrameStrata("FULLSCREEN_DIALOG")
         ns.UI.SkinPanel(toolbar)
         local function button(label, width, x, callback)
             local b = ns.UI.CreateCompactButton(toolbar, label, callback, width)
@@ -548,11 +549,24 @@ local function makeNudgeButton(overlay, def)
     return b
 end
 
+local function overlayLabel(anchor)
+    local label = anchor.def and anchor.def.label or anchor.anchorName
+    local entry = ns.Anchors:ResolveEntry(anchor.anchorName)
+    if entry and entry.attachTo then return label .. " > " .. entry.attachTo end
+    return label
+end
+
 local function overlay_OnEnter(self)
     self._hover = true
     local anchor = self.anchor
     if not anchor then return end
-    local label = anchor.def and anchor.def.label or anchor.anchorName
+    local label = overlayLabel(anchor)
+    local entry = ns.Anchors:ResolveEntry(anchor.anchorName)
+    local parent = entry and overlays[entry.attachTo]
+    if parent then
+        self.highlightedParent = parent
+        setBorderColor(parent.border, {0.35, 0.9, 1, 1})
+    end
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:SetText(label)
     GameTooltip:AddLine("Drag to move", 1, 1, 1)
@@ -563,6 +577,11 @@ local function overlay_OnEnter(self)
 end
 
 local function overlay_OnLeave(self)
+    local parent = self.highlightedParent
+    if parent then
+        setBorderColor(parent.border, parent._selected and OVERLAY_EDGE_SELECTED or OVERLAY_EDGE)
+        self.highlightedParent = nil
+    end
     GameTooltip:Hide()
     if not overlayFocused(self) then
         self._hover = false
@@ -590,7 +609,7 @@ local function createOverlay(anchor)
     ns.Pixel.SetFont(label, "Fonts\\FRIZQT__.TTF", 11, "")
     label:SetPoint("CENTER", f, "CENTER", 0, 0)
     label:SetTextColor(LABEL_COLOR[1], LABEL_COLOR[2], LABEL_COLOR[3], 1)
-    label:SetText(anchor.def and anchor.def.label or anchor.anchorName)
+    label:SetText(overlayLabel(anchor))
     f.label = label
 
     f:EnableMouse(true)
@@ -646,7 +665,7 @@ local function applyAnchorState(name, anchor)
             o:SetAllPoints(anchor)
         end
         if o.label and anchor.def then
-            o.label:SetText(anchor.def.label or anchor.anchorName)
+            o.label:SetText(overlayLabel(anchor))
         end
         o:EnableMouse(true)
         o:Show()
@@ -729,7 +748,7 @@ function EditMode:RefreshOne(anchor)
     if o._dragging then return end
     o:SetAllPoints(anchor)
     if o.label and anchor.def then
-        o.label:SetText(anchor.def.label or anchor.anchorName)
+        o.label:SetText(overlayLabel(anchor))
     end
 end
 

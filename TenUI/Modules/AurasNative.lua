@@ -236,6 +236,37 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
         return true
     end
 
+    -- Only order by timestamps Blizzard lets Lua read. Aliases keep one rank;
+    -- fixed/independent lanes never enter this ordering path.
+    local function sortBarTimers(order, mode)
+        if not mode or mode == "fixed" or ns.TrackedAuras:IsRestricted() then return end
+        local times, ranks = {}, {}
+        for unit, ids in pairs(order) do
+            for _, rank in pairs(ids) do ranks[rank] = true end
+            local ok, auras = pcall(C_UnitAuras.GetUnitAuras, unit, unit == "target" and "HARMFUL|PLAYER" or "HELPFUL")
+            if ok and not isSecret(auras) and type(auras) == "table" then
+                for _, aura in ipairs(auras) do
+                    if not isSecret(aura) and not isSecret(aura.spellId) and not isSecret(aura.expirationTime) then
+                        local rank, expires = ids[aura.spellId], aura.expirationTime
+                        if rank and expires and expires > 0 then times[rank] = math.min(times[rank] or expires, expires) end
+                    end
+                end
+            end
+        end
+        if not next(times) then return end
+        local sorted = {}
+        for rank in pairs(ranks) do sorted[#sorted+1] = rank end
+        table.sort(sorted, function(a, b)
+            local x, y = times[a], times[b]
+            if x == y then return a < b end
+            if not x or not y then return x ~= nil end
+            if mode == "long" then return x > y end
+            return x < y
+        end)
+        for i, rank in ipairs(sorted) do ranks[rank] = i end
+        for _, ids in pairs(order) do for id, rank in pairs(ids) do ids[id] = ranks[rank] end end
+    end
+
     function Auras:_NativeDisplayOptions(kind, config, units)
         local overrides = { player = {}, target = {} }
         local order = { player = {}, target = {} }
@@ -263,6 +294,7 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
                 end
             end
         end
+        if kind == "TrackedBars" then sortBarTimers(order, config.style.barOrder) end
         config.overrides, config.order = overrides, order
     end
 
@@ -288,9 +320,13 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
             style.name, style.timer = getTrackedBarsTextStyles()
             style.showName = opts.showName ~= false
             style.showTimer = opts.showTimer ~= false
-            style.showIcon = opts.showIcon ~= false
+            style.barOrder = visuals.barOrder
+            style.iconSide = visuals.iconSide or "LEFT"
+            style.elapsed = visuals.timerDirection == "fill"
+            style.spark = visuals.spark == true
+            style.showIcon = opts.showIcon ~= false and style.iconSide ~= "NONE"
             style.showCount = opts.showStackText ~= false
-            style.count = { anchor = "LEFT", x = style.showIcon and height + 4 or 2, y = -4 }
+            style.count = { anchor = "LEFT", x = style.showIcon and style.iconSide == "LEFT" and height + 4 or 2, y = -4 }
             style.texture = ns.Widgets.resolveMedia("statusbar", visuals.texture, ns.Widgets.DEFAULT_STATUSBAR)
                 or [[Interface\TargetingFrame\UI-StatusBar]]
             style.fill = visuals.fillColor or { 1, 1, 1, 1 }
@@ -303,6 +339,9 @@ function ns.InstallNativeAuraDisplay(Auras, runtime)
             if vertical then
                 point = point == "LEFT" and "TOP" or point == "RIGHT" and "BOTTOM" or "CENTER"
             end
+            style.zoom = visuals.zoom or 8
+            style.reverseSwipe = visuals.reverseSwipe ~= false
+            style.swipeAlpha = (visuals.swipeAlpha or 80) / 100
             style.showSwipe = opts.showDurationSwipe ~= false
             style.showTimer = true
             style.showCount = opts.showStackText ~= false

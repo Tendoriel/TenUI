@@ -1914,7 +1914,7 @@ local function handler(msg)
     msg = msg:gsub("^%s+", ""):gsub("%s+$", "")
 
     if msg == "" then
-        out("v" .. tostring(ns.version) .. " loaded. Type |cffffd200/tenui help|r.")
+        ns.Options:Toggle()
         return
     end
 
@@ -2356,7 +2356,7 @@ function TenUI_OnAddonCompartmentEnter(addon, menuButtonFrame)
     GameTooltip:SetOwner(menuButtonFrame or UIParent, "ANCHOR_LEFT")
     GameTooltip:SetText("TenUI v" .. tostring(ns.version))
     GameTooltip:AddLine("Click for Options window.", 1, 1, 1)
-    GameTooltip:AddLine("/tenui for commands.", 0.7, 0.7, 0.7)
+    GameTooltip:AddLine("/tenui help for commands.", 0.7, 0.7, 0.7)
     GameTooltip:Show()
 end
 
@@ -2365,3 +2365,16 @@ function TenUI_OnAddonCompartmentLeave(addon, menuButtonFrame)
         GameTooltip:Hide()
     end
 end
+
+ns:RegisterEvent("PLAYER_LOGIN", function()
+    if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
+    local panel = CreateFrame("Frame")
+    local button = ns.UI.CreateCompactButton(panel, "Open TenUI settings", function()
+        if InCombatLockdown() then return end
+        HideUIPanel(SettingsPanel)
+        ns.Options:Open()
+    end, 180)
+    button:SetPoint("TOPLEFT", 16, -20)
+    local category = Settings.RegisterCanvasLayoutCategory(panel, "TenUI")
+    Settings.RegisterAddOnCategory(category)
+end)

@@ -1,3 +1,4 @@
+issecretvalue = function() return false end
 -- Exercise the registered event handlers and the normal HUD render path.
 local dead, ghost, combat = false, false, false
 InCombatLockdown = function() return combat end
@@ -28,7 +29,7 @@ CreateFrame = function() return { SetScript = noop, UnregisterEvent = noop, Regi
 local handlers = {}
 local options = { enabled = true, raidBuffs = true, showInRaid = true }
 local profile = { modules = { General = { classReminders = options } } }
-local ns = { RegisterModule = noop, GetProfile = function() return profile end,
+local ns = { SyncHUDAction = noop, Pixel = { SetFont = noop }, RegisterModule = noop, GetProfile = function() return profile end,
     RegisterEvent = function(_, event, callback) handlers[event] = callback return callback end }
 assert(loadfile("TenUI/Modules/General/ClassReminders.lua"))("TenUI", ns)
 local reminders = ns.ClassReminders
@@ -70,3 +71,21 @@ options.showInRaid = false
 reminders:ApplyOptions()
 assert(not frame.visible)
 print("PASS raid buff reminder, death, ghost, test preview, resurrection, combat, individual buffs and raid visibility")
+
+options.showInRaid, options.raidBuffs = true, false
+options.readyCheck, options.clickToApply = true, true
+C_Timer = { After = function(delay, fn) if delay < 1 then fn() end end }
+C_Item = { GetItemCount = function(id) return id == 241320 and 1 or 0 end }
+C_UnitAuras.GetUnitAuras = function() return {{icon=136000}} end
+GetWeaponEnchantInfo = function() return true end
+GetInventoryItemID = function() return 42 end
+GetInventoryItemDurability = function(slot) if slot == 1 then return 19,100 end end
+ns.SyncHUDAction = function(slot, kind, id) slot.clickType, slot.clickID = kind, id end
+handlers.READY_CHECK("READY_CHECK", "Leader", 30)
+assert(frame.visible and frame.slots[1].entry.key == "flask")
+assert(frame.slots[1].clickType == "item" and frame.slots[1].clickID == 241320)
+assert(frame.slots[2].entry.key == "rune" and frame.slots[3].entry.key == "repair")
+assert(rawget(frame.slots[4], "entry") == nil)
+handlers.READY_CHECK_FINISHED("READY_CHECK_FINISHED")
+assert(not frame.visible)
+print("PASS ready check, equipped weapon, food, durability and owned flask click assignment")

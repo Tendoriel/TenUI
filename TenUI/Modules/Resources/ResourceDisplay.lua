@@ -542,6 +542,23 @@ local function formatNumber(n)
     return ""
 end
 
+local function customPowerText(bar, mode, power, current)
+    if not mode or mode == "auto" then return false end
+    if mode == "short" then
+        local ok, value = pcall(AbbreviateNumbers, current)
+        if ok then bar:SetRightText(value) else bar:SetRightText(current) end
+    elseif mode == "percent" or mode == "both" then
+        local ok, percent = pcall(UnitPowerPercent, "player", power, false, getScaleTo100())
+        if ok and (isSecret(percent) or type(percent) == "number") then
+            local fs = bar.frame.rightText
+            if not fs then return false end
+            if mode == "both" then fs:SetFormattedText("%d · %.0f%%", current, percent)
+            else fs:SetFormattedText("%.0f%%", percent) end
+        else bar:SetRightText(current) end
+    else bar:SetRightText(current) end
+    return true
+end
+
 local function setBarCurrentValueText(bar, pt, cur, maxV)
     if not (bar and bar.SetRightText) then return end
     local curSecret = isSecret(cur)
@@ -776,14 +793,8 @@ local function primary_Refresh()
         bar:SetMinMaxValues(0, maxV)
     end
 
-    if curSecret then
-        bar:SetValue(cur)
-    elseif type(cur) == "number" then
-        bar:SetValue(cur)
-    else
-        bar:SetValue(0)
-    end
-
+    if not curSecret and type(cur) ~= "number" then cur = 0 end
+    bar:SetValue(cur, Primary.selfProfile and Primary.selfProfile.smooth)
     if bar.frame then
         vlog("Primary.Refresh: applied cur=%s max=%s alpha=%s shown=%s w=%s h=%s",
              secretSafeStr(cur), secretSafeStr(maxV),
@@ -794,7 +805,9 @@ local function primary_Refresh()
     end
 
     if Primary.selfProfile and Primary.selfProfile.showText ~= false then
-        if curSecret or maxSecret then
+        if customPowerText(bar, Primary.selfProfile.valueFormat, pt, UnitPower("player",pt)) then
+            -- The selected format has already written the label.
+        elseif curSecret or maxSecret then
             local renderedPct = false
             local scaleTo100 = getScaleTo100()
             if UnitPowerPercent and scaleTo100 then
@@ -1958,6 +1971,7 @@ local function secondary_PopulateActive(kind, count, color)
     Secondary._kind = kind
     for i = 1, count do
         local w = secondary_AcquirePip(kind, i, color)
+        w.baseColor = color
         Secondary.pips[i] = w
     end
     for i = count + 1, #Secondary.pips do
@@ -2016,6 +2030,19 @@ local function secondary_RefreshShards()
     ns.PowerPrediction.UpdatePips()
     secondary_UpdateCountFromPower(pt)
 
+    if powerName == "ComboPoints" then
+        local options = Secondary.selfProfile or {}
+        local charged = GetUnitChargedPowerPoints and GetUnitChargedPowerPoints("player")
+        for index, pip in ipairs(Secondary.pips) do
+            local c = index == #Secondary.pips and options.lastPointColor or pip.baseColor
+            if options.chargedPointColor and not isSecret(charged) and type(charged) == "table" then
+                for _, point in ipairs(charged) do
+                    if not isSecret(point) and point == index then c = options.chargedPointColor break end
+                end
+            end
+            if c then pip:SetStatusBarColor(unpack(c)) end
+        end
+    end
     local modCur = UnitPower("player", pt)
     if isSecret(modCur) then
         if not (UnitPowerPercent and C_CurveUtil and C_CurveUtil.CreateCurve) then return end
@@ -2320,16 +2347,11 @@ local function secondary_RefreshBar()
         bar:SetMinMaxValues(0, maxV)
     end
 
-    if isSecret(cur) then
-        bar:SetValue(cur)
-    elseif type(cur) == "number" then
-        bar:SetValue(cur)
-    else
-        bar:SetValue(0)
-    end
-
+    if not isSecret(cur) and type(cur) ~= "number" then cur = 0 end
+    local options = Secondary.selfProfile or {}
+    bar:SetValue(cur, options.smooth)
     if secondary_TextEnabledForBar() then
-        setBarCurrentValueText(bar, pt, cur, maxV)
+        if not customPowerText(bar, options.valueFormat, pt, cur) then setBarCurrentValueText(bar, pt, cur, maxV) end
     else
         bar:SetRightText("")
     end
@@ -2901,6 +2923,7 @@ local function secondary_OnEvent(_self, event, unit, arg2)
         end
         return
     end
+    if event == "UNIT_POWER_POINT_CHARGE" then secondary_RefreshShards() return end
     if event == "UNIT_POWER_UPDATE" or event == "UNIT_POWER_FREQUENT" then
         if unit ~= "player" then return end
         if Secondary._valueSource then return end
@@ -2940,6 +2963,7 @@ function Secondary:Enable(parentProfile)
         local ok, err = pcall(ef.RegisterUnitEvent, ef, event, "player")
         if not ok then dlog("Secondary regUnit(%s) failed: %s", event, tostring(err)) end
     end
+    regUnit("UNIT_POWER_POINT_CHARGE")
     regUnit("UNIT_POWER_UPDATE")
     regUnit("UNIT_POWER_FREQUENT")
     regUnit("UNIT_MAXPOWER")

@@ -2,10 +2,10 @@
 ## Title: TenUI
 ## Notes: Custom HUD: cooldowns, auras, resources, castbar, trinkets
 ## Author: tendoriel
-## Version: 0.6.2
+## Version: 0.6.3
 ## SavedVariables: TenUIDB, TendorHUDDB
 ## SavedVariablesPerCharacter: TenUICharDB, TendorHUDCharDB
-## OptionalDeps: SharedMedia
+## OptionalDeps: SharedMedia, Masque
 ## X-License: MIT
 ## X-Website: https://tenuiaddon.com/
 ## X-Category: HUDs
@@ -32,6 +32,7 @@ Core\CDMLayout.lua
 Widgets\Media.lua
 Widgets\Bar.lua
 Widgets\Icon.lua
+Widgets\HUDActions.lua
 Widgets\Text.lua
 
 Modules\CastBar.lua

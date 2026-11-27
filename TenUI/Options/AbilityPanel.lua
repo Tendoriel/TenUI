@@ -10,6 +10,7 @@ local pcall    = pcall
 
 local batch
 local _currentSpellID = nil
+function ns.HasAbilitySelection() return _currentSpellID ~= nil end
 local _currentEntry   = nil
 local _currentRowName = nil
 

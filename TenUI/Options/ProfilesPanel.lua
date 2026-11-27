@@ -105,14 +105,30 @@ local function buildProfilesPage(sc)
     local C = ns.UI
     if not C then return end
     local Theme = C.Theme
-    local children = {}
+    local children, starts = {}, {}
 
     local function pickSections(selection, allowed)
+        local group = {}
+        local actions = CreateFrame("Frame", nil, sc)
+        actions:SetHeight(22)
+        local function choose(value)
+            for id, row in pairs(group) do
+                selection[id] = (value and row:IsMouseEnabled()) or nil
+                row.Refresh()
+            end
+        end
+        local all = C.CreateCompactButton(actions, "All", function() choose(true) end, 42)
+        all:SetPoint("LEFT")
+        local clear = C.CreateCompactButton(actions, "None", function() choose(false) end, 50)
+        clear:SetPoint("LEFT", all, "RIGHT", 4, 0)
+        children[#children+1] = actions
         for _, id in ipairs(ns.ProfileSectionOrder) do
             local key = id
             local row = C.CreateCheckBox(sc, ns.ProfileSections[key].label,
                 function() return selection[key] == true end,
                 function(value) selection[key] = value or nil end)
+            row.layoutKind = "chip"
+            group[key] = row
             if allowed then allowed[key] = row end
             children[#children + 1] = row
         end
@@ -300,7 +316,7 @@ local function buildProfilesPage(sc)
     end
     fullCopyEB:SetScript("OnEnterPressed", function(self) doFullCopy() self:ClearFocus() end)
 
-    local fullCopyBtn = C.CreateCompactButton(fullCopyRow, "Duplicate Active", doFullCopy, 80)
+    local fullCopyBtn = C.CreateCompactButton(fullCopyRow, "Duplicate Active", doFullCopy, 124)
     fullCopyBtn:SetPoint("RIGHT", fullCopyRow, "RIGHT", 0, 0)
     fullCopyBox:SetPoint("RIGHT", fullCopyBtn, "LEFT", -8, 0)
 
@@ -310,49 +326,33 @@ local function buildProfilesPage(sc)
         children[#children + 1] = C.CreateButton(sc, "Undo Last Change to This Profile", function() ns:UndoProfileChange() end)
     end
 
-    children[#children + 1] = C.CreateSubSection(sc, "Rename Active Profile")
-
-    local renameRow = CreateFrame("Frame", nil, sc)
-    renameRow:SetHeight(24)
-    children[#children + 1] = renameRow
-
-    local renameBox, renameEB = makeNameBox(C, renameRow, "New name for active profile...")
-    renameBox:SetPoint("LEFT", renameRow, "LEFT", 0, 0)
-
-    local renameStatus = C.Text(sc, C.Fonts.value, Theme.color.textDim, "")
-    renameStatus:SetWordWrap(true)
-    renameStatus:SetHeight(18)
-    renameStatus:SetJustifyH("LEFT")
-
     local function doRename()
         if InCombatLockdown() then
-            renameStatus:SetTextColor(unpack(Theme.color.danger))
-            renameStatus:SetText("Cannot rename in combat.")
+            fullCopyStatus:SetTextColor(unpack(Theme.color.danger))
+            fullCopyStatus:SetText("Cannot rename in combat.")
             return
         end
-        local newName = (renameEB:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local newName = (fullCopyEB:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
         local oldName = ns:GetProfileKey()
         local ok, result = ns:RenameProfile(oldName, newName)
         if ok then
-            renameStatus:SetTextColor(0.3, 1, 0.3, 1)
-            renameStatus:SetText(("Renamed to '%s'."):format(tostring(result)))
-            renameEB:SetText("")
+            fullCopyStatus:SetTextColor(0.3, 1, 0.3, 1)
+            fullCopyStatus:SetText(("Renamed to '%s'."):format(tostring(result)))
+            fullCopyEB:SetText("")
             if ns.Options and ns.Options.RebuildPage then
                 ns.Options:RebuildPage("profiles")
             end
         else
-            renameStatus:SetTextColor(unpack(Theme.color.danger))
-            renameStatus:SetText("Rename failed: " .. tostring(result))
+            fullCopyStatus:SetTextColor(unpack(Theme.color.danger))
+            fullCopyStatus:SetText("Rename failed: " .. tostring(result))
         end
     end
-    renameEB:SetScript("OnEnterPressed", function(self) doRename() self:ClearFocus() end)
+    local renameBtn = C.CreateCompactButton(fullCopyRow, "Rename", doRename, 80)
+    renameBtn:SetPoint("RIGHT", fullCopyRow, "RIGHT", 0, 0)
+    fullCopyBtn:ClearAllPoints()
+    fullCopyBtn:SetPoint("RIGHT", renameBtn, "LEFT", -4, 0)
 
-    local renameBtn = C.CreateCompactButton(renameRow, "Rename", doRename, 80)
-    renameBtn:SetPoint("RIGHT", renameRow, "RIGHT", 0, 0)
-    renameBox:SetPoint("RIGHT", renameBtn, "LEFT", -8, 0)
-
-    children[#children + 1] = renameStatus
-
+    starts[#children+1] = "Copy & Specs"
     children[#children + 1] = C.CreateSubSection(sc, "Copy From Another Profile")
 
     local copyValues = {}
@@ -386,6 +386,7 @@ local function buildProfilesPage(sc)
         if _selectedCopyFrom then ns:ApplyProfileSections(ns.db.profiles[_selectedCopyFrom], copySelection) end
     end)
 
+    starts[#children+1] = "Manage"
     children[#children + 1] = C.CreateSubSection(sc, "Spec Profile Swap")
 
     children[#children + 1] = C.CreateHelpText(sc,
@@ -470,16 +471,18 @@ local function buildProfilesPage(sc)
     rebuildSpecMatrix()
 
     children[#children + 1] = C.CreateSubSection(sc, "Content Auto-Switch")
-    for _, rule in ipairs({{"raid","Raid"}, {"party","Dungeon / Mythic+"}, {"arena","Arena"}, {"pvp","Battleground"}}) do
+    for _, rule in ipairs({{"none","Outside instances"}, {"raid","Raid"}, {"party","Dungeon / Mythic+"}, {"arena","Arena"}, {"pvp","Battleground"}}) do
         local kind = rule[1]
         children[#children + 1] = C.CreateDropdownLikeList(sc, rule[2], buildSpecRowValues(),
             function() return (ns.db.contentProfiles or {})[kind] or clearValueKey end,
             function(k)
                 ns.db.contentProfiles = ns.db.contentProfiles or {}
                 ns.db.contentProfiles[kind] = k ~= clearValueKey and k or nil
+                ns._manualContent = nil
                 ns:Fire("CONTENT_PROFILE_CHANGED")
             end)
     end
+    starts[#children+1] = "Copy & Specs"
     children[#children + 1] = C.CreateSubSection(sc, "Specialization Overrides")
     local overrides = {}
     for key in pairs(ns:GetProfile().specScopes or {}) do overrides[#overrides+1] = {key=key, label=key} end
@@ -502,6 +505,7 @@ local function buildProfilesPage(sc)
         children[#children + 1] = C.CreateHelpText(sc, "This profile uses shared settings for every specialization.")
     end
 
+    starts[#children+1] = "Import / Export"
     children[#children + 1] = C.CreateSubSection(sc, "Export")
     local fullExport, exportSelection = true, {}
     local exportRows = {}
@@ -568,6 +572,8 @@ local function buildProfilesPage(sc)
             local available = review and (metadata.sections.all or metadata.sections[key])
             chosen[key] = available or nil
             local row = importRows[key]
+            local changed = available and ns:ProfileSectionDiffers(review, key)
+            row.label:SetText(ns.ProfileSections[key].label .. (changed and " *" or ""))
             row:SetAlpha(available and 1 or 0.45)
             row:EnableMouse(available and true or false)
             row.Refresh()
@@ -577,6 +583,7 @@ local function buildProfilesPage(sc)
         table.sort(scopes)
         local message = review and ("TenUI " .. metadata.version .. " · " .. table.concat(labels, ", ")
             .. (#scopes > 0 and (" · " .. table.concat(scopes, ", ")) or "")) or err
+        if review then message = message .. " · * differs from your active profile. Applying replaces checked sections." end
         setImportStatus(review ~= nil, importEB:GetText() ~= "" and message or "")
         importStatus:SetHeight(math.max(22, importStatus:GetStringHeight() + 6))
     end
@@ -589,7 +596,7 @@ local function buildProfilesPage(sc)
     children[#children + 1] = C.CreateCheckBox(sc, "Use current settings for omitted sections when creating a profile",
         function() return inherit end, function(v) inherit = v end)
     local function doImport()
-        local ok, result = ns:ImportProfile(importEB:GetText(), importNameEB:GetText(), inherit)
+        local ok, result = ns:ImportProfile(importEB:GetText(), importNameEB:GetText(), inherit, chosen)
         if not ok then setImportStatus(false, result) return end
         refreshProfileValues()
         refreshCopyValues()
@@ -603,8 +610,10 @@ local function buildProfilesPage(sc)
 
     children[#children + 1] = importStatus
 
-    local totalH = C.LayoutVertical(sc, children, 4, -8)
-    sc:SetHeight(math_max(totalH, 10))
+    ns.Options:ClearPinnedHeader("profiles")
+    local byControl = {}
+    for index, name in pairs(starts) do if children[index] then byControl[children[index]] = name end end
+    ns.Options:LayoutSettingsTabs("profiles", sc, children, {"Manage", "Import / Export", "Copy & Specs"}, byControl)
 end
 
 ns.Options:RegisterPage({

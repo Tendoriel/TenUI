@@ -408,6 +408,8 @@ local function buildQoLPage(sc)
     addReminderToggle("enabled", isClass and "Enable Class Reminders" or "Enable Stealth Tracking")
 
     if isClass then
+        addReminderToggle("clickToApply", "Click missing buffs or summons outside combat")
+        addReminderToggle("readyCheck", "Check consumables and repairs during ready checks")
         local function texture(spell, fallback)
             return C_Spell.GetSpellTexture(spell) or fallback
         end

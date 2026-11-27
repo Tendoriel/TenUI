@@ -51,8 +51,9 @@ end
 
 local function resolveMedia(kind, key, fallback)
     local default = not key or key == "" or key == "default" or key == "GLOBAL"
-    if kind == "statusbar" and (default or key == DEFAULT_STATUSBAR) then key = ns:GetGlobalStyle().texture or key end
+    if kind == "statusbar" and (default or key == DEFAULT_STATUSBAR) then key = ns:GetGlobalStyle().texture or DEFAULT_STATUSBAR end
     if kind == "font" and (default or key == DEFAULT_FONT) then key = ns:GetGlobalStyle().font or key end
+    if kind == "statusbar" and (key == "Blizzard" or key == "default") then return DEFAULT_STATUSBAR end
     if kind == "font" then
         return resolveFont(key, fallback)
     end

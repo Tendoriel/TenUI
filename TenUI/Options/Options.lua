@@ -137,6 +137,23 @@ local function showErrorLabel(sc, msg)
     errLabel:SetPoint("TOPLEFT", sc, "TOPLEFT", 8, -8)
 end
 
+local resetSections = {
+    resources = "resources", castbar = "castbar", dragonriding = "skyriding",
+    cdmbars = "cdm", auras = "auras", glow = "glow", qolReminders = "reminders",
+}
+local function confirmPageReset()
+    local key = resetSections[_currentPage]
+    if not key or InCombatLockdown() then return end
+    StaticPopupDialogs.TENUI_RESET_SECTION = StaticPopupDialogs.TENUI_RESET_SECTION or {
+        text = "Restore %s settings in this profile, including specialization overrides? You can undo this in Profiles.",
+        button1 = YES, button2 = CANCEL, timeout = 0, whileDead = true, hideOnEscape = true,
+        OnAccept = function(_, data)
+            if data.profile == ns:GetProfile() then ns:ApplyProfileSections({modules={}}, {[data.key]=true}) end
+        end,
+    }
+    StaticPopup_Show("TENUI_RESET_SECTION", ns.ProfileSections[key].label, nil, {profile=ns:GetProfile(), key=key})
+end
+
 function Options:_BuildWindow()
     if _frame then return end
     local UI = ns.UI
@@ -258,8 +275,12 @@ function Options:_BuildWindow()
     contentArea:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4,          FOOTER_H)
     f.contentArea = contentArea
 
-    UI.CreateFooter(f, "TenUI v" .. tostring(ns.version or "0.1.0") .. "  |  /tenui for commands", { height = FOOTER_H })
+    local footer = UI.CreateFooter(f, "TenUI v" .. tostring(ns.version or "0.1.0") .. "  |  /tenui help for commands", { height = FOOTER_H })
 
+    f.resetPage = UI.CreateCompactButton(footer, "Reset section", confirmPageReset, 104)
+    f.resetPage:SetPoint("RIGHT", footer, "RIGHT", -8, 0)
+    f.resetPage:SetHeight(20)
+    f.resetPage:Hide()
     _frame = f
     _built = true
 
@@ -286,6 +307,13 @@ function Options:_RebuildSidebar()
     for i = 1, #_pages do
         local entry = _pageMap[_pages[i].key]
         if entry and entry.tabBtn then
+            local group = ({ general = "GENERAL", layout = "HUD MODULES", profiles = "SYSTEM" })[_pages[i].key]
+            if group then
+                entry.groupLabel = entry.groupLabel or UI.Text(sidebar, UI.Fonts.small, UI.Theme.color.textDim, group)
+                entry.groupLabel:ClearAllPoints()
+                entry.groupLabel:SetPoint("TOPLEFT", 12, y-4)
+                y = y - 22
+            end
             entry.tabBtn:ClearAllPoints()
             entry.tabBtn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, y)
             entry.tabBtn:SetWidth(SIDEBAR_W - 1)
@@ -360,6 +388,70 @@ function Options:GetPinnedHeader(key, height)
     return ph
 end
 
+function Options:LayoutSettingsTabs(page, sc, children, names, starts, previewHeight)
+    local header = self:GetPinnedHeader(page, (previewHeight or 0) + 29)
+    local ui = ns:GetUIState()
+    ui.settingsTabs = ui.settingsTabs or {}
+    local selected = ui.settingsTabs[page] or names[1]
+    local buttons, groups = {}, {}
+    local group = names[1]
+    for _, child in ipairs(children) do
+        group = starts[child] or group
+        groups[child] = child.settingsGroup or group
+    end
+    local offsetGroups, expanded, toggles = {}, {}, {}
+    local lastGroup
+    for _, child in ipairs(children) do
+        local label = child.label and child.label.GetText and child.label:GetText() or ""
+        local lower = label:lower()
+        if child.layoutKind == "slider" and lower:find("offset") and
+            (lower:find("font") or lower:find("text") or lower:find("keybind") or (page == "layout" and groups[child] == "Style & Text")) then
+            if not lastGroup or groups[child] ~= groups[lastGroup] then lastGroup = child end
+            offsetGroups[child] = lastGroup
+        else lastGroup = nil end
+    end
+    local function show(name)
+        selected = name
+        ui.settingsTabs[page] = name
+        local shown = {}
+        for _, child in ipairs(children) do
+            local visible = groups[child] == name or groups[child] == "shared"
+            local placement = offsetGroups[child]
+            if placement == child then
+                local toggle = toggles[child]
+                if not toggle then
+                    toggle = ns.UI.CreateButton(sc, "Text placement…", function()
+                        expanded[placement] = not expanded[placement]
+                        show(selected)
+                    end)
+                    toggles[child] = toggle
+                end
+                toggle:SetShown(visible)
+                if visible then shown[#shown+1] = toggle end
+            end
+            if placement and not expanded[placement] then visible = false end
+            child:SetShown(visible)
+            if visible then shown[#shown+1] = child end
+        end
+        for key, button in pairs(buttons) do button:SetSelected(key == name) end
+        sc:SetHeight(ns.UI.LayoutVertical(sc, shown, 4, -8))
+        _pageMap[page].scrollFrame:SetVerticalScroll(0)
+    end
+    local prev
+    for _, name in ipairs(names) do
+        local button = ns.UI.CreateTabButton(header, name, function() show(name) end)
+        if prev then button:SetPoint("LEFT", prev, "RIGHT", 4, 0)
+        else button:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 8, 0) end
+        buttons[name], prev = button, button
+    end
+    sc.RevealSetting = function(child)
+        local placement = offsetGroups[child]
+        if placement then expanded[placement] = true end
+        if groups[child] and groups[child] ~= "shared" and (selected ~= groups[child] or placement) then show(groups[child]) end
+    end
+    show(buttons[selected] and selected or names[1])
+end
+
 function Options:BuildCooldownHeader(page, selected, height)
     self:ClearPinnedHeader(page)
     local header = self:GetPinnedHeader(page, height)
@@ -430,6 +522,19 @@ function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
         marker:Show()
     end
 
+    local function selectVisible(all)
+        wipe(selected)
+        for _, button in ipairs(buttons) do
+            if button:IsShown() and button.optionItem.spellID then
+                if all then selected[itemKey(button.optionItem)] = button.optionItem end
+                mark(button)
+            end
+        end
+    end
+    local all = C.CreateCompactButton(header, "All", function() selectVisible(true) end, 40)
+    local clear = C.CreateCompactButton(header, "Clear", function() selectVisible(false) end, 48)
+    all:SetPoint("TOPLEFT", strip, "BOTTOMLEFT", 0, -2)
+    clear:SetPoint("LEFT", all, "RIGHT", 4, 0)
     return function(rows)
         currentRows = rows
         local width = strip:GetWidth()
@@ -532,7 +637,7 @@ function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
             lanes[i] = nil
         end
         strip:SetHeight(top)
-        callbacks.resize(top - offset + 1)
+        callbacks.resize(top - offset + 25)
     end
 end
 
@@ -546,6 +651,7 @@ end
 
 function Options:SelectPage(key, forceRebuild)
     if not key then return end
+    if _frame and _frame.header.searchField then _frame.header.searchField:CloseResults() end
 
     local entry = _pageMap[key]
     if not entry or not _frame then return end
@@ -563,6 +669,7 @@ function Options:SelectPage(key, forceRebuild)
     end
 
     _currentPage = key
+    _frame.resetPage:SetShown(resetSections[key] ~= nil)
 
     local tab = _pageMap[entry.def.sidebarParent or key].tabBtn
     if tab then
@@ -822,6 +929,9 @@ local function buildGeneralPage(sc)
                 local p = ns:GetProfile()
                 for _, name in ipairs({"Layout","Resources","CastBar","DragonRiding","General","Auras"}) do
                     if p.modules[name] then reset(p.modules[name]) end
+                end
+                for _, field in ipairs({"abilities","abilitiesDefaults","auras","aurasDefaults"}) do
+                    if type(p[field]) == "table" then reset(p[field]) end
                 end
                 for _, scope in pairs(p.specScopes or {}) do reset(scope) end
                 ns:Fire("PROFILE_CHANGED", key)

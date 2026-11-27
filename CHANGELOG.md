@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.3] - 2026-11-27
+
+For WoW Retail Midnight 12.1.5 (Interface 120105).
+
+### Settings and Edit Mode
+
+- Layout, Resources and Profiles now have pinned tabs. Related controls share a row when their labels fit. Search, toggles, tabs and actions use TenUI's dark panels, square edges, monospace type and violet selection markers.
+- Search results identify the relevant tab or anchor. Picking an ability or aura setting before selecting a spell takes you to its picker. Clicking outside search or changing pages dismisses the results.
+- Edit Mode labels identify attached parents. Hover over a child to highlight its parent. Dragging or nudging an attached anchor updates the offsets in Layout. Use **All** or **Clear** for batch selection in cooldown and aura previews.
+- Open settings with `/tenui`, the minimap compartment or Blizzard Settings → AddOns → TenUI. Use `/tenui help` for commands. Supported settings sections can be reset individually and restored using Profiles → Undo.
+
+### Profiles and appearance
+
+- Global Appearance, snapping and tooltip preferences can travel with a selective export or copy. **Create as New** respects the sections checked in Import Preview, including when importing a full profile.
+- Manually switching profiles inside an instance survives role and zone refreshes. **Outside instances** provides a separate fallback. Duplicate and Rename share a name field.
+- Applying global appearance now reaches per-spell and per-aura overrides, icon text and reminder fonts. The default status-bar texture resolves correctly on the Skyriding bar.
+
+### Cooldowns, auras and resources
+
+- Cooldown rows support per-row growth, zoom, swipe opacity and direction, range and power colors, an optional assisted-rotation marker, and optional Masque skinning.
+- Action-key labels support items, equipped trinkets, resolvable macros and spell overrides. Bindings refresh after equipment, talent and form changes. Layout includes size, corner and offsets.
+- Tracked Bars can put the icon on either side or hide it, fill or drain over time, and show a spark. Active bars can sort by readable remaining time outside combat. Inactive and independently positioned bars keep their assigned lanes.
+- Power bars can smooth value changes and show current, percentage, combined or abbreviated values. Combo points have separate last-point and charged-point colors.
+
+### Reminders and minimap
+
+- Class Reminders can cast supported missing buffs or summon a pet with an out-of-combat click. Optional ready-check reminders cover flasks, food, weapon enchant, augment runes and equipment below 20% durability. Available supported items can be used from their reminders. The Consumables row has its own out-of-combat click option.
+- TenUI now respects a minimap-button collector hiding its icon across ordinary profile refreshes. Empty Consumables rows also release their previous layout size after combat.
+
 ## [0.6.2] - 2026-11-26
 
 For WoW Retail 12.1.5 (Interface 120105).

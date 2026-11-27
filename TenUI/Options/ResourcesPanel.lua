@@ -608,7 +608,7 @@ end
 local function buildResourcesPage(sc)
     local C = ns.UI
     if not C then return end
-    local children = {}
+    local children, starts = {}, {}
 
     local PREVIEW_EST_H = PREVIEW_TOP_PAD + 24 + PREVIEW_SEC_GAP_H + PREVIEW_BOTTOM_PAD
     ns.Options:ClearPinnedHeader("resources")
@@ -639,6 +639,15 @@ local function buildResourcesPage(sc)
         end
     end
 
+    local function powerControls(key)
+        children[#children+1] = C.CreateCheckBox(sc,"Smooth bar animation",function() return getResProfile()[key].smooth == true end,
+            function(v) getResProfile()[key].smooth = v applyOptions() end)
+        children[#children+1] = C.CreateDropdownLikeList(sc,"Power bar number format",
+            {{key="auto",label="Automatic"},{key="current",label="Current"},{key="percent",label="Percent"},
+             {key="both",label="Current · Percent"},{key="short",label="Abbreviated"}},
+            function() return getResProfile()[key].valueFormat or "auto" end,
+            function(v) getResProfile()[key].valueFormat = v applyOptions() end)
+    end
     children[#children + 1] = C.CreateSection(sc, "Resources")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Hide resources out of combat",
@@ -654,6 +663,7 @@ local function buildResourcesPage(sc)
     )
 
     children[#children + 1] = C.CreateSubSection(sc, "Primary Resource Bar")
+    powerControls("primary")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show cast prediction (green gain, red spend)",
         function() return getResProfile().primary.showManaCost == true end,
@@ -801,6 +811,7 @@ local function buildResourcesPage(sc)
         return rp.primary.threshold
     end
 
+    starts[#children+1] = "Thresholds"
     children[#children + 1] = C.CreateSubSection(sc, "Primary Resource Thresholds")
 
     children[#children + 1] = C.CreateCheckBox(sc, "Recolor at Threshold",
@@ -882,6 +893,7 @@ local function buildResourcesPage(sc)
         end
     )
 
+    starts[#children+1] = "Primary"
     children[#children + 1] = C.CreateFontDropdown(sc, "Primary Font",
         function()
             local rp = getResProfile()
@@ -952,7 +964,15 @@ local function buildResourcesPage(sc)
             applyOptions()
         end, 0)
 
+    starts[#children+1] = "Secondary & Spec"
     children[#children + 1] = C.CreateSubSection(sc, "Secondary Resource")
+    powerControls("secondary")
+    if select(2,UnitClass("player")) == "ROGUE" or select(2,UnitClass("player")) == "DRUID" then
+        for _, pair in ipairs({{"lastPointColor","Last combo point",{1,0.75,0.2,1}}, {"chargedPointColor","Charged combo point",{0.25,0.7,1,1}}}) do
+            children[#children+1] = C.CreateColorSwatch(sc,pair[2],function() return unpack(getResProfile().secondary[pair[1]] or pair[3]) end,
+                function(...) getResProfile().secondary[pair[1]] = {...} applyOptions() end,pair[3])
+        end
+    end
 
     local resolver = ns.Resources_Resolver
     local class, _, specID
@@ -1221,6 +1241,7 @@ local function buildResourcesPage(sc)
         end
     )
 
+    starts[#children+1] = "Primary"
     children[#children + 1] = C.CreateSubSection(sc, "Bar Dimensions")
 
     children[#children + 1] = C.CreateSlider(sc, "Primary Width", 40, 600, 1,
@@ -1261,6 +1282,7 @@ local function buildResourcesPage(sc)
             end
         end, 18)
 
+    starts[#children+1] = "Secondary & Spec"
     children[#children + 1] = C.CreateSlider(sc, "Secondary Width", 40, 600, 1,
         function()
             local rt = ns:GetAnchor("ResourceSecondary")
@@ -1299,8 +1321,9 @@ local function buildResourcesPage(sc)
             end
         end, 16)
 
-    local totalH = C.LayoutVertical(sc, children, 4, -8)
-    sc:SetHeight(math_max(totalH, 10))
+    local byControl = {}
+    for index, name in pairs(starts) do if children[index] then byControl[children[index]] = name end end
+    ns.Options:LayoutSettingsTabs("resources", sc, children, {"Primary", "Secondary & Spec", "Thresholds"}, byControl, previewBlock:IsShown() and previewBlock:GetHeight() or 0)
 end
 
 ns.Options:RegisterPage({

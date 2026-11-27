@@ -132,8 +132,9 @@ function Bar:SetMinMaxValues(minV, maxV)
     end
 end
 
-function Bar:SetValue(v)
-    self.frame:SetValue(v)
+function Bar:SetValue(v, smooth)
+    if smooth then self.frame:SetValue(v, Enum.StatusBarInterpolation.ExponentialEaseOut)
+    else self.frame:SetValue(v) end
 end
 
 function Bar:SetTexture(textureOrKey)
