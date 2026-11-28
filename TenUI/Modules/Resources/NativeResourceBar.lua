@@ -50,9 +50,6 @@ function Native.Prepare(bar, auraID, maxApplications, texture, color, fontStyle,
 
     local container
     local ok, err = pcall(function()
-        if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
-            C_AddOns.LoadAddOn("Blizzard_AuraContainer")
-        end
         container = CreateFrame("AuraContainer", nil, frame, "CustomAuraContainerTemplate")
         container:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -inset)
         container:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)

@@ -122,6 +122,7 @@ local function buildGlowPage(sc)
                 applyGlowDefaultsLive()
             end
         )
+        styleCtl.layoutGroup = intent
         children[#children + 1] = styleCtl
 
         colorCtl = C.CreateColorSwatch(sc, def.label .. " Default Color",
@@ -137,6 +138,7 @@ local function buildGlowPage(sc)
                 applyGlowDefaultsLive()
             end
         )
+        colorCtl.layoutGroup = intent
         children[#children + 1] = colorCtl
 
         children[#children + 1] = C.CreateCompactButton(sc,

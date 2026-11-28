@@ -15,24 +15,24 @@ local FONTS = "Interface\\AddOns\\TenUI\\Media\\Fonts\\"
 local Theme = {
     color = {
         bg          = { 0.020, 0.031, 0.063, 0.96 },
-        bgOverlay   = { 0.012, 0.020, 0.043, 0.60 },
-        panel       = { 0.031, 0.043, 0.086, 0.92 },
+        bgOverlay   = { 0.023, 0.015, 0.061, 0.78 },
+        panel       = { 0.075, 0.055, 0.169, 0.92 },
         panelLight  = { 0.047, 0.063, 0.118, 0.95 },
-        input       = { 0.016, 0.024, 0.055, 0.92 },
-        line        = { 0.46, 0.46, 0.60, 0.55 },
+        input       = { 0.027, 0.020, 0.071, 0.92 },
+        line        = { 0.663, 0.706, 0.820, 0.55 },
         lineSoft    = { 0.38, 0.38, 0.54, 0.65 },
         lineFaint   = { 0.26, 0.26, 0.36, 0.22 },
-        text        = { 0.784, 0.811, 0.878, 1.0 },
+        text        = { 0.865, 0.875, 0.933, 1.0 },
         textBright  = { 0.92, 0.94, 1.0, 1.0 },
-        textDim     = { 0.64, 0.66, 0.76, 1.0 },
-        textFaint   = { 0.38, 0.40, 0.50, 1.0 },
-        accent      = { 0.349, 0.761, 1.0, 1.0 },
-        accentDim   = { 0.349, 0.761, 1.0, 0.45 },
-        violet      = { 0.557, 0.486, 1.0, 1.0 },
-        violetDim   = { 0.557, 0.486, 1.0, 0.40 },
+        textDim     = { 0.72, 0.74, 0.83, 1.0 },
+        textFaint   = { 0.57, 0.58, 0.68, 1.0 },
+        accent      = { 0.220, 0.784, 1.0, 1.0 },
+        accentDim   = { 0.220, 0.784, 1.0, 0.45 },
+        violet      = { 0.549, 0.271, 1.0, 1.0 },
+        violetDim   = { 0.549, 0.271, 1.0, 0.40 },
         danger      = { 1.0, 0.35, 0.38, 1.0 },
         hover       = { 1.0, 1.0, 1.0, 0.05 },
-        selected    = { 0.557, 0.486, 1.0, 0.18 },
+        selected    = { 0.549, 0.271, 1.0, 0.18 },
         section     = { 0.092, 0.083, 0.16, 0.92 },
     },
     spacing = {
@@ -44,7 +44,7 @@ local Theme = {
         sectionGap = 14,
     },
     texture = {
-        nebula   = MEDIA .. "nebula_bg.tga",
+        nebula   = MEDIA .. "midnight_duality.tga",
         panel    = MEDIA .. "panel_bg.tga",
         pixel    = MEDIA .. "pixel.tga",
         edgeGlow = MEDIA .. "edge_glow.tga",
@@ -168,24 +168,15 @@ function UI.Glow(parent, layer, color)
 end
 
 local function cornerAccents(frame, size, color)
-    size = size or 12
-    color = color or Theme.color.violetDim
-    local defs = {
-        { "TOPLEFT", 1, -1, 1, 1 },
-        { "TOPRIGHT", -1, -1, -1, 1 },
-        { "BOTTOMLEFT", 1, 1, 1, -1 },
-        { "BOTTOMRIGHT", -1, 1, -1, -1 },
-    }
-    for i = 1, #defs do
-        local point, ox, oy, dx, dy = unpack(defs[i])
-        local h = frame:CreateTexture(nil, "OVERLAY")
-        h:SetColorTexture(unpack(color))
-        h:SetSize(size, 1)
-        h:SetPoint(point, frame, point, ox, oy)
-        local v = frame:CreateTexture(nil, "OVERLAY")
-        v:SetColorTexture(unpack(color))
-        v:SetSize(1, size)
-        v:SetPoint(point, frame, point, ox, oy)
+    local plate = (size or 12) >= 12 and "corner_void_orb" or "card_corner_inlay"
+    local length = (size or 12) * (plate == "corner_void_orb" and 2.1 or 1.4)
+    for _, point in ipairs({ "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }) do
+        local left, top = point:find("LEFT"), point:find("TOP")
+        local t = frame:CreateTexture(nil, "OVERLAY", nil, 5)
+        t:SetTexture(MEDIA .. plate .. ".tga")
+        t:SetSize(length, length)
+        t:SetTexCoord(left and 0 or 1, left and 1 or 0, top and 0 or 1, top and 1 or 0)
+        t:SetPoint(point, frame, point, left and -2 or 2, top and 2 or -2)
     end
 end
 
@@ -202,22 +193,61 @@ function UI.SkinPanel(frame, opts)
     return { bg = bg, border = border }
 end
 
+local function windowTrim(frame)
+    -- Draw outside the content rectangle. The rails stretch while the mitres
+    -- and keystones retain their proportions at every options-window scale.
+    local trim = CreateFrame("Frame", nil, frame)
+    trim:SetPoint("TOPLEFT", -8, 8)
+    trim:SetPoint("BOTTOMRIGHT", 8, -8)
+    trim:SetFrameLevel(frame:GetFrameLevel() + 12)
+    trim:EnableMouse(false)
+    for i, color in ipairs({ {0.08,0.07,0.13,1}, {0.59,0.59,0.69,1},
+        {0.32,0.31,0.41,1}, {0.22,0.20,0.30,1}, {0.13,0.12,0.21,1},
+        {0.48,0.44,0.58,1}, {0.09,0.08,0.15,1} }) do
+        local rail = CreateFrame("Frame", nil, trim)
+        rail:SetPoint("TOPLEFT", i-1, 1-i)
+        rail:SetPoint("BOTTOMRIGHT", 1-i, i-1)
+        UI.Border(rail, color)
+    end
+    local bezel = CreateFrame("Frame", nil, trim)
+    bezel:SetAllPoints()
+    bezel:SetFrameLevel(trim:GetFrameLevel() + 2)
+    bezel:EnableMouse(false)
+    local function ornament(asset, point, width, height, left, top, x, y)
+        local tex = bezel:CreateTexture(nil, "OVERLAY", nil, 5)
+        tex:SetTexture(MEDIA .. asset .. ".tga")
+        tex:SetSize(width, height)
+        tex:SetTexCoord(left and 0 or 1, left and 1 or 0, top and 0 or 1, top and 1 or 0)
+        tex:SetPoint(point, trim, point, x or 0, y or 0)
+    end
+    for _, point in ipairs({"TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT"}) do
+        ornament("window_mitre", point, 51, 51, point:find("LEFT"), point:find("TOP"))
+    end
+    ornament("window_keystone", "LEFT", 19, 38, true, true, -2, 0)
+    ornament("window_keystone", "RIGHT", 19, 38, false, true, 2, 0)
+    ornament("window_lintel", "BOTTOM", 51, 12, true, false, 0, -2)
+    return trim
+end
+
 function UI.SkinWindow(frame, opts)
     opts = opts or {}
-    local nebula = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    local bounds = opts.corners == false and frame or windowTrim(frame)
+    -- Art and backing share the outermost rail's anchors, including fractional
+    -- UI scales. No screen pixels can show through the bevel or the mitres.
+    local backing = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    backing:SetColorTexture(.042, .031, .072, 1)
+    backing:SetAllPoints(bounds)
+    local nebula = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
     nebula:SetTexture(Theme.texture.nebula)
-    nebula:SetAllPoints(frame)
-    nebula:SetVertexColor(1, 1, 1, opts.nebulaAlpha or 0.95)
+    nebula:SetAllPoints(bounds)
+    nebula:SetVertexColor(1, 1, 1, opts.nebulaAlpha or .95)
     nebula:SetHorizTile(false)
     nebula:SetVertTile(false)
-    local overlay = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+    local overlay = frame:CreateTexture(nil, "BACKGROUND", nil, -6)
     overlay:SetColorTexture(unpack(Theme.color.bgOverlay))
-    overlay:SetAllPoints(frame)
+    overlay:SetAllPoints(bounds)
     local border = UI.Border(frame, Theme.color.line, "OVERLAY")
-    if opts.corners ~= false then
-        cornerAccents(frame, opts.cornerSize or 14, Theme.color.violetDim)
-    end
-    return { nebula = nebula, overlay = overlay, border = border }
+    return { nebula=nebula, overlay=overlay, backing=backing, bounds=bounds, border=border }
 end
 
 local function makeCrossIcon(btn, size, color)
@@ -325,8 +355,13 @@ function UI.CreateHeader(parent, opts)
     logo:SetTexture(Theme.texture.logo)
     logo:SetSize(110, 27.5)
     logo:SetPoint("LEFT", h, "LEFT", 12, 0)
-    local divider = UI.GlowLine(h, "OVERLAY", { 0.557, 0.486, 1.0, 0.35 })
-    divider:SetHeight(8)
+    local divider = h:CreateTexture(nil, "OVERLAY")
+    divider:SetTexture(MEDIA .. "divider_clash_eclipse.tga")
+    divider:SetHeight(14)
+    local clasp = h:CreateTexture(nil, "OVERLAY", nil, 1)
+    clasp:SetTexture(MEDIA .. "header_eye_clasp.tga")
+    clasp:SetSize(57, 14)
+    clasp:SetPoint("CENTER", divider, "CENTER")
     divider:SetPoint("BOTTOMLEFT", h, "BOTTOMLEFT", 0, -4)
     divider:SetPoint("BOTTOMRIGHT", h, "BOTTOMRIGHT", 0, -4)
     h.logo = logo
@@ -353,14 +388,35 @@ function UI.CreateFooter(parent, text, opts)
     return fbar
 end
 
+function UI.CreateNavigationHeading(parent, text)
+    local heading = CreateFrame("Frame", nil, parent)
+    heading:SetHeight(24)
+    local label = UI.Text(heading, UI.Fonts.section, {0.80, 0.72, 0.99, 1}, text)
+    label:SetPoint("LEFT", 9, 0)
+    local rule = UI.Rect(heading, "ARTWORK", {0.59, 0.53, 0.72, .60})
+    rule:SetHeight(1)
+    rule:SetPoint("LEFT", label, "RIGHT", 7, 0)
+    rule:SetPoint("RIGHT", -8, 0)
+    return heading
+end
+
+-- Call after creating one row of peer controls; anchor chains reflow when sized.
+function UI.SizePeers(buttons, height, minimumWidth)
+    local width = minimumWidth or 0
+    for _, button in ipairs(buttons) do width = math.max(width, button:GetWidth()) end
+    for _, button in ipairs(buttons) do button:SetSize(math.ceil(width), height or Theme.spacing.controlH) end
+    return math.ceil(width)
+end
+
 function UI.CreateSidebarItem(parent, label, onClick)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(160, 26)
     local bg = UI.Rect(btn, "BACKGROUND", { 0, 0, 0, 0 })
     bg:SetAllPoints(btn)
     local edge = btn:CreateTexture(nil, "BORDER")
-    edge:SetColorTexture(unpack(Theme.color.violet))
-    edge:SetWidth(2)
+    edge:SetTexture(MEDIA .. "bracket_alleria_chevron.tga")
+    edge:SetVertexColor(.82, .80, 1)
+    edge:SetWidth(10)
     edge:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, -2)
     edge:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 0, 2)
     edge:Hide()
@@ -370,7 +426,7 @@ function UI.CreateSidebarItem(parent, label, onClick)
     marker:SetRotation(math.pi / 4)
     marker:Hide()
     local fs = UI.Text(btn, UI.Fonts.label, Theme.color.textDim, label)
-    fs:SetPoint("LEFT", btn, "LEFT", 12, 0)
+    fs:SetPoint("LEFT", btn, "LEFT", 20, 0)
     btn.label = fs
     btn._selected = false
     function btn.SetSelected(self, sel)

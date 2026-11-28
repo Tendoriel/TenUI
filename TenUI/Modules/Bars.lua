@@ -284,7 +284,6 @@ local MIRROR_VIEWER_NAMES = { "EssentialCooldownViewer", "UtilityCooldownViewer"
 
 local _mirrorMap = {}
 local _mirrorMapDirty = true
-local _mirrorHooked = {}
 local _spellOverrides = {}
 
 local function getMirrorViewer(name)
@@ -293,32 +292,7 @@ local function getMirrorViewer(name)
     return nil
 end
 
-local function mirrorViewerItems(viewer)
-    if not viewer then return nil end
-    if type(viewer.GetItemFrames) == "function" then
-        local ok, frames = pcall(viewer.GetItemFrames, viewer)
-        if ok and type(frames) == "table" then return frames end
-    end
-    local out = {}
-    if type(viewer.itemFramePool) == "table"
-       and type(viewer.itemFramePool.EnumerateActive) == "function" then
-        pcall(function()
-            for itemFrame in viewer.itemFramePool:EnumerateActive() do
-                out[#out + 1] = itemFrame
-            end
-        end)
-    end
-    return out
-end
-
-local function hookMirrorViewer(name, viewer)
-    if _mirrorHooked[name] then return end
-    if type(viewer.RefreshLayout) ~= "function" then return end
-    _mirrorHooked[name] = true
-    pcall(hooksecurefunc, viewer, "RefreshLayout", function()
-        _mirrorMapDirty = true
-    end)
-end
+local mirrorViewerItems = ns.GetCooldownViewerFrames
 
 local function addMirrorKey(child, sid)
     if isSecret(sid) then return end
@@ -1930,6 +1904,7 @@ local function layoutIconRow(anchor, iconList, iconW, iconH, spacing, mode, cros
 end
 
 function Row:Layout()
+    ns.RefreshHUDActions()
     local anchor = self.anchor
     if not (anchor and anchor.frame) then return end
     local count1 = countVisibleIcons(self._iconsRow1 or {})

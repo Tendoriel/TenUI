@@ -187,7 +187,7 @@ function Options:_BuildWindow()
     closeBtn:SetPoint("RIGHT", header, "RIGHT", -8, 0)
     header.searchField = ns.AddSettingsSearch(header, _pageMap, closeBtn)
 
-    local unlockBtn = UI.CreateCompactButton(header, ns.db and ns.db.locked and "Edit Mode" or "Exit Edit", function()
+    local unlockBtn = UI.CreatePrimaryButton(header, ns.db and ns.db.locked and "Edit Mode" or "Exit Edit", function()
         if InCombatLockdown() then
             DEFAULT_CHAT_FRAME:AddMessage("|cff4fc3f7TenUI|r: Cannot unlock frames in combat")
             return
@@ -268,6 +268,23 @@ function Options:_BuildWindow()
     divider:SetPoint("TOPRIGHT",    sidebar, "TOPRIGHT",    0, 0)
     divider:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", 0, 0)
     divider:SetWidth(1)
+    local profilePlate = CreateFrame("Frame", nil, sidebar)
+    profilePlate:SetPoint("BOTTOMLEFT", 9, 7)
+    profilePlate:SetPoint("BOTTOMRIGHT", -9, 7)
+    profilePlate:SetHeight(44)
+    UI.SkinPanel(profilePlate, {color = {.045, .03, .09, .85}})
+    local title = UI.Text(profilePlate, UI.Fonts.small, Theme.color.accent, "ACTIVE PROFILE")
+    title:SetPoint("TOPLEFT", 7, -5)
+    local profileName = UI.Text(profilePlate, UI.Fonts.label, Theme.color.textBright)
+    profileName:SetPoint("BOTTOMLEFT", 7, 5)
+    profileName:SetPoint("BOTTOMRIGHT", -7, 5)
+    profileName:SetWordWrap(false)
+    profileName:SetJustifyH("LEFT")
+    local function refreshProfile()
+        profileName:SetText(ns:GetProfileKey())
+    end
+    refreshProfile()
+    ns:RegisterMessage("PROFILE_CHANGED", refreshProfile)
     f.sidebar = sidebar
 
     local contentArea = CreateFrame("Frame", nil, f)
@@ -309,10 +326,11 @@ function Options:_RebuildSidebar()
         if entry and entry.tabBtn then
             local group = ({ general = "GENERAL", layout = "HUD MODULES", profiles = "SYSTEM" })[_pages[i].key]
             if group then
-                entry.groupLabel = entry.groupLabel or UI.Text(sidebar, UI.Fonts.small, UI.Theme.color.textDim, group)
+                entry.groupLabel = entry.groupLabel or UI.CreateNavigationHeading(sidebar, group)
                 entry.groupLabel:ClearAllPoints()
-                entry.groupLabel:SetPoint("TOPLEFT", 12, y-4)
-                y = y - 22
+                entry.groupLabel:SetPoint("TOPLEFT", 0, y-4)
+                entry.groupLabel:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, y-4)
+                y = y - 30
             end
             entry.tabBtn:ClearAllPoints()
             entry.tabBtn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, y)
@@ -437,13 +455,15 @@ function Options:LayoutSettingsTabs(page, sc, children, names, starts, previewHe
         sc:SetHeight(ns.UI.LayoutVertical(sc, shown, 4, -8))
         _pageMap[page].scrollFrame:SetVerticalScroll(0)
     end
-    local prev
+    local peers, prev = {}
     for _, name in ipairs(names) do
         local button = ns.UI.CreateTabButton(header, name, function() show(name) end)
         if prev then button:SetPoint("LEFT", prev, "RIGHT", 4, 0)
         else button:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 8, 0) end
+        peers[#peers+1] = button
         buttons[name], prev = button, button
     end
+    ns.UI.SizePeers(peers)
     sc.RevealSetting = function(child)
         local placement = offsetGroups[child]
         if placement then expanded[placement] = true end
@@ -455,7 +475,7 @@ end
 function Options:BuildCooldownHeader(page, selected, height)
     self:ClearPinnedHeader(page)
     local header = self:GetPinnedHeader(page, height)
-    local prev
+    local peers, prev = {}
     for _, tab in ipairs(COOLDOWN_TABS) do
         local key = tab.key
         local button = ns.UI.CreateTabButton(header, tab.label, function()
@@ -471,8 +491,10 @@ function Options:BuildCooldownHeader(page, selected, height)
             button:SetPoint("TOPLEFT", header, "TOPLEFT", 8, 0)
         end
         button:SetSelected(key == selected)
+        peers[#peers+1] = button
         prev = button
     end
+    ns.UI.SizePeers(peers, nil, 114)
     return header
 end
 
@@ -531,7 +553,7 @@ function Options:CreateCooldownStrip(header, offset, callbacks, emptyText)
             end
         end
     end
-    local all = C.CreateCompactButton(header, "All", function() selectVisible(true) end, 40)
+    local all = C.CreateCompactButton(header, "All", function() selectVisible(true) end, 48)
     local clear = C.CreateCompactButton(header, "Clear", function() selectVisible(false) end, 48)
     all:SetPoint("TOPLEFT", strip, "BOTTOMLEFT", 0, -2)
     clear:SetPoint("LEFT", all, "RIGHT", 4, 0)

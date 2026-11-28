@@ -197,7 +197,7 @@ local function rebuildAuraList()
         cdmBtn:HookScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine("Open Blizzard Cooldown Manager")
-            GameTooltip:AddLine("Configure this aura in Blizzard's tracked lists.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine("Press Enter to open Blizzard's tracked lists.", 0.8, 0.8, 0.8, true)
             GameTooltip:Show()
         end)
         cdmBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -335,7 +335,7 @@ local function buildAuraPage(sc)
         "TenUI uses Blizzard aura containers to display enabled buffs and your target debuffs.")
     if depNote then children[#children + 1] = depNote end
 
-    children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager", function()
+    children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager (Enter)", function()
         if ns.Auras then ns.Auras:OpenBlizzardCDMSettings() end
     end)
 
@@ -363,6 +363,7 @@ local function buildAuraPage(sc)
             scroll:SetVerticalScroll(math.min(top - sectionTop, scroll:GetVerticalScrollRange()))
         end
     end, 140)
+    C.SizePeers({display, layout})
     display:SetPoint("RIGHT", layout, "LEFT", -6, 0)
 
     children[#children + 1] = C.CreateHelpText(sc,
@@ -543,7 +544,7 @@ local function buildAuraSettingsPage(sc)
     )
     children[#children + 1] = C.CreateHelpText(sc,
         "Move this aura between icons and bars in Blizzard Cooldown Manager.")
-    children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager", function()
+    children[#children + 1] = C.CreateButton(sc, "Open Blizzard Cooldown Manager (Enter)", function()
         if ns.Auras then ns.Auras:OpenBlizzardCDMSettings() end
     end)
 
@@ -596,12 +597,22 @@ local function buildAuraSettingsPage(sc)
                     function(value) setBar(axis.key, value) end)
             end
         end
-        children[#children + 1] = C.CreateColorSwatch(sc, "Bar fill color", function()
+        local function currentFill()
             local visuals = ns.GetLayoutVisuals and ns:GetLayoutVisuals("TrackedBars")
-            local color = (barSettings().appearance or {}).fill or (visuals and visuals.fillColor)
-            if color then return color[1], color[2], color[3], color[4] or 1 end
-            return 1, 1, 1, 1
-        end, function(r, g, b, a) setAppearance("fill", { r, g, b, a or 1 }) end, { 1, 1, 1, 1 })
+            return (barSettings().appearance or {}).fill or (visuals and visuals.fillColor) or {1, 1, 1, 1}
+        end
+        children[#children+1] = C.CreateCheckBox(sc, "Custom color for this aura", function()
+            return (barSettings().appearance or {}).fill ~= nil
+        end, function(enabled)
+            setAppearance("fill", enabled and {unpack(currentFill())} or nil)
+            rebuild()
+        end)
+        if (barSettings().appearance or {}).fill then
+            children[#children].layoutGroup = "auraFill"
+            children[#children+1] = C.CreateColorSwatch(sc, "Bar fill color", function() return unpack(currentFill()) end,
+                function(...) setAppearance("fill", {...}) end)
+            children[#children].layoutGroup = "auraFill"
+        end
         for _, field in ipairs({ { key = "showIcon", label = "Show icon" }, { key = "showName", label = "Show name" },
                                 { key = "showTimer", label = "Show timer" }, { key = "reverseFill", label = "Reverse fill" } }) do
             children[#children + 1] = C.CreateCheckBox(sc, field.label, function()

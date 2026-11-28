@@ -900,7 +900,7 @@ local function buildScannerPage(sc)
     _addingToLabel = addingLabel
     children[#children + 1] = addingLabel
 
-    local prevTab
+    local peers, prevTab = {}
     for i, cont in ipairs(CONTAINERS) do
         local capturedKey = cont.key
         local tb = C.CreateTabButton(header, cont.label, function()
@@ -919,7 +919,9 @@ local function buildScannerPage(sc)
         prevTab = tb
         tb:SetSelected(cont.key == _selectedContainer)
         _tabBgMap[cont.key] = tb
+        peers[#peers+1] = tb
     end
+    C.SizePeers(peers, nil, 114)
 
     if _selectedContainer == "Custom" then
         children[#children + 1] = C.CreateSubSection(sc, "Custom Bars (cooldown tracking)")

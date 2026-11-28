@@ -530,7 +530,7 @@ local function buildCastBarPage(sc)
         end
     )
 
-    children[#children + 1] = C.CreateDropdownLikeList(sc, "Icon Side",
+    children[#children + 1] = C.CreateSegmentedControl(sc, "Icon Side",
         {
             { key = "LEFT",  label = "Left (default)" },
             { key = "RIGHT", label = "Right" },
@@ -602,6 +602,7 @@ local function buildCastBarPage(sc)
         end, 2)
 
     children[#children + 1] = C.CreateSubSection(sc, "Cast Information")
+    children[#children]._castTab = "Typography & State Colors"
 
     children[#children + 1] = C.CreateCheckBox(sc, "Show Spell Name",
         function()
@@ -635,6 +636,8 @@ local function buildCastBarPage(sc)
         end
     )
 
+    children[#children + 1] = C.CreateSubSection(sc, "Latency, Channels & Empower")
+    children[#children]._castTab = "Bar & Mechanics"
     for _, option in ipairs({
         { "showCastLatency", "Show measured cast latency (red)" },
         { "showQueueWindow", "Show spell queue window on casts and channels" },
@@ -708,6 +711,7 @@ local function buildCastBarPage(sc)
     )
 
     children[#children + 1] = C.CreateSubSection(sc, "Bar Style")
+    children[#children]._castTab = "Bar & Mechanics"
 
     children[#children + 1] = C.CreateStatusBarTextureDropdown(sc, "Bar Texture",
         function()
@@ -772,6 +776,7 @@ local function buildCastBarPage(sc)
         end, { 0, 0, 0, 1 })
 
     children[#children + 1] = C.CreateSubSection(sc, "Bar Colors")
+    children[#children]._castTab = "Typography & State Colors"
 
     children[#children + 1] = C.CreateColorSwatch(sc, "Interruptible (Cast)",
         function()
@@ -865,6 +870,7 @@ local function buildCastBarPage(sc)
         end, { 0.2, 1.0, 0.2, 1 })
 
     children[#children + 1] = C.CreateSubSection(sc, "Timing")
+    children[#children]._castTab = "Bar & Mechanics"
 
     children[#children + 1] = C.CreateSlider(sc, "Hold Time (s)", 0, 2, 0.1,
         function()
@@ -877,8 +883,17 @@ local function buildCastBarPage(sc)
             applyOptions()
         end, 0.4)
 
-    local totalH = C.LayoutVertical(sc, children, 4, -8)
-    sc:SetHeight(math_max(totalH, 10))
+    local grid = {
+        Width="size", Height="size", ["Show Bar Background"]="background", ["Bar Background Color"]="background",
+        ["Show Bar Border"]="border", ["Bar Border Color"]="border", ["Font"]="type", ["Font Size"]="type",
+    }
+    local starts = {}
+    for _, row in ipairs(children) do
+        if row.label then row.layoutGroup = grid[row.label:GetText()] end
+        if row._castTab then starts[row] = row._castTab end
+    end
+    ns.Options:LayoutSettingsTabs("castbar", sc, children, {"Bar & Mechanics", "Typography & State Colors"},
+        starts, previewBlock:GetHeight())
 end
 
 ns.Options:RegisterPage({

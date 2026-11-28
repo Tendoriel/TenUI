@@ -70,6 +70,7 @@ function Icon:New(parent, opts)
     local self_ = setmetatable({}, Icon)
     self_._opts = opts
     self_._state = "live"
+    self_.borderEnabled, self_.borderColor = opts.border ~= false, opts.borderColor
 
     local f = CreateFrame("Button", nil, parent, "BackdropTemplate")
     f:EnableMouse(false)
@@ -80,7 +81,7 @@ function Icon:New(parent, opts)
     if opts.zoomIcon ~= false then
         icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         f:SetScript("OnSizeChanged", function(_, w, h)
-            Icon.ApplyCropTexCoord(icon, w, h, self_.iconZoom)
+            if not self_.masqueGroup then Icon.ApplyCropTexCoord(icon, w, h, self_.iconZoom) end
         end)
     end
     if opts.texture then
@@ -443,7 +444,8 @@ function Icon:SetTextAnchor(point, relPoint, x, y)
 end
 
 function Icon:SetBorder(enabled, color)
-    if enabled then
+    self.borderEnabled, self.borderColor = enabled, color
+    if enabled and not self.masqueGroup then
         if not self.frame.border then
             self.frame.border = makeBorder(self.frame, color or { 0, 0, 0, 1 })
         else
@@ -672,6 +674,7 @@ function Icon:SetItemTooltip(itemID, enabled)
 end
 
 function Icon:Destroy()
+    ns.ReleaseHUDAction(self.frame)
     if self.masqueGroup then self.masqueGroup:RemoveButton(self.frame) self.masqueGroup = nil end
     local f = self.frame
     if f then

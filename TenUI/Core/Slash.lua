@@ -2287,11 +2287,11 @@ local function handler(msg)
             return
         end
         local viewer = _G.BuffIconCooldownViewer
-        if not (type(viewer) == "table" and viewer.GetItemFrames) then
+        if not (type(viewer) == "table" and viewer.GetChildren) then
             out("Probe N/A -- BuffIconCooldownViewer not loaded yet")
             return
         end
-        local ok, items = pcall(viewer.GetItemFrames, viewer)
+        local ok, items = pcall(ns.GetCooldownViewerFrames, viewer)
         if not (ok and type(items) == "table" and #items > 0) then
             out("Probe N/A -- no viewer item frames available")
             return

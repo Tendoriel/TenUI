@@ -137,6 +137,7 @@ function ns:SetActiveProfile(name, fromSpec)
         local _, kind = IsInInstance()
         self._manualContent = kind
         if self.charDb then
+            self.charDb.manualContent = kind
             self.charDb.selectedProfile = name
             self.charDb.selectedSpec = self:GetLiveSpecID()
         end
@@ -224,7 +225,11 @@ local function selectProfile(self, assigned, specID)
     local rules = self.db.contentProfiles
     if rules and IsInInstance then
         local _, kind = IsInInstance()
-        if self._manualContent ~= kind then self._manualContent = nil end
+        self._manualContent = self.charDb and self.charDb.manualContent or self._manualContent
+        if self._manualContent ~= kind or (self.charDb and self.charDb.selectedSpec ~= specID) then
+            self._manualContent = nil
+            if self.charDb then self.charDb.manualContent = nil end
+        end
         if self._manualContent and self.charDb and self.charDb.selectedSpec == specID and self.db.profiles[self.charDb.selectedProfile] then
             return self.charDb.selectedProfile, "character"
         end

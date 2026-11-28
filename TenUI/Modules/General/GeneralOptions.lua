@@ -225,7 +225,7 @@ local function buildQoLPage(sc)
     ns.Options:ClearPinnedHeader("qolReminders")
     local tabRow = ns.Options:GetPinnedHeader("qolReminders", 28)
 
-    local prevTab
+    local peers, prevTab = {}
     for i, t in ipairs(QOL_TABS) do
         local capturedKey = t.key
         local tb = C.CreateTabButton(tabRow, t.label, function()
@@ -252,7 +252,9 @@ local function buildQoLPage(sc)
         end
         prevTab = tb
         tb:SetSelected(t.key == _selectedQoLTab)
+        peers[#peers+1] = tb
     end
+    C.SizePeers(peers)
 
     local isClass, isStealth = _selectedQoLTab == "classReminders", _selectedQoLTab == "stealth"
     local settingRows = {}

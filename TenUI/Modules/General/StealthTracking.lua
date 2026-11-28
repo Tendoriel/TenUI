@@ -179,9 +179,6 @@ local function ensureRushContainer()
     if StealthTracking._rushContainer or InCombatLockdown() then return end
     local container
     local ok, err = pcall(function()
-        if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
-            C_AddOns.LoadAddOn("Blizzard_AuraContainer")
-        end
         local parent = StealthTracking.frame.rushSlot
         container = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
         container:SetAllPoints(parent)

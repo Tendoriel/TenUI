@@ -157,6 +157,15 @@ local function resolveSecStyle(rp, kind)
     return showBorder, bc, showBg, bgc
 end
 
+local function samplePowerText(mode, percent, maximum)
+    local current = math.floor(maximum * percent / 100 + 0.5)
+    if mode == "percent" then return percent .. "%" end
+    if mode == "both" then return current .. " · " .. percent .. "%" end
+    if mode == "short" and AbbreviateNumbers then return AbbreviateNumbers(current) end
+    if mode == "auto" or not mode then return current .. " / " .. maximum end
+    return tostring(current)
+end
+
 local function buildEmbeddedPreview(block)
     local Widgets = ns.Widgets
     if not (Widgets and Widgets.Bar) then
@@ -270,7 +279,7 @@ local function buildEmbeddedPreview(block)
             })
             secBarWidget:SetMinMaxValues(0, 100)
             secBarWidget:SetValue(50)
-            secBarWidget:SetRightText("50")
+            secBarWidget:SetRightText(samplePowerText(rp.secondary and rp.secondary.valueFormat, 50, 100))
         else
             local n
             if secKind == "runes" then
@@ -353,6 +362,7 @@ local function buildEmbeddedPreview(block)
     local thColor       = { 1, 0.1, 0.1, 1 }
     local showValueText = true
     local lastShownPct  = nil
+    local sampleFormat = rp.primary and rp.primary.valueFormat
     local lastThHit     = nil
 
     local function applyFillVisual()
@@ -373,7 +383,7 @@ local function buildEmbeddedPreview(block)
         local shown = math_floor(fillPct + 0.5)
         if shown ~= lastShownPct then
             lastShownPct = shown
-            primBar:SetRightText(showValueText and tostring(shown) or "")
+            primBar:SetRightText(showValueText and samplePowerText(sampleFormat, shown, 25000) or "")
         end
     end
 
@@ -454,6 +464,7 @@ local function buildEmbeddedPreview(block)
             thColor = { r, g, b, 1 }
 
             showValueText = prim2.showText ~= false
+            sampleFormat = prim2.valueFormat
             lastShownPct = nil
             lastThHit = nil
             applyFillVisual()
@@ -529,7 +540,7 @@ local function buildEmbeddedPreview(block)
                             sfs:SetJustifyH("CENTER")
                         end
                     end
-                    secBarWidget:SetRightText(stEnabled and "50" or "")
+                    secBarWidget:SetRightText(stEnabled and samplePowerText(rp2.secondary and rp2.secondary.valueFormat, 50, 100) or "")
                 elseif secPips then
                     local texPath = sec2.texture
                     if Widgets.resolveMedia then
@@ -966,7 +977,8 @@ local function buildResourcesPage(sc)
 
     starts[#children+1] = "Secondary & Spec"
     children[#children + 1] = C.CreateSubSection(sc, "Secondary Resource")
-    powerControls("secondary")
+    local descriptor = ns.Resources_Display and ns.Resources_Display.getSpecDescriptor()
+    if descriptor and descriptor.secondary and descriptor.secondary.kind == "bar" then powerControls("secondary") end
     if select(2,UnitClass("player")) == "ROGUE" or select(2,UnitClass("player")) == "DRUID" then
         for _, pair in ipairs({{"lastPointColor","Last combo point",{1,0.75,0.2,1}}, {"chargedPointColor","Charged combo point",{0.25,0.7,1,1}}}) do
             children[#children+1] = C.CreateColorSwatch(sc,pair[2],function() return unpack(getResProfile().secondary[pair[1]] or pair[3]) end,

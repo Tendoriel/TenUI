@@ -419,52 +419,7 @@ local function getViewer(name)
     return nil
 end
 
-local function getItemFrames(viewer)
-    if not viewer then return nil end
-    local out = {}
-    local seen = {}
-    local function pushUnique(frame)
-        if type(frame) ~= "table" then return end
-        if seen[frame] then return end
-        seen[frame] = true
-        out[#out + 1] = frame
-    end
-    if type(viewer.GetItemFrames) == "function" then
-        local ok, frames = pcall(viewer.GetItemFrames, viewer)
-        if ok and type(frames) == "table" and #frames > 0 then
-            for i = 1, #frames do pushUnique(frames[i]) end
-            return out
-        end
-    end
-    if type(viewer.itemFramePool) == "table"
-       and type(viewer.itemFramePool.EnumerateActive) == "function" then
-        local ok = pcall(function()
-            for itemFrame in viewer.itemFramePool:EnumerateActive() do
-                pushUnique(itemFrame)
-            end
-        end)
-        if ok and #out > 0 then
-            table.sort(out, function(a, b)
-                local ai = (type(a) == "table" and tonumber(a.layoutIndex)) or 0
-                local bi = (type(b) == "table" and tonumber(b.layoutIndex)) or 0
-                return ai < bi
-            end)
-            return out
-        end
-        wipe(out)
-        wipe(seen)
-    end
-    local ok, children = pcall(function() return { viewer:GetChildren() } end)
-    if ok and type(children) == "table" then
-        for i = 1, #children do
-            local c = children[i]
-            if type(c) == "table" and c.GetObjectType then
-                pushUnique(c)
-            end
-        end
-    end
-    return out
-end
+local getItemFrames = ns.GetCooldownViewerFrames
 
 local function itemHasCooldownID(item)
     if type(item) ~= "table" then return false end
@@ -5353,9 +5308,10 @@ function Auras:OpenBlizzardCDMSettings()
     end
     local shown = type(panel.IsShown) == "function" and panel:IsShown()
     if shown then return true, "already-open" end
-    local ok = pcall(panel.TogglePanel, panel)
-    if not ok then return false, "error" end
-    return true, "opened"
+    local cmd = _G.SLASH_COOLDOWNMANAGER1
+    if not cmd or not ChatFrame_OpenChat then return false, "unavailable" end
+    ChatFrame_OpenChat(cmd)
+    return true, "press-enter"
 end
 
 function Auras._lowTimeTextClamp01(v)
@@ -6050,23 +6006,6 @@ function Auras:OnEnable(_, profile)
             mod:RequestRefresh()
         end
     end)
-
-    if not self._viewerHooked then
-        self._viewerHooked = true
-        for _, vn in ipairs({ ICON_VIEWER_NAME, BAR_VIEWER_NAME }) do
-            local v = getViewer(vn)
-            if v and type(v.RefreshLayout) == "function" then
-                pcall(hooksecurefunc, v, "RefreshLayout", function(self_)
-                    mod:InvalidateViewerAuraMap()
-                    if C_Timer and C_Timer.After then
-                        mod:RequestRefresh()
-                    else
-                        mod:Refresh()
-                    end
-                end)
-            end
-        end
-    end
 
     if not self._cdmLayoutHooked and EventRegistry and EventRegistry.RegisterCallback then
         self._cdmLayoutHooked = true
@@ -7861,7 +7800,13 @@ function ensureAuraCacheFrame()
             end
             return
         elseif event == "UNIT_AURA" then
-            if (Auras._nativeIcons and Auras._nativeBars) or ns.TrackedAuras:IsRestricted() then return end
+            if ns.TrackedAuras:IsRestricted() then return end
+            if Auras._nativeIcons and Auras._nativeBars then
+                local visuals = getTrackedBarsVisuals()
+                local order = visuals and visuals.barOrder
+                if (arg1 == "player" or arg1 == "target") and (order == "short" or order == "long") then Auras:RequestRefresh() end
+                return
+            end
             local unit, updateInfo = arg1, arg2
             if Auras._liveAura and Auras._liveAura.handleUnitAura then
                 pcall(Auras._liveAura.handleUnitAura, unit, updateInfo)

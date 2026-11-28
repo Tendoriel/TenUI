@@ -77,6 +77,8 @@ ns.charDb = {}
 ns.db.contentProfiles = {raid="Legacy", none="ResourcesOnly"}
 assert(ns:ResolveActiveProfile() == "Legacy")
 assert(ns:SetActiveProfile("Inherited"))
+assert(ns.charDb.manualContent == "raid")
+ns._manualContent = nil -- a reload keeps character SavedVariables only
 assert(ns:ResolveActiveProfile() == "Inherited")
 kind = "none"
 assert(ns:ResolveActiveProfile() == "ResourcesOnly")

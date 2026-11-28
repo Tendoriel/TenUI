@@ -217,6 +217,7 @@ local function addTextStyleControls(children, sc, C, label, getStyle, apply)
         children[#children + 1] = C.CreateSubSection(sc, label)
     end
 
+    local firstTypeRow = #children + 1
     children[#children + 1] = C.CreateFontDropdown(sc, "Font",
         function() return getStyle().font or "default" end,
         function(v)
@@ -245,6 +246,11 @@ local function addTextStyleControls(children, sc, C, label, getStyle, apply)
             apply()
         end
     )
+
+    for i = firstTypeRow, #children do children[i].layoutGroup = "typography" end
+    local size = children[firstTypeRow+1]
+    size.slider:SetWidth(58)
+    size.controlWidth = size.controlWidth - 72
 
     children[#children + 1] = C.CreateTextAnchorDropdown(sc, "Text Anchor",
         function() return getStyle().anchor or "BOTTOMRIGHT" end,
@@ -403,6 +409,15 @@ local function buildLayoutPage(sc)
         )
     end
 
+    local modulePage = ({CastBar="castbar", DragonRiding="dragonriding", Resources="resources",
+        ResourceSecondary="resources", EbonMight="resources", ArcaneSoul="resources"})[_selectedAnchor]
+    if modulePage then
+        local title = ({castbar="Cast Bar", dragonriding="Dragon Riding", resources="Resources"})[modulePage]
+        children[#children+1] = C.CreateButton(sc, "Configure " .. title .. " visuals", function()
+            ns.Options:SelectPage(modulePage)
+        end)
+    end
+
     starts[#children+1] = "Style & Text"
     if isIconVisualAnchor(_selectedAnchor) then
         if _selectedAnchor ~= "TrackedIcon" and _selectedAnchor ~= "Consumables" then
@@ -433,7 +448,7 @@ local function buildLayoutPage(sc)
         local tracked = _selectedAnchor == "TrackedIcon"
         children[#children+1] = C.CreateCheckBox(sc,"Reverse cooldown swipe",val("reverseSwipe",tracked),setter("reverseSwipe"))
         if not tracked then
-            children[#children+1] = C.CreateDropdownLikeList(sc,"Growth",{{key="CENTER",label="Center"},{key="LEFT",label="Forward"},{key="RIGHT",label="Reverse"}},
+            children[#children+1] = C.CreateSegmentedControl(sc,"Growth",{{key="CENTER",label="Center"},{key="LEFT",label="Forward"},{key="RIGHT",label="Reverse"}},
                 val("growth",(ns.Bars.profileRef or {}).iconAnchor or "CENTER"),setter("growth"))
             children[#children+1] = C.CreateCheckBox(sc,"Desaturate on cooldown",val("desaturateCooldown",true),setter("desaturateCooldown"))
             children[#children+1] = C.CreateCheckBox(sc,"Show assisted rotation hint",val("assisted",false),setter("assisted"))
@@ -456,7 +471,7 @@ local function buildLayoutPage(sc)
             function(source)
                 if source == "choose" or InCombatLockdown() then return end
                 local from, to = getVisualsProfile(source), getVisualsProfile(_selectedAnchor)
-                for _, key in ipairs({"iconWidth","iconHeight","spacing","orientation","showBorder","borderColor","textCooldown","textStack","text"}) do
+                for _, key in ipairs({"iconWidth","iconHeight","spacing","orientation","showBorder","borderColor","textCooldown","textStack","text","zoom","swipeAlpha","reverseSwipe","growth","desaturateCooldown","assisted","masque","rangeTint","powerTint","showKeybind","keybindFont","keybindCorner","keybindSize","keybindX","keybindY"}) do
                     to[key] = type(from[key]) == "table" and CopyTable(from[key]) or from[key]
                 end
                 applyVisualSize(_selectedAnchor)
@@ -497,7 +512,7 @@ local function buildLayoutPage(sc)
             end, 2)
         children[#children].settingsGroup = "Position & Size"
 
-        children[#children + 1] = C.CreateDropdownLikeList(sc, "Orientation",
+        children[#children + 1] = C.CreateSegmentedControl(sc, "Orientation",
             {
                 { key = "H", label = "Horizontal (default)" },
                 { key = "V", label = "Vertical" },
@@ -552,9 +567,9 @@ local function buildLayoutPage(sc)
             end, 250)
         children[#children].settingsGroup = "Position & Size"
         local function setBar(key,v) getVisualsProfile("TrackedBars")[key] = v applyTextStyle("TrackedBars") end
-        children[#children+1] = C.CreateDropdownLikeList(sc,"Tracked bar icon",{{key="LEFT",label="Left"},{key="RIGHT",label="Right"},{key="NONE",label="None"}},
+        children[#children+1] = C.CreateSegmentedControl(sc,"Tracked bar icon",{{key="LEFT",label="Left"},{key="RIGHT",label="Right"},{key="NONE",label="None"}},
             function() return getVisualsProfile("TrackedBars").iconSide or "LEFT" end,function(v) setBar("iconSide",v) end)
-        children[#children+1] = C.CreateDropdownLikeList(sc,"Timer direction",{{key="drain",label="Drain"},{key="fill",label="Fill"}},
+        children[#children+1] = C.CreateSegmentedControl(sc,"Timer direction",{{key="drain",label="Drain"},{key="fill",label="Fill"}},
             function() return getVisualsProfile("TrackedBars").timerDirection or "drain" end,function(v) setBar("timerDirection",v) end)
         children[#children+1] = C.CreateDropdownLikeList(sc, "Active bar order outside combat",
             {{key="fixed",label="Configured order"},{key="short",label="Shortest time first"},{key="long",label="Longest time first"}},
@@ -755,6 +770,7 @@ local function buildLayoutPage(sc)
             end
         end, 1.0)
 
+    children[#children].settingsGroup = "Visibility & Snap"
     starts[#children+1] = "Visibility & Snap"
     children[#children + 1] = C.CreateSection(sc, "Visibility")
     children[#children + 1] = C.CreateHelpText(sc,
@@ -838,7 +854,7 @@ local function buildLayoutPage(sc)
         btnSel:SetPoint("BOTTOM", resetRow, "BOTTOM", 0, 0)
         btnSel:SetPoint("RIGHT", resetRow, "CENTER", -(BTN_GUTTER / 2), 0)
 
-        local btnAll = C.CreateButton(resetRow, "Reset ALL Anchors", function()
+        local btnAll = C.CreateDestructiveButton(resetRow, "Reset ALL Anchors", function()
             if InCombatLockdown() then
                 DEFAULT_CHAT_FRAME:AddMessage("|cff4fc3f7TenUI|r: Cannot reset anchors in combat")
                 return
@@ -850,6 +866,7 @@ local function buildLayoutPage(sc)
         btnAll:SetPoint("BOTTOM", resetRow, "BOTTOM", 0, 0)
         btnAll:SetPoint("LEFT", resetRow, "CENTER", (BTN_GUTTER / 2), 0)
 
+        resetRow.settingsGroup = "Position & Size"
         children[#children + 1] = resetRow
     end
 
@@ -918,7 +935,9 @@ local function buildLayoutPage(sc)
 
     local byControl = {}
     for index, name in pairs(starts) do if children[index] then byControl[children[index]] = name end end
-    ns.Options:LayoutSettingsTabs("layout", sc, children, {"Position & Size", "Style & Text", "Visibility & Snap"}, byControl, 30)
+    local names = { "Position & Size", "Visibility & Snap" }
+    if isIconVisualAnchor(_selectedAnchor) or BAR_VISUAL_SET[_selectedAnchor] then table.insert(names, 2, "Style & Text") end
+    ns.Options:LayoutSettingsTabs("layout", sc, children, names, byControl, 30)
 end
 
 ns.Options.GetSnapSettings = getSnapProfile

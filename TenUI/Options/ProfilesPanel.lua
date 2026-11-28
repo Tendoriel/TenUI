@@ -117,7 +117,7 @@ local function buildProfilesPage(sc)
                 row.Refresh()
             end
         end
-        local all = C.CreateCompactButton(actions, "All", function() choose(true) end, 42)
+        local all = C.CreateCompactButton(actions, "All", function() choose(true) end, 50)
         all:SetPoint("LEFT")
         local clear = C.CreateCompactButton(actions, "None", function() choose(false) end, 50)
         clear:SetPoint("LEFT", all, "RIGHT", 4, 0)
@@ -213,7 +213,7 @@ local function buildProfilesPage(sc)
     end
     newNameEB:SetScript("OnEnterPressed", function(self) doCreateProfile() self:ClearFocus() end)
 
-    local createBtn = C.CreateCompactButton(newProfileRow, "Create", doCreateProfile, 80)
+    local createBtn = C.CreateCompactButton(newProfileRow, "Create", doCreateProfile, 128)
     createBtn:SetPoint("RIGHT", newProfileRow, "RIGHT", 0, 0)
     newNameBox:SetPoint("RIGHT", createBtn, "LEFT", -8, 0)
 
@@ -248,7 +248,7 @@ local function buildProfilesPage(sc)
         end
     end
 
-    local deleteBtn = C.CreateCompactButton(activeActionsRow, "Delete", doDeleteProfile, 80)
+    local deleteBtn = C.CreateDestructiveButton(activeActionsRow, "Delete", doDeleteProfile, 128)
     deleteBtn:SetPoint("LEFT", activeActionsRow, "LEFT", 0, 0)
 
     local function doResetProfile()
@@ -278,7 +278,7 @@ local function buildProfilesPage(sc)
         end
     end
 
-    local resetBtn = C.CreateCompactButton(activeActionsRow, "Reset", doResetProfile, 80)
+    local resetBtn = C.CreateDestructiveButton(activeActionsRow, "Reset", doResetProfile, 128)
     resetBtn:SetPoint("LEFT", deleteBtn, "RIGHT", 4, 0)
 
     local fullCopyRow = CreateFrame("Frame", nil, sc)
@@ -316,7 +316,7 @@ local function buildProfilesPage(sc)
     end
     fullCopyEB:SetScript("OnEnterPressed", function(self) doFullCopy() self:ClearFocus() end)
 
-    local fullCopyBtn = C.CreateCompactButton(fullCopyRow, "Duplicate Active", doFullCopy, 124)
+    local fullCopyBtn = C.CreateCompactButton(fullCopyRow, "Duplicate Active", doFullCopy, 128)
     fullCopyBtn:SetPoint("RIGHT", fullCopyRow, "RIGHT", 0, 0)
     fullCopyBox:SetPoint("RIGHT", fullCopyBtn, "LEFT", -8, 0)
 
@@ -347,7 +347,7 @@ local function buildProfilesPage(sc)
             fullCopyStatus:SetText("Rename failed: " .. tostring(result))
         end
     end
-    local renameBtn = C.CreateCompactButton(fullCopyRow, "Rename", doRename, 80)
+    local renameBtn = C.CreateCompactButton(fullCopyRow, "Rename", doRename, 128)
     renameBtn:SetPoint("RIGHT", fullCopyRow, "RIGHT", 0, 0)
     fullCopyBtn:ClearAllPoints()
     fullCopyBtn:SetPoint("RIGHT", renameBtn, "LEFT", -4, 0)
@@ -465,8 +465,13 @@ local function buildProfilesPage(sc)
                 end
             end
         end
-        local h = C.LayoutVertical(specMatrixContainer, rows, 4, 0)
-        specMatrixContainer:SetHeight(math_max(h, 1))
+        local y = 0
+        for _, row in ipairs(rows) do
+            row:SetPoint("TOPLEFT", specMatrixContainer, "TOPLEFT", 0, -y)
+            row:SetPoint("TOPRIGHT", specMatrixContainer, "TOPRIGHT", 0, -y)
+            y = y + row:GetHeight() + 4
+        end
+        specMatrixContainer:SetHeight(math_max(y, 1))
     end
     rebuildSpecMatrix()
 

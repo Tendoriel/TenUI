@@ -542,19 +542,31 @@ local function formatNumber(n)
     return ""
 end
 
-local function customPowerText(bar, mode, power, current)
+local function customPowerText(bar, mode, power, current, unmodified)
     if not mode or mode == "auto" then return false end
-    if mode == "short" then
-        local ok, value = pcall(AbbreviateNumbers, current)
-        if ok then bar:SetRightText(value) else bar:SetRightText(current) end
-    elseif mode == "percent" or mode == "both" then
+    local precision = "%d"
+    if unmodified then
+        local divisor = UnitPowerDisplayMod and UnitPowerDisplayMod(power)
+        if isSecret(current) then
+            current = UnitPower("player", power)
+        elseif type(divisor) == "number" and divisor > 1 then
+            current = current / divisor
+            precision = "%.1f"
+        end
+    end
+    if mode == "percent" or mode == "both" then
         local ok, percent = pcall(UnitPowerPercent, "player", power, false, getScaleTo100())
-        if ok and (isSecret(percent) or type(percent) == "number") then
-            local fs = bar.frame.rightText
-            if not fs then return false end
-            if mode == "both" then fs:SetFormattedText("%d · %.0f%%", current, percent)
-            else fs:SetFormattedText("%.0f%%", percent) end
-        else bar:SetRightText(current) end
+        local fs = bar.frame.rightText
+        if ok and fs and (isSecret(percent) or type(percent) == "number") then
+            if mode == "both" then ok = pcall(fs.SetFormattedText, fs, precision .. " · %.0f%%", current, percent)
+            else ok = pcall(fs.SetFormattedText, fs, "%.0f%%", percent) end
+            if ok then return true end
+        end
+    elseif mode == "short" and precision == "%d" then
+        local ok, value = pcall(AbbreviateNumbers, current)
+        if ok then bar:SetRightText(value) return true end
+    end
+    if precision == "%.1f" then bar:SetRightText(string.format(precision, current))
     else bar:SetRightText(current) end
     return true
 end
@@ -805,7 +817,7 @@ local function primary_Refresh()
     end
 
     if Primary.selfProfile and Primary.selfProfile.showText ~= false then
-        if customPowerText(bar, Primary.selfProfile.valueFormat, pt, UnitPower("player",pt)) then
+        if customPowerText(bar, Primary.selfProfile.valueFormat, pt, cur, useUnmodified) then
             -- The selected format has already written the label.
         elseif curSecret or maxSecret then
             local renderedPct = false
@@ -2502,9 +2514,6 @@ local function secondary_SyncNativeAuraPips()
     local frame
     local candidate = { spellID = spellID, count = count, fills = {} }
     local ok, err = pcall(function()
-        if C_AddOns and not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
-            C_AddOns.LoadAddOn("Blizzard_AuraContainer")
-        end
         frame = CreateFrame("AuraContainer", nil, Secondary.container, "CustomAuraContainerTemplate")
         frame:SetAllPoints(Secondary.container)
         frame:EnableMouse(false)

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.5] - 2026-11-28
+
+For WoW Retail Midnight 12.1.5 (Interface 120105).
+
+### Options
+
+- Midnight is now the settings window’s single theme. Xal’atath and Alleria frame the controls. Silver-violet rails, mitred corners and a continuous opaque backing close the gap between the artwork and the frame at different window scales.
+- Square checkboxes show a check when enabled. Section headings have dividers, the sidebar shows the active profile, and related tabs and buttons use equal dimensions. Profile specialization selectors align with the other dropdowns.
+- Cast Bar has separate **Bar & Mechanics** and **Typography & State Colors** tabs below its preview. Texture selectors preview their fill. Layout provides a spatial text-anchor picker and direct links to the relevant module settings.
+
+### Cooldowns and tracked auras
+
+- TenUI reads the existing Blizzard cooldown layout and viewer slots without requesting a Blizzard layout rebuild. Restricted updates reuse the last readable layout for the current specialization. The Blizzard CDM shortcut prepares the native chat command. Press Enter to open it.
+- Tracked Bars using **Shortest time first** or **Longest time first** update when a player or target aura changes outside combat. Each aura can use its own bar color or inherit the group color.
+
+### HUD actions and reminders
+
+- Consumable and reminder click targets follow their icons after movement, scaling and Edit Mode. Retired buttons are released after combat. Right-click passes through for camera movement, and hovering retains the item tooltip.
+- Weapon oil reminders target the main-hand slot and refresh when its enchant changes. Food reminders also recognize the localized Well Fed name.
+
+### Resources, profiles and layout
+
+- Custom power formats preserve readable fractional Soul Shards. The resource preview follows the chosen numeric format. Bar-only options are hidden for segmented secondary resources.
+- An explicitly chosen profile survives a UI reload within the same instance type and specialization. Automatic selection resumes when the context changes.
+- **Copy visuals from** also copies zoom, swipe, growth, tints, keybind styling and Masque settings. Masque owns the icon border and crop while enabled. Disabling it restores TenUI styling.
+- Layout shows relevant tabs for the selected anchor. Reset controls are on **Position & Size**, and alpha is on **Visibility & Snap**.
+
 ## [0.6.3] - 2026-11-27
 
 For WoW Retail Midnight 12.1.5 (Interface 120105).

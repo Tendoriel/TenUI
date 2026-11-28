@@ -435,10 +435,13 @@ end
 local function foodBuff()
     local ok, auras = pcall(C_UnitAuras.GetUnitAuras, "player", "HELPFUL")
     if not ok or issecretvalue(auras) or type(auras) ~= "table" then return end
+    local wellFed = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(19705)
     local unknown = false
     for _, aura in ipairs(auras) do
-        if issecretvalue(aura) or issecretvalue(aura.icon) then unknown = true
-        elseif aura.icon == 136000 then return true end
+        if issecretvalue(aura) then unknown = true
+        elseif not issecretvalue(aura.icon) and aura.icon == 136000 then return true
+        elseif not issecretvalue(aura.name) and wellFed and type(aura.name) == "string" and aura.name:find(wellFed, 1, true) then return true
+        elseif issecretvalue(aura.icon) or issecretvalue(aura.name) then unknown = true end
     end
     if not unknown then return false end
 end
@@ -753,7 +756,7 @@ local function render(entries)
         local e = entries[i]
         if o.clickToApply and f._locked and ClassReminders._testUntil <= GetTime() and e and not e.active then
             local spell = e.spell and spellKnown(e.spell) and e.spell
-            ns.SyncHUDAction(slot, spell and "spell" or "item", spell or e.item)
+            ns.SyncHUDAction(slot, spell and "spell" or "item", spell or e.item, e.key == "oil" and 16 or nil)
         elseif slot._actionButton then
             ns.SyncHUDAction(slot)
         end
@@ -1013,6 +1016,7 @@ syncUnitEvents = function()
     if uf._registered then
         uf:UnregisterEvent("UNIT_AURA")
         uf:UnregisterEvent("UNIT_PET")
+        uf:UnregisterEvent("UNIT_INVENTORY_CHANGED")
     end
     uf._registered = mode
     if mode then
@@ -1022,6 +1026,7 @@ syncUnitEvents = function()
             uf:RegisterUnitEvent("UNIT_AURA", "player", "pet")
         end
         uf:RegisterUnitEvent("UNIT_PET", "player")
+        uf:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
     end
 end
 
@@ -1082,6 +1087,7 @@ function ClassReminders:OnDisable()
     if self._unitFrame and self._unitFrame._registered then
         self._unitFrame:UnregisterEvent("UNIT_AURA")
         self._unitFrame:UnregisterEvent("UNIT_PET")
+        self._unitFrame:UnregisterEvent("UNIT_INVENTORY_CHANGED")
         self._unitFrame._registered = false
     end
     if self.frame then

@@ -124,17 +124,24 @@ function ns.StyleCooldownIcon(icon, name, visuals)
     icon.swipeAlpha = (v.swipeAlpha or 80) / 100
     icon:SetCooldownReverse(v.reverseSwipe == true)
     icon:SetDrawSwipe(icon._drawSwipe ~= false)
-    ns.Widgets.Icon.ApplyCropTexCoord(f.icon, f:GetWidth(), f:GetHeight(), icon.iconZoom)
-    if InCombatLockdown() then return end
+    if InCombatLockdown() then
+        if not icon.masqueGroup then ns.Widgets.Icon.ApplyCropTexCoord(f.icon, f:GetWidth(), f:GetHeight(), icon.iconZoom) end
+        return
+    end
     if v.masque and not icon.masqueGroup then
         local masque = LibStub("Masque", true)
         if masque then
             icon.masqueGroup = masque:Group("TenUI", name)
+            icon:SetBorder(icon.borderEnabled, icon.borderColor)
             icon.masqueGroup:AddButton(f, {Icon = f.icon, Cooldown = f.cooldown, Count = f.stack}, "Action", true)
         end
     elseif not v.masque and icon.masqueGroup then
         icon.masqueGroup:RemoveButton(f)
         icon.masqueGroup = nil
+        icon:SetBorder(icon.borderEnabled, icon.borderColor)
+    end
+    if not icon.masqueGroup then
+        ns.Widgets.Icon.ApplyCropTexCoord(f.icon, f:GetWidth(), f:GetHeight(), icon.iconZoom)
     end
 end
 

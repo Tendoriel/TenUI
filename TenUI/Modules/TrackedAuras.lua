@@ -411,9 +411,6 @@ local function applyStyle(button, regions, config, restyle)
 end
 
 local function createContainer(parent, unit)
-    if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
-        C_AddOns.LoadAddOn("Blizzard_AuraContainer")
-    end
     local container = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
     container:SetUnit(unit)
     return container

@@ -49,13 +49,14 @@ end
 
 function UI.CreateSubSection(parent, title)
     local f = CreateFrame("Frame", nil, parent)
-    f:SetSize(ROW_W, 20)
+    f:SetSize(ROW_W, 24)
     UI.Rect(f, "BACKGROUND", Theme.color.section):SetAllPoints()
     local rule = UI.Rect(f, "ARTWORK", Theme.color.violet)
-    rule:SetWidth(2)
+    UI.CornerAccents(f, 7)
+    rule:SetWidth(1)
     rule:SetPoint("TOPLEFT")
     rule:SetPoint("BOTTOMLEFT")
-    local fs = UI.Text(f, UI.Fonts.section, Theme.color.violet, string.upper(tostring(title or "")))
+    local fs = UI.Text(f, UI.Fonts.section, {0.78, 0.70, 1, 1}, string.upper(tostring(title or "")))
     fs:SetPoint("LEFT", f, "LEFT", 8, 0)
     f.text = fs
     f.searchHeading = true
@@ -84,14 +85,17 @@ end
 
 local BTN_TEXT_PAD = 16
 
-local function buildButton(parent, text, callback, width, primary)
+local function buildButton(parent, text, callback, width, intent)
+    local primary, destructive = intent == true, intent == "destructive"
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(width or ROW_W, ROW_H)
     local bg = UI.Rect(btn, "BACKGROUND", Theme.color.input)
     bg:SetAllPoints(btn)
-    local borderColor = primary and Theme.color.violetDim or C_LINE
+    local borderColor = destructive and {.66,.30,.43,.9} or (primary and Theme.color.violetDim or C_LINE)
     local border = UI.Border(btn, borderColor)
-    local labelColor = primary and Theme.color.violet or Theme.color.text
+    local labelColor = primary and Theme.color.textBright or Theme.color.text
+    local base = primary and { .28, .18, .43, 1 } or Theme.color.input
+    bg:SetColorTexture(unpack(base))
     local label = UI.Text(btn, UI.Fonts.label, labelColor, text)
     label:SetAllPoints(btn)
     label:SetJustifyH("CENTER")
@@ -102,7 +106,10 @@ local function buildButton(parent, text, callback, width, primary)
     end
     btn:SetScript("OnEnter", function()
         bg:SetColorTexture(unpack(Theme.color.hover))
-        if primary then
+        if destructive then
+            bg:SetColorTexture(.36,.12,.21,1)
+            border.SetColor(unpack(Theme.color.danger))
+        elseif primary then
             border.SetColor(unpack(Theme.color.violet))
             label:SetTextColor(unpack(Theme.color.textBright))
         else
@@ -111,7 +118,7 @@ local function buildButton(parent, text, callback, width, primary)
         end
     end)
     btn:SetScript("OnLeave", function()
-        bg:SetColorTexture(unpack(Theme.color.input))
+        bg:SetColorTexture(unpack(base))
         border.SetColor(unpack(borderColor))
         label:SetTextColor(unpack(labelColor))
     end)
@@ -127,6 +134,10 @@ function UI.CreateButton(parent, text, callback)
     return button
 end
 
+function UI.CreateDestructiveButton(parent, text, callback, width)
+    return buildButton(parent, text, callback, width, "destructive")
+end
+
 function UI.CreateCompactButton(parent, text, callback, width)
     return buildButton(parent, text, callback, width or 80, false)
 end
@@ -137,30 +148,27 @@ end
 
 local function buildToggle(parent)
     local t = CreateFrame("Frame", nil, parent)
-    t:SetSize(28, 14)
+    t:SetSize(18, 18)
     local track = UI.Rect(t, "BACKGROUND", C_INPUT)
-    track:SetAllPoints(t)
+    track:SetAllPoints()
     local border = UI.Border(t, C_LINE)
-    local knob = t:CreateTexture(nil, "ARTWORK")
-    knob:SetSize(10, 10)
-    knob:SetColorTexture(unpack(Theme.color.textDim))
-    knob:SetPoint("LEFT", t, "LEFT", 2, 0)
-    t.track = track
-    t.border = border
-    t.knob = knob
-    function t.SetOn(self, on)
-        knob:ClearAllPoints()
+    local inset = UI.Rect(t, "ARTWORK", Theme.color.selected)
+    inset:SetPoint("TOPLEFT", 3, -3)
+    inset:SetPoint("BOTTOMRIGHT", -3, 3)
+    local check = t:CreateTexture(nil, "OVERLAY")
+    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    check:SetDesaturated(true)
+    check:SetVertexColor(.94, .93, 1)
+    check:SetPoint("TOPLEFT", 0, 1)
+    check:SetPoint("BOTTOMRIGHT", 0, -1)
+    function t:SetOn(on)
+        check:SetShown(on)
+        inset:SetShown(on)
+        track:SetColorTexture(unpack(C_INPUT))
         if on then
-            track:SetColorTexture(Theme.color.violet[1], Theme.color.violet[2], Theme.color.violet[3], 0.45)
-            border.SetColor(unpack(Theme.color.violetDim))
-            knob:SetColorTexture(unpack(Theme.color.textBright))
-            knob:SetPoint("RIGHT", t, "RIGHT", -2, 0)
-        else
-            track:SetColorTexture(unpack(C_INPUT))
-            border.SetColor(unpack(C_LINE))
-            knob:SetColorTexture(unpack(Theme.color.textDim))
-            knob:SetPoint("LEFT", t, "LEFT", 2, 0)
-        end
+            inset:SetColorTexture(.36, .22, .60, 1)
+            border.SetColor(.77, .67, .95, 1)
+        else border.SetColor(unpack(C_LINE)) end
     end
     return t
 end
@@ -274,10 +282,10 @@ function UI.CreateSlider(parent, labelText, minVal, maxVal, step, get, set, defa
     track:SetHeight(3)
     track:SetPoint("LEFT", slider, "LEFT", 0, 0)
     track:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
-    slider:SetThumbTexture(Theme.texture.pixel)
+    slider:SetThumbTexture("Interface\\AddOns\\TenUI\\Media\\UI\\thumb_void_diamond.tga")
     local thumb = slider:GetThumbTexture()
-    thumb:SetSize(7, 13)
-    thumb:SetVertexColor(unpack(Theme.color.violet))
+    thumb:SetSize(14, 16)
+    thumb:SetVertexColor(1, 1, 1, 1)
     local fill = slider:CreateTexture(nil, "BORDER")
     fill:SetColorTexture(Theme.color.violet[1], Theme.color.violet[2], Theme.color.violet[3], 0.45)
     fill:SetHeight(3)
@@ -528,7 +536,7 @@ local function popupRow(parent, idx)
     return row
 end
 
-local function openPopupFor(owner, anchorBtn, values, currentKey, onPick)
+local function openPopupFor(owner, anchorBtn, values, currentKey, onPick, positionGrid)
     local p = getPopup()
     if p:IsShown() and _popupOwner == owner then
         p:Hide()
@@ -537,22 +545,33 @@ local function openPopupFor(owner, anchorBtn, values, currentKey, onPick)
     _popupOwner = owner
 
     local ROWH = 20
-    local W = math_max(anchorBtn:GetWidth() or 180, 120)
+    local W = positionGrid and 282 or math_max(anchorBtn:GetWidth() or 180, 120)
     local count = values and #values or 0
     local visible = math_min(count, 8)
     local H = math_max(visible * ROWH + 2, ROWH + 2)
 
+    if positionGrid then H = 4 * ROWH + 2 end
+
     for i = 1, #_popupRows do _popupRows[i]:Hide() end
 
     local sc = p._listChild
-    sc:SetHeight(count * ROWH)
+    sc:SetHeight(positionGrid and 4 * ROWH or count * ROWH)
     local rowW = (count > visible) and (W - 14) or (W - 2)
     for idx = 1, count do
         local entry = values[idx]
         local row = popupRow(sc, idx)
-        row:SetWidth(rowW)
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", sc, "TOPLEFT", 0, -(idx - 1) * ROWH)
+        if positionGrid then
+            local cols = idx <= 9 and 3 or 2
+            local w = (W - 4) / cols
+            local x = idx <= 9 and (idx - 1) % 3 or idx - 10
+            local y = idx <= 9 and math.floor((idx - 1) / 3) or 3
+            row:SetWidth(w)
+            row:SetPoint("TOPLEFT", sc, "TOPLEFT", x * w, -y * ROWH)
+        else
+            row:SetWidth(rowW)
+            row:SetPoint("TOPLEFT", sc, "TOPLEFT", 0, -(idx - 1) * ROWH)
+        end
         row._label:SetText(tostring(entry.label or entry.key))
         row._isCurrent = (entry.key == currentKey)
         if row._isCurrent then
@@ -588,7 +607,11 @@ local function openPopupFor(owner, anchorBtn, values, currentKey, onPick)
     p:Show()
 end
 
-function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
+function UI.CreateSegmentedControl(parent, labelText, values, get, set)
+    return UI.CreateDropdownLikeList(parent, labelText, values, get, set, { segmented = true })
+end
+
+function UI.CreateDropdownLikeList(parent, labelText, values, get, set, opts)
     local f = CreateFrame("Frame", nil, parent)
     f:SetSize(ROW_W, ROW_H)
 
@@ -596,11 +619,9 @@ function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
     label:SetPoint("LEFT", f, "LEFT", 0, 0)
     label:SetJustifyH("LEFT")
     f.label = label
-    f.layoutKind, f.controlWidth = "dropdown", 176
+    f.layoutKind, f.controlWidth = "dropdown", 192
 
-    local segmented = { ["Icon Side"] = true, ["Orientation"] = true, ["Direction"] = true,
-        ["Tracked bar icon"] = true, ["Timer direction"] = true, ["Growth"] = true }
-    if segmented[labelText] and type(values) == "table" and #values >= 2 and #values <= 4 then
+    if opts and opts.segmented and type(values) == "table" and #values >= 2 and #values <= 4 then
         local buttons = {}
         local function refresh()
             local current = get()
@@ -616,6 +637,7 @@ function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
             width = width + b:GetWidth() + 2
             nextButton, buttons[i] = b, b
         end
+        width = UI.SizePeers(buttons, Theme.spacing.controlH) * #buttons + 2 * #buttons
         f.controlWidth = width + 12
         f.Refresh = refresh
         refresh()
@@ -623,7 +645,7 @@ function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
     end
 
     local btn = CreateFrame("Button", nil, f)
-    btn:SetSize(160, 20)
+    btn:SetSize(176, Theme.spacing.controlH)
     btn:SetPoint("RIGHT", f, "RIGHT", -2, 0)
     local btnBg = UI.Rect(btn, "BACKGROUND", C_INPUT)
     btnBg:SetAllPoints(btn)
@@ -648,6 +670,10 @@ function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
     local function refresh()
         local k = type(get) == "function" and get() or nil
         btnLabel:SetText(tostring(getLabelForKey(k)))
+        if opts and opts.surface then
+            btnBg:SetTexture(ns.Widgets.resolveMedia("statusbar", k, ns.Widgets.DEFAULT_STATUSBAR))
+            btnBg:SetVertexColor(.27, .24, .37, 1)
+        end
     end
     refresh()
 
@@ -659,7 +685,7 @@ function UI.CreateDropdownLikeList(parent, labelText, values, get, set)
                 if not ok then logErr("Dropdown set", err) end
             end
             refresh()
-        end)
+        end, opts and opts.positionGrid)
     end)
     btn:SetScript("OnEnter", function()
         border.SetColor(unpack(Theme.color.line))
@@ -745,21 +771,14 @@ function UI.CreateColorSwatch(parent, labelText, getRGBA, setRGBA, default)
 end
 
 local ANCHOR_POINTS = {
-    { key = "CENTER",      label = "Center" },
-    { key = "TOP",         label = "Top" },
-    { key = "BOTTOM",      label = "Bottom" },
-    { key = "LEFT",        label = "Left" },
-    { key = "RIGHT",       label = "Right" },
-    { key = "TOPLEFT",     label = "Top Left" },
-    { key = "TOPRIGHT",    label = "Top Right" },
-    { key = "BOTTOMLEFT",  label = "Bottom Left" },
-    { key = "BOTTOMRIGHT", label = "Bottom Right" },
-    { key = "BELOW_ICON",  label = "Below Icon" },
-    { key = "ABOVE_ICON",  label = "Above Icon" },
+    {key="TOPLEFT", label="Top left"}, {key="TOP", label="Top"}, {key="TOPRIGHT", label="Top right"},
+    {key="LEFT", label="Left"}, {key="CENTER", label="Center"}, {key="RIGHT", label="Right"},
+    {key="BOTTOMLEFT", label="Bottom left"}, {key="BOTTOM", label="Bottom"}, {key="BOTTOMRIGHT", label="Bottom right"},
+    {key="BELOW_ICON", label="Below icon"}, {key="ABOVE_ICON", label="Above icon"},
 }
 
 function UI.CreateTextAnchorDropdown(parent, labelText, get, set)
-    return UI.CreateDropdownLikeList(parent, labelText, ANCHOR_POINTS, get, set)
+    return UI.CreateDropdownLikeList(parent, labelText, ANCHOR_POINTS, get, set, {positionGrid = true})
 end
 
 local FONT_KEY_TO_PATH = {
@@ -964,7 +983,7 @@ function UI.CreateStatusBarTextureDropdown(parent, labelText, get, set, globalPi
             if not v or v == "" then return globalPicker and "Blizzard" or "default" end
             return statusbarDisplayKey(v)
         end,
-        set
+        set, {surface = true}
     )
 end
 
@@ -1113,42 +1132,64 @@ function UI.LayoutVertical(parent, children, spacing, startY)
     local y = startY
     local pw = parent:GetWidth()
     if not pw or pw <= 0 then pw = ROW_W end
-    local usable, gap = pw - 16, 14
+    local usable, gap = pw - 24, 12
+    local cards = parent._sectionCards or {}
+    parent._sectionCards = cards
+    local cardCount, card, cardTop = 0
+    local function finishCard()
+        if card then card:SetHeight(math_max(1, cardTop - y - 2)) end
+    end
     local i = 1
     while i <= #children do
         local first = children[i]
-        local count = 1
-        local kind = first.layoutKind
-        local columns = (kind == "chip" or kind == "color" or kind == "action") and 3 or 2
-        if kind then
-            for n = 2, columns do
-                local candidate = children[i+n-1]
-                if not candidate then break end
-                local toggleColor = n == 2 and kind == "toggle" and candidate.layoutKind == "color"
-                if candidate.layoutKind ~= kind and not toggleColor then break end
-                local width = (usable - (n-1)*gap) / n
-                local fits = true
-                for k = i, i+n-1 do
-                    local item = children[k]
-                    local textWidth = item.label and item.label:GetStringWidth() or 0
-                    if textWidth + (item.controlWidth or 16) > width then fits = false break end
-                end
-                if not fits then break end
-                count = n
+        if first.searchHeading then
+            finishCard()
+            y = y - 4
+            cardCount = cardCount + 1
+            card = cards[cardCount]
+            if not card then
+                card = parent:CreateTexture(nil, "BACKGROUND", nil, -7)
+                card:SetColorTexture(.043, .033, .085, .67)
+                cards[cardCount] = card
             end
+            cardTop = y + 2
+            card:ClearAllPoints()
+            card:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, cardTop)
+            card:SetWidth(pw - 8)
+            card:Show()
         end
-        local width, h = (usable-gap*(count-1))/count, 0
-        for n = 1, count do
-            local c = children[i+n-1]
-            c:ClearAllPoints()
-            c:SetPoint("TOPLEFT", parent, "TOPLEFT", 8+(n-1)*(width+gap), y)
-            c:SetWidth(width)
-            if c.AutoHeight then c.AutoHeight() end
-            h = math_max(h, c:GetHeight() or ROW_H)
+        local kind = first.layoutKind
+        local last, columns = i, 1
+        if first.layoutGroup or kind == "chip" or kind == "color" then
+            local minWidth = 1
+            while last <= #children do
+                local candidate = children[last]
+                if first.layoutGroup ~= candidate.layoutGroup
+                    or (not first.layoutGroup and candidate.layoutKind ~= kind) then break end
+                local labelWidth = candidate.label and candidate.label:GetStringWidth() or 0
+                minWidth = math_max(minWidth, labelWidth + (candidate.controlWidth or 16))
+                last = last + 1
+            end
+            last = last - 1
+            columns = math_max(1, math_min(last - i + 1, 3, math_floor((usable + gap) / (minWidth + gap))))
         end
-        y = y - h - spacing
-        i = i + count
+        local width = (usable - gap * (columns - 1)) / columns
+        while i <= last do
+            local count, h = math_min(columns, last - i + 1), 0
+            for n = 1, count do
+                local c = children[i+n-1]
+                c:ClearAllPoints()
+                c:SetPoint("TOPLEFT", parent, "TOPLEFT", 12+(n-1)*(width+gap), y)
+                c:SetWidth(width)
+                if c.AutoHeight then c.AutoHeight() end
+                h = math_max(h, c:GetHeight() or ROW_H)
+            end
+            y = y - h - spacing
+            i = i + count
+        end
     end
+    finishCard()
+    for index = cardCount + 1, #cards do cards[index]:Hide() end
     return math.abs(y) + 8
 end
 

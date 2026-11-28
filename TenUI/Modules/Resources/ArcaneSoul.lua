@@ -118,7 +118,6 @@ function Soul.Update(profile, preview, alpha)
     proxy:Show()
     sample:SetShown(editing)
     if not InCombatLockdown() then
-        if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then C_AddOns.LoadAddOn("Blizzard_AuraContainer") end
         for _, phase in ipairs(phases) do
             local gcd = gcdLength() or phase.gcd or 1.5
             phase.desiredGcd = gcd
